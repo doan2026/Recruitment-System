@@ -9,11 +9,20 @@ import {
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { ApiException } from '../common/errors/api-exception';
+import {
+  ApiSuccessResponse,
+  apiSuccess,
+} from '../common/http/api-response.interceptor';
 import { PrismaService } from '../prisma/prisma.service';
 import { CompanyProfileDto } from './dto/company-profile.dto';
 import { CreateCompanyDto } from './dto/create-company.dto';
+import { ListCompaniesQueryDto } from './dto/list-companies-query.dto';
 import { PublicCompanyProfileDto } from './dto/public-company-profile.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
+import {
+  CompanyVerificationDecision,
+  VerifyCompanyDto,
+} from './dto/verify-company.dto';
 
 type CompanyWithMedia = Company & { media: CompanyMedia[] };
 
@@ -116,6 +125,191 @@ export class CompanyService {
     }
 
     return this.toProfile(membership.company);
+  }
+
+  async listForReview(
+    query: ListCompaniesQueryDto,
+  ): Promise<ApiSuccessResponse<CompanyProfileDto[]>> {
+    const where: Prisma.CompanyWhereInput = {
+      verifiedStatus: query.verified_status,
+    };
+    const skip = (query.page - 1) * query.limit;
+
+    const [companies, total] = await this.prisma.$transaction([
+      this.prisma.company.findMany({
+        where,
+        skip,
+        take: query.limit,
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        ...COMPANY_WITH_MEDIA,
+      }),
+      this.prisma.company.count({ where }),
+    ]);
+
+    return apiSuccess(
+      companies.map((company) => this.toProfile(company)),
+      {
+        page: query.page,
+        limit: query.limit,
+        total,
+        totalPages: Math.ceil(total / query.limit),
+      },
+    );
+  }
+
+  async verify(
+    companyId: string,
+    dto: VerifyCompanyDto,
+  ): Promise<CompanyProfileDto> {
+    const reason = dto.reason?.trim();
+
+    if (
+      dto.decision === CompanyVerificationDecision.REJECT &&
+      !reason
+    ) {
+      throw new ApiException(
+        'VERIFICATION_REASON_REQUIRED',
+        'A rejection reason is required',
+        HttpStatus.BAD_REQUEST,
+        { field: 'reason' },
+      );
+    }
+
+    if (
+      dto.decision === CompanyVerificationDecision.APPROVE &&
+      reason !== undefined
+    ) {
+      throw new ApiException(
+        'VERIFICATION_REASON_NOT_ALLOWED',
+        'reason must be omitted when approving a company',
+        HttpStatus.BAD_REQUEST,
+        { field: 'reason' },
+      );
+    }
+
+    const targetStatus =
+      dto.decision === CompanyVerificationDecision.APPROVE
+        ? CompanyVerificationStatus.VERIFIED
+        : CompanyVerificationStatus.REJECTED;
+
+    try {
+      const company = await this.prisma.$transaction(
+        async (transaction) => {
+          const current = await transaction.company.findUnique({
+            where: { id: companyId },
+            ...COMPANY_WITH_MEDIA,
+          });
+
+          if (!current) {
+            throw new ApiException(
+              'COMPANY_NOT_FOUND',
+              'Company was not found',
+              HttpStatus.NOT_FOUND,
+            );
+          }
+
+          const isIdempotentDecision =
+            current.verifiedStatus === targetStatus &&
+            (targetStatus === CompanyVerificationStatus.VERIFIED ||
+              current.rejectReason === reason);
+
+          if (isIdempotentDecision) {
+            return current;
+          }
+
+          if (
+            current.verifiedStatus !== CompanyVerificationStatus.PENDING
+          ) {
+            throw new ApiException(
+              'INVALID_VERIFICATION_TRANSITION',
+              'Only a PENDING company can be reviewed',
+              HttpStatus.CONFLICT,
+              {
+                currentStatus: current.verifiedStatus,
+                requestedStatus: targetStatus,
+              },
+            );
+          }
+
+          return transaction.company.update({
+            where: { id: companyId },
+            data: {
+              verifiedStatus: targetStatus,
+              rejectReason:
+                targetStatus === CompanyVerificationStatus.REJECTED
+                  ? reason
+                  : null,
+            },
+            ...COMPANY_WITH_MEDIA,
+          });
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        },
+      );
+
+      return this.toProfile(company);
+    } catch (error) {
+      this.throwPersistenceError(error);
+    }
+  }
+
+  async resubmit(recruiterId: string): Promise<CompanyProfileDto> {
+    try {
+      const company = await this.prisma.$transaction(
+        async (transaction) => {
+          const membership = await transaction.companyMember.findUnique({
+            where: { userId: recruiterId },
+            include: {
+              company: COMPANY_WITH_MEDIA,
+            },
+          });
+
+          if (!membership || membership.role !== CompanyMemberRole.OWNER) {
+            throw new ApiException(
+              'COMPANY_OWNER_REQUIRED',
+              'Only the company owner can submit this profile for review',
+              HttpStatus.FORBIDDEN,
+            );
+          }
+
+          if (
+            membership.company.verifiedStatus ===
+            CompanyVerificationStatus.PENDING
+          ) {
+            return membership.company;
+          }
+
+          if (
+            membership.company.verifiedStatus !==
+            CompanyVerificationStatus.REJECTED
+          ) {
+            throw new ApiException(
+              'INVALID_RESUBMISSION_TRANSITION',
+              'Only a REJECTED company can be resubmitted',
+              HttpStatus.CONFLICT,
+              { currentStatus: membership.company.verifiedStatus },
+            );
+          }
+
+          return transaction.company.update({
+            where: { id: membership.companyId },
+            data: {
+              verifiedStatus: CompanyVerificationStatus.PENDING,
+              rejectReason: null,
+            },
+            ...COMPANY_WITH_MEDIA,
+          });
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        },
+      );
+
+      return this.toProfile(company);
+    } catch (error) {
+      this.throwPersistenceError(error);
+    }
   }
 
   async getPublicById(companyId: string): Promise<PublicCompanyProfileDto> {

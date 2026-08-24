@@ -2,14 +2,19 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   HttpStatus,
   Param,
+  Patch,
   ParseUUIDPipe,
+  Query,
   Post,
   Put,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiBadRequestResponse,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiExtraModels,
   ApiNotFoundResponse,
@@ -25,6 +30,7 @@ import { Public } from '../common/auth/public.decorator';
 import { Roles } from '../common/auth/roles.decorator';
 import { SystemRole } from '../common/auth/system-role.enum';
 import { ApiException } from '../common/errors/api-exception';
+import { ApiSuccessResponse } from '../common/http/api-response.interceptor';
 import { CompanyService } from './company.service';
 import {
   CompanyMediaResponseDto,
@@ -32,11 +38,13 @@ import {
   LogoReferenceResponseDto,
 } from './dto/company-profile.dto';
 import { CreateCompanyDto } from './dto/create-company.dto';
+import { ListCompaniesQueryDto } from './dto/list-companies-query.dto';
 import {
   PublicCompanyMediaDto,
   PublicCompanyProfileDto,
 } from './dto/public-company-profile.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
+import { VerifyCompanyDto } from './dto/verify-company.dto';
 
 const COMPANY_ID_PIPE = new ParseUUIDPipe({
   version: '4',
@@ -54,6 +62,27 @@ const COMPANY_PROFILE_ENVELOPE = {
   properties: {
     data: { $ref: getSchemaPath(CompanyProfileDto) },
     meta: { type: 'object', nullable: true, example: null },
+  },
+};
+
+const COMPANY_LIST_ENVELOPE = {
+  type: 'object',
+  required: ['data', 'meta'],
+  properties: {
+    data: {
+      type: 'array',
+      items: { $ref: getSchemaPath(CompanyProfileDto) },
+    },
+    meta: {
+      type: 'object',
+      required: ['page', 'limit', 'total', 'totalPages'],
+      properties: {
+        page: { type: 'integer', minimum: 1 },
+        limit: { type: 'integer', minimum: 1, maximum: 100 },
+        total: { type: 'integer', minimum: 0 },
+        totalPages: { type: 'integer', minimum: 0 },
+      },
+    },
   },
 };
 
@@ -90,6 +119,54 @@ export class CompanyController {
     @Body() dto: CreateCompanyDto,
   ): Promise<CompanyProfileDto> {
     return this.companyService.create(user.id, dto);
+  }
+
+  @Get()
+  @Roles(SystemRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List companies for the admin review queue' })
+  @ApiOkResponse({ schema: COMPANY_LIST_ENVELOPE })
+  listForReview(
+    @Query() query: ListCompaniesQueryDto,
+  ): Promise<ApiSuccessResponse<CompanyProfileDto[]>> {
+    return this.companyService.listForReview(query);
+  }
+
+  @Post('me/submit-verification')
+  @HttpCode(HttpStatus.OK)
+  @Roles(SystemRole.RECRUITER)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Resubmit the authenticated OWNER company after rejection',
+  })
+  @ApiOkResponse({ schema: COMPANY_PROFILE_ENVELOPE })
+  @ApiConflictResponse({
+    description: 'The company is VERIFIED and cannot be resubmitted',
+  })
+  resubmit(
+    @CurrentUser() user: AuthUser,
+  ): Promise<CompanyProfileDto> {
+    return this.companyService.resubmit(user.id);
+  }
+
+  @Patch(':id/verify')
+  @Roles(SystemRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Approve or reject a PENDING company' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOkResponse({ schema: COMPANY_PROFILE_ENVELOPE })
+  @ApiBadRequestResponse({
+    description: 'REJECT requires a reason; APPROVE must omit it',
+  })
+  @ApiNotFoundResponse({ description: 'The company does not exist' })
+  @ApiConflictResponse({
+    description: 'The company is not PENDING and the decision is not a retry',
+  })
+  verify(
+    @Param('id', COMPANY_ID_PIPE) companyId: string,
+    @Body() dto: VerifyCompanyDto,
+  ): Promise<CompanyProfileDto> {
+    return this.companyService.verify(companyId, dto);
   }
 
   @Get('me')

@@ -1,6 +1,6 @@
 {
   "info": {
-    "name": "Company Service - Company Profile (C01)",
+    "name": "Company Service - Profile and Verification (C01-C02)",
     "description": "Requests are written for the Nginx gateway, which strips the /companies prefix before forwarding to Company Service.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -15,6 +15,10 @@
     },
     {
       "key": "companyId",
+      "value": ""
+    },
+    {
+      "key": "adminToken",
       "value": ""
     }
   ],
@@ -213,6 +217,98 @@
             "{{companyId}}"
           ]
         }
+      }
+    },
+    {
+      "name": "Admin - List pending companies",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{adminToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/companies?verified_status=PENDING&page=1&limit=20"
+      }
+    },
+    {
+      "name": "Admin - Approve company",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{adminToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"decision\": \"APPROVE\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/companies/{{companyId}}/verify"
+      }
+    },
+    {
+      "name": "Admin - Reject company",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{adminToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"decision\": \"REJECT\",\n  \"reason\": \"Tax document is unreadable\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/companies/{{companyId}}/verify"
+      }
+    },
+    {
+      "name": "Recruiter - Resubmit rejected company",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{accessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "url": "{{baseUrl}}/companies/me/submit-verification"
       }
     }
   ]
