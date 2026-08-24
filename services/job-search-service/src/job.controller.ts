@@ -8,6 +8,7 @@ import {
   Patch,
   ParseUUIDPipe,
   Post,
+  Query,
   Put,
 } from '@nestjs/common';
 import {
@@ -34,6 +35,12 @@ import {
   RejectJobDto,
   UpdateJobDto,
 } from './job.dto';
+import {
+  JobSearchItemDto,
+  JobSearchQueryDto,
+  JobSearchResultDto,
+} from './job-search.dto';
+import { JobSearchService } from './job-search.service';
 import { JobService } from './job.service';
 
 const JOB_ID_PIPE = new ParseUUIDPipe({
@@ -54,12 +61,22 @@ const envelope = (array = false) => ({
     meta: { type: 'object', nullable: true },
   },
 });
+const searchEnvelope = {
+  type: 'object',
+  properties: {
+    data: { $ref: getSchemaPath(JobSearchResultDto) },
+    meta: { type: 'object', nullable: true },
+  },
+};
 
 @ApiTags('jobs')
-@ApiExtraModels(JobDto)
+@ApiExtraModels(JobDto, JobSearchItemDto, JobSearchResultDto)
 @Controller()
 export class JobController {
-  constructor(private readonly jobs: JobService) {}
+  constructor(
+    private readonly jobs: JobService,
+    private readonly jobSearch: JobSearchService,
+  ) {}
   @Public()
   @Get('health')
   @ApiOperation({ summary: 'Job Service health check' })
@@ -101,6 +118,16 @@ export class JobController {
   @ApiOkResponse({ schema: envelope(true) })
   listPending(): Promise<JobDto[]> {
     return this.jobs.listPending();
+  }
+
+  @Public()
+  @Get('search')
+  @ApiOperation({
+    summary: 'Search published jobs with Elasticsearch and PostgreSQL fallback',
+  })
+  @ApiOkResponse({ schema: searchEnvelope })
+  search(@Query() query: JobSearchQueryDto): Promise<JobSearchResultDto> {
+    return this.jobSearch.search(query);
   }
 
   @Public()
