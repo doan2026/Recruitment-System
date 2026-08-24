@@ -1,2 +1,102 @@
-generator client { provider = "prisma-client-js" }
-datasource db { provider = "postgresql" url = env("DATABASE_URL") }
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum CompanyVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum CompanyMemberRole {
+  OWNER
+  MEMBER
+}
+
+enum CompanyInvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+enum CompanyMediaType {
+  IMAGE
+  VIDEO
+}
+
+model Company {
+  id               String                    @id @default(uuid()) @db.Uuid
+  name             String                    @db.VarChar(160)
+  normalizedName   String                    @unique @map("normalized_name") @db.VarChar(160)
+  slug             String                    @unique @db.VarChar(190)
+  description      String                    @db.Text
+  industry         String                    @db.VarChar(120)
+  size             String                    @db.VarChar(50)
+  address          String                    @db.VarChar(500)
+  website          String?                   @db.VarChar(2048)
+  taxCode          String                    @unique @map("tax_code") @db.VarChar(32)
+  logoFileId       String?                   @map("logo_file_id") @db.Uuid
+  logoUrl          String?                   @map("logo_url") @db.Text
+  verifiedStatus   CompanyVerificationStatus @default(PENDING) @map("verified_status")
+  rejectReason     String?                   @map("reject_reason") @db.Text
+  createdAt        DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  members          CompanyMember[]
+  media            CompanyMedia[]
+  invitations      CompanyInvitation[]
+
+  @@map("companies")
+}
+
+model CompanyMember {
+  id        String            @id @default(uuid()) @db.Uuid
+  companyId String            @map("company_id") @db.Uuid
+  userId    String            @unique @map("user_id") @db.Uuid
+  role      CompanyMemberRole
+  joinedAt  DateTime          @default(now()) @map("joined_at") @db.Timestamptz(3)
+  company   Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@map("company_members")
+}
+
+model CompanyMedia {
+  id        String           @id @default(uuid()) @db.Uuid
+  companyId String           @map("company_id") @db.Uuid
+  fileId    String           @unique @map("file_id") @db.Uuid
+  url       String           @db.Text
+  type      CompanyMediaType
+  sortOrder Int              @default(0) @map("sort_order")
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  company   Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, sortOrder])
+  @@map("company_media")
+}
+
+model CompanyInvitation {
+  id              String                  @id @default(uuid()) @db.Uuid
+  companyId       String                  @map("company_id") @db.Uuid
+  email           String                  @db.VarChar(320)
+  normalizedEmail String                  @map("normalized_email") @db.VarChar(320)
+  status          CompanyInvitationStatus @default(PENDING)
+  tokenHash       String                  @unique @map("token_hash") @db.Char(64)
+  invitedBy       String                  @map("invited_by") @db.Uuid
+  acceptedBy      String?                 @map("accepted_by") @db.Uuid
+  expiresAt       DateTime                @map("expires_at") @db.Timestamptz(3)
+  acceptedAt      DateTime?               @map("accepted_at") @db.Timestamptz(3)
+  createdAt       DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
+  company         Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, normalizedEmail])
+  @@index([companyId, status])
+  @@index([expiresAt])
+  @@map("company_invitations")
+}

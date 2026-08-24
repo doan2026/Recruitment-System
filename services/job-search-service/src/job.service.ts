@@ -1,0 +1,435 @@
+import { HttpStatus, Injectable } from '@nestjs/common';
+import { Job, JobStatus, Prisma } from '@prisma/client';
+import { ApiException } from './common';
+import {
+  CompanyClientService,
+  RecruiterCompany,
+} from './company-client.service';
+import { CreateJobDto, JobDto, UpdateJobDto } from './job.dto';
+import { PrismaService } from './prisma.service';
+
+@Injectable()
+export class JobService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly companies: CompanyClientService,
+  ) {}
+
+  async create(
+    recruiterId: string,
+    authorization: string,
+    dto: CreateJobDto,
+  ): Promise<JobDto> {
+    const company = await this.companies.getRecruiterCompany(
+      recruiterId,
+      authorization,
+    );
+    if (company.verifiedStatus !== 'VERIFIED') {
+      throw new ApiException(
+        'COMPANY_NOT_VERIFIED',
+        'Only members of a VERIFIED company can create jobs',
+        HttpStatus.FORBIDDEN,
+        { verifiedStatus: company.verifiedStatus },
+      );
+    }
+    const data = this.validateAndMap(dto);
+    const job = await this.prisma.job.create({
+      data: {
+        ...data,
+        companyId: company.companyId,
+        createdBy: recruiterId,
+        status: JobStatus.DRAFT,
+      },
+    });
+    return this.toDto(job);
+  }
+
+  async listManaged(
+    recruiterId: string,
+    authorization: string,
+  ): Promise<JobDto[]> {
+    const company = await this.companies.getRecruiterCompany(
+      recruiterId,
+      authorization,
+    );
+    const jobs = await this.prisma.job.findMany({
+      where: {
+        companyId: company.companyId,
+        ...(company.memberRole === 'MEMBER'
+          ? { createdBy: recruiterId }
+          : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return jobs.map((job) => this.toDto(job));
+  }
+
+  async getPublic(jobId: string): Promise<JobDto> {
+    const job = await this.prisma.job.findFirst({
+      where: { id: jobId, status: JobStatus.PUBLISHED },
+    });
+    if (!job) {
+      throw new ApiException(
+        'JOB_NOT_FOUND',
+        'Published job was not found',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return {
+      ...this.toDto(job),
+      rejectionReason: null,
+      reviewedBy: null,
+      reviewedAt: null,
+    };
+  }
+
+  async listPending(): Promise<JobDto[]> {
+    const jobs = await this.prisma.job.findMany({
+      where: { status: JobStatus.PENDING_APPROVAL },
+      orderBy: { updatedAt: 'asc' },
+      take: 50,
+    });
+    return jobs.map((job) => this.toDto(job));
+  }
+
+  async update(
+    recruiterId: string,
+    authorization: string,
+    jobId: string,
+    dto: UpdateJobDto,
+  ): Promise<JobDto> {
+    if (!Object.keys(dto).length) {
+      throw new ApiException(
+        'EMPTY_UPDATE',
+        'At least one job field must be provided',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const company = await this.companies.getRecruiterCompany(
+      recruiterId,
+      authorization,
+    );
+    const current = await this.prisma.job.findUnique({
+      where: { id: jobId },
+    });
+    this.requireManagePermission(current, company, recruiterId);
+    if (
+      current.status === JobStatus.CLOSED ||
+      current.status === JobStatus.EXPIRED
+    ) {
+      throw new ApiException(
+        'JOB_NOT_EDITABLE',
+        'CLOSED or EXPIRED jobs cannot be edited',
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const merged: CreateJobDto = {
+      title: dto.title ?? current.title,
+      description: dto.description ?? current.description,
+      requirements: dto.requirements ?? current.requirements,
+      benefits: dto.benefits ?? current.benefits,
+      salaryMin: dto.isNegotiable === true
+        ? undefined
+        : (dto.salaryMin ?? current.salaryMin?.toNumber()),
+      salaryMax: dto.isNegotiable === true
+        ? undefined
+        : (dto.salaryMax ?? current.salaryMax?.toNumber()),
+      isNegotiable: dto.isNegotiable ?? current.isNegotiable,
+      currency: dto.currency ?? current.currency,
+      location: dto.location ?? current.location,
+      jobType: dto.jobType ?? current.jobType,
+      experienceYears:
+        dto.experienceYears ?? current.experienceYears,
+      quantity: dto.quantity ?? current.quantity,
+      skills: dto.skills ?? current.skills,
+      deadline:
+        dto.deadline ?? current.deadline.toISOString().slice(0, 10),
+    };
+    const data: Prisma.JobUpdateInput = this.validateAndMap(merged);
+    const criticalChanged = [
+      'title',
+      'description',
+      'requirements',
+      'salaryMin',
+      'salaryMax',
+      'isNegotiable',
+    ].some((field) => dto[field as keyof UpdateJobDto] !== undefined);
+    if (
+      current.status === JobStatus.PUBLISHED &&
+      criticalChanged
+    ) {
+      data.status = JobStatus.PENDING_APPROVAL;
+      data.publishedAt = null;
+      data.rejectionReason = null;
+      data.reviewedBy = null;
+      data.reviewedAt = null;
+    }
+
+    return this.toDto(
+      await this.prisma.job.update({
+        where: { id: jobId },
+        data,
+      }),
+    );
+  }
+
+  async publish(
+    recruiterId: string,
+    authorization: string,
+    jobId: string,
+  ): Promise<JobDto> {
+    const company = await this.companies.getRecruiterCompany(
+      recruiterId,
+      authorization,
+    );
+    if (company.verifiedStatus !== 'VERIFIED') {
+      throw new ApiException(
+        'COMPANY_NOT_VERIFIED',
+        'Only members of a VERIFIED company can publish jobs',
+        HttpStatus.FORBIDDEN,
+        { verifiedStatus: company.verifiedStatus },
+      );
+    }
+    const job = await this.prisma.job.findUnique({ where: { id: jobId } });
+    this.requireManagePermission(job, company, recruiterId);
+    this.requireStatus(job, JobStatus.DRAFT, 'publish');
+    this.requireFutureDeadline(job.deadline);
+
+    return this.transition(jobId, JobStatus.DRAFT, {
+      status: JobStatus.PENDING_APPROVAL,
+      publishedAt: null,
+      rejectionReason: null,
+      reviewedBy: null,
+      reviewedAt: null,
+    });
+  }
+
+  async close(
+    recruiterId: string,
+    authorization: string,
+    jobId: string,
+  ): Promise<JobDto> {
+    const company = await this.companies.getRecruiterCompany(
+      recruiterId,
+      authorization,
+    );
+    const job = await this.prisma.job.findUnique({ where: { id: jobId } });
+    this.requireManagePermission(job, company, recruiterId);
+    this.requireStatus(job, JobStatus.PUBLISHED, 'close');
+
+    return this.transition(jobId, JobStatus.PUBLISHED, {
+      status: JobStatus.CLOSED,
+    });
+  }
+
+  async approve(adminId: string, jobId: string): Promise<JobDto> {
+    const job = await this.requireJob(jobId);
+    this.requireStatus(job, JobStatus.PENDING_APPROVAL, 'approve');
+    this.requireFutureDeadline(job.deadline);
+    const now = new Date();
+
+    return this.transition(jobId, JobStatus.PENDING_APPROVAL, {
+      status: JobStatus.PUBLISHED,
+      publishedAt: now,
+      rejectionReason: null,
+      reviewedBy: adminId,
+      reviewedAt: now,
+    });
+  }
+
+  async reject(
+    adminId: string,
+    jobId: string,
+    reason: string,
+  ): Promise<JobDto> {
+    const job = await this.requireJob(jobId);
+    this.requireStatus(job, JobStatus.PENDING_APPROVAL, 'reject');
+    const normalizedReason = reason.normalize('NFKC').trim();
+    if (normalizedReason.length < 3 || normalizedReason.length > 1000) {
+      throw new ApiException(
+        'INVALID_REJECTION_REASON',
+        'Rejection reason must contain 3 to 1000 non-blank characters',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    return this.transition(jobId, JobStatus.PENDING_APPROVAL, {
+      status: JobStatus.DRAFT,
+      publishedAt: null,
+      rejectionReason: normalizedReason,
+      reviewedBy: adminId,
+      reviewedAt: new Date(),
+    });
+  }
+
+  async expirePublishedJobs(now = new Date()): Promise<number> {
+    const today = new Date(now);
+    today.setUTCHours(0, 0, 0, 0);
+    const result = await this.prisma.job.updateMany({
+      where: {
+        status: JobStatus.PUBLISHED,
+        deadline: { lt: today },
+      },
+      data: { status: JobStatus.EXPIRED },
+    });
+    return result.count;
+  }
+
+  private async requireJob(jobId: string): Promise<Job> {
+    const job = await this.prisma.job.findUnique({ where: { id: jobId } });
+    if (!job) {
+      throw new ApiException(
+        'JOB_NOT_FOUND',
+        'Job was not found',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return job;
+  }
+
+  private requireStatus(
+    job: Job,
+    expected: JobStatus,
+    action: string,
+  ): void {
+    if (job.status !== expected) {
+      throw new ApiException(
+        'INVALID_JOB_STATUS',
+        `Job must be ${expected} to perform action: ${action}`,
+        HttpStatus.CONFLICT,
+        { currentStatus: job.status, expectedStatus: expected },
+      );
+    }
+  }
+
+  private requireFutureDeadline(deadline: Date): void {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    if (deadline.getTime() <= today.getTime()) {
+      throw new ApiException(
+        'JOB_DEADLINE_PASSED',
+        'Job deadline must be later than today',
+        HttpStatus.CONFLICT,
+      );
+    }
+  }
+
+  private async transition(
+    jobId: string,
+    expectedStatus: JobStatus,
+    data: Prisma.JobUpdateManyMutationInput,
+  ): Promise<JobDto> {
+    const result = await this.prisma.job.updateMany({
+      where: { id: jobId, status: expectedStatus },
+      data,
+    });
+    if (result.count !== 1) {
+      throw new ApiException(
+        'JOB_STATE_CHANGED',
+        'Job status changed during this request; please retry',
+        HttpStatus.CONFLICT,
+      );
+    }
+    return this.toDto(await this.requireJob(jobId));
+  }
+
+  private requireManagePermission(
+    job: Job | null,
+    company: RecruiterCompany,
+    recruiterId: string,
+  ): asserts job is Job {
+    if (!job || job.companyId !== company.companyId) {
+      throw new ApiException(
+        'JOB_NOT_FOUND',
+        'Job was not found in this company',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    if (
+      company.memberRole === 'MEMBER' &&
+      job.createdBy !== recruiterId
+    ) {
+      throw new ApiException(
+        'JOB_ACCESS_DENIED',
+        'MEMBER can only manage jobs they created',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+  }
+
+  private validateAndMap(dto: CreateJobDto) {
+    const deadline = new Date(dto.deadline + 'T00:00:00.000Z');
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    if (
+      Number.isNaN(deadline.getTime()) ||
+      deadline.getTime() <= today.getTime()
+    ) {
+      throw new ApiException(
+        'INVALID_DEADLINE',
+        'deadline must be later than today',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (dto.isNegotiable) {
+      if (dto.salaryMin !== undefined || dto.salaryMax !== undefined) {
+        throw new ApiException(
+          'INVALID_SALARY_MODE',
+          'Negotiable jobs must omit salaryMin and salaryMax',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    } else if (
+      dto.salaryMin === undefined ||
+      dto.salaryMax === undefined ||
+      dto.salaryMin > dto.salaryMax
+    ) {
+      throw new ApiException(
+        'INVALID_SALARY_RANGE',
+        'salaryMin and salaryMax are required and min must not exceed max',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const skills = [...new Set(
+      dto.skills.map((skill) => skill.normalize('NFKC').trim()),
+    )].filter(Boolean);
+    if (!skills.length) {
+      throw new ApiException(
+        'SKILLS_REQUIRED',
+        'At least one non-blank skill is required',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return {
+      title: dto.title.normalize('NFKC').trim(),
+      description: dto.description.trim(),
+      requirements: dto.requirements.trim(),
+      benefits: dto.benefits.trim(),
+      salaryMin: dto.isNegotiable ? null : dto.salaryMin,
+      salaryMax: dto.isNegotiable ? null : dto.salaryMax,
+      isNegotiable: dto.isNegotiable,
+      currency: dto.currency.toUpperCase(),
+      location: dto.location.normalize('NFKC').trim(),
+      jobType: dto.jobType,
+      experienceYears: dto.experienceYears,
+      quantity: dto.quantity,
+      skills,
+      deadline,
+    };
+  }
+
+  private toDto(job: Job): JobDto {
+    return {
+      ...job,
+      salaryMin: job.salaryMin?.toString() ?? null,
+      salaryMax: job.salaryMax?.toString() ?? null,
+      deadline: job.deadline.toISOString().slice(0, 10),
+      publishedAt: job.publishedAt?.toISOString() ?? null,
+      reviewedAt: job.reviewedAt?.toISOString() ?? null,
+      createdAt: job.createdAt.toISOString(),
+      updatedAt: job.updatedAt.toISOString(),
+    };
+  }
+}

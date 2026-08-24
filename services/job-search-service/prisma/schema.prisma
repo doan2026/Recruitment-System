@@ -1,2 +1,55 @@
-generator client { provider = "prisma-client-js" }
-datasource db { provider = "postgresql" url = env("DATABASE_URL") }
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum JobStatus {
+  DRAFT
+  PENDING_APPROVAL
+  PUBLISHED
+  CLOSED
+  EXPIRED
+}
+
+enum JobType {
+  FULL_TIME
+  PART_TIME
+  REMOTE
+  INTERNSHIP
+}
+
+model Job {
+  id              String    @id @default(uuid()) @db.Uuid
+  companyId       String    @map("company_id") @db.Uuid
+  createdBy       String    @map("created_by") @db.Uuid
+  title           String    @db.VarChar(200)
+  description     String    @db.Text
+  requirements    String    @db.Text
+  benefits        String    @db.Text
+  salaryMin       Decimal?  @map("salary_min") @db.Decimal(15, 2)
+  salaryMax       Decimal?  @map("salary_max") @db.Decimal(15, 2)
+  isNegotiable    Boolean   @default(false) @map("is_negotiable")
+  currency        String    @default("VND") @db.Char(3)
+  location        String    @db.VarChar(255)
+  jobType         JobType   @map("job_type")
+  experienceYears Int       @map("experience_years")
+  quantity        Int
+  skills          String[]
+  deadline        DateTime  @db.Date
+  status          JobStatus @default(DRAFT)
+  publishedAt     DateTime? @map("published_at") @db.Timestamptz(3)
+  rejectionReason String?   @map("rejection_reason") @db.VarChar(1000)
+  reviewedBy      String?   @map("reviewed_by") @db.Uuid
+  reviewedAt      DateTime? @map("reviewed_at") @db.Timestamptz(3)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([companyId, status])
+  @@index([createdBy, status])
+  @@index([status, deadline])
+  @@map("jobs")
+}

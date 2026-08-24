@@ -1,6 +1,56 @@
-import { Controller, Get, Module } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
-@Controller() class CompanyController { @Get('health') health() { return { service: 'company-service', status: 'UP' }; } }
-@Module({ controllers: [CompanyController] }) class CompanyModule {}
-async function bootstrap() { const app = await NestFactory.create(CompanyModule); await app.listen(Number(process.env.PORT ?? 3000), '0.0.0.0'); }
-bootstrap();
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { AppModule } from './app.module';
+
+async function bootstrap(): Promise<void> {
+  const app = await NestFactory.create(AppModule);
+  const config = app.get(ConfigService);
+  const port = Number(config.get<string>('PORT') ?? '3000');
+
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error('PORT must be an integer between 1 and 65535');
+  }
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    }),
+  );
+
+  const allowedOrigins = (config.get<string>('CORS_ORIGINS') ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  if (allowedOrigins.length > 0) {
+    app.enableCors({
+      origin: allowedOrigins.includes('*') ? true : allowedOrigins,
+    });
+  }
+
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('Company Service API')
+    .setDescription(
+      'Company profile endpoints. The API gateway exposes these routes under /companies.',
+    )
+    .setVersion('1.0')
+    .addBearerAuth()
+    .addServer('/companies', 'API Gateway')
+    .addServer('/', 'Direct service access')
+    .build();
+
+  SwaggerModule.setup(
+    'docs',
+    app,
+    SwaggerModule.createDocument(app, swaggerConfig),
+  );
+
+  app.enableShutdownHooks();
+  await app.listen(port, '0.0.0.0');
+}
+
+void bootstrap();
