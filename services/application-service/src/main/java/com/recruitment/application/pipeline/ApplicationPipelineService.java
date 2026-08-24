@@ -14,6 +14,7 @@ import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -38,6 +39,7 @@ public class ApplicationPipelineService {
     private final Clock clock;
     private final String topic;
 
+    @Autowired
     public ApplicationPipelineService(
         ApplicationPipelineRepository applications,
         ApplicationHistoryWriter history,
