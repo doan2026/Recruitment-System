@@ -2,7 +2,7 @@
 
 This NestJS service owns company profiles and company membership data.
 
-## C01 company-profile and C02 company-verification scope
+## C01 profile, C02 verification and C03 member-management scope
 
 | Internal route | Gateway route | Access |
 | --- | --- | --- |
@@ -11,6 +11,12 @@ This NestJS service owns company profiles and company membership data.
 | `GET /?verified_status=PENDING&page=1&limit=20` | `GET /companies?verified_status=PENDING&page=1&limit=20` | ADMIN |
 | `PATCH /:id/verify` | `PATCH /companies/:id/verify` | ADMIN |
 | `POST /me/submit-verification` | `POST /companies/me/submit-verification` | Company OWNER |
+| `POST /:id/members` | `POST /companies/:id/members` | Company OWNER |
+| `GET /:id/members` | `GET /companies/:id/members` | Company OWNER |
+| `POST /invitations/accept` | `POST /companies/invitations/accept` | RECRUITER |
+| `DELETE /:id/members/:userId` | `DELETE /companies/:id/members/:userId` | Company OWNER |
+| `PATCH /:id/members/:userId/transfer-ownership` | `PATCH /companies/:id/members/:userId/transfer-ownership` | Company OWNER |
+| `GET /by-user/:userId` | `GET /companies/by-user/:userId` | Self recruiter / ADMIN |
 | `GET /:id` | `GET /companies/:id` | Public, VERIFIED companies only |
 | `PUT /:id` | `PUT /companies/:id` | Company OWNER |
 | `GET /health` | `GET /companies/health` | Public |
@@ -32,6 +38,16 @@ PENDING.
 Public responses omit workflow fields and raw Media Service file identifiers.
 Owner responses include review status and rejection reason.
 
+
+## Member invitations
+
+An OWNER invites a recruiter by email. Company Service returns the invitation
+token once and stores only its SHA-256 hash. The caller must hand that token to
+the email/notification flow; the raw token must not be logged or persisted.
+Invitations expire after seven days. Acceptance creates a MEMBER atomically,
+and the unique `CompanyMember.userId` constraint ensures one recruiter belongs
+to at most one company. Removing the OWNER is blocked until ownership has been
+transferred to an existing MEMBER.
 ## Authentication
 
 Set `JWT_JWKS_URI` to the Auth Service JWKS endpoint for production. Keys are
