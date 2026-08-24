@@ -97,6 +97,13 @@ export class CreateJobDto {
 
 export class UpdateJobDto extends PartialType(CreateJobDto) {}
 
+export class RejectJobDto {
+  @ApiProperty({ minLength: 3, maxLength: 1000 })
+  @IsString()
+  @Length(3, 1000)
+  reason!: string;
+}
+
 export class JobDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ format: 'uuid' }) companyId!: string;
@@ -118,6 +125,12 @@ export class JobDto {
   @ApiProperty({ enum: JobStatus }) status!: JobStatus;
   @ApiPropertyOptional({ nullable: true, format: 'date-time' })
   publishedAt!: string | null;
+  @ApiPropertyOptional({ nullable: true })
+  rejectionReason!: string | null;
+  @ApiPropertyOptional({ nullable: true, format: 'uuid' })
+  reviewedBy!: string | null;
+  @ApiPropertyOptional({ nullable: true, format: 'date-time' })
+  reviewedAt!: string | null;
   @ApiProperty({ format: 'date-time' }) createdAt!: string;
   @ApiProperty({ format: 'date-time' }) updatedAt!: string;
 }

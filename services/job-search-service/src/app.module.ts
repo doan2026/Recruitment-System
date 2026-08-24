@@ -10,6 +10,7 @@ import {
 } from './common';
 import { CompanyClientService } from './company-client.service';
 import { JobController } from './job.controller';
+import { JobExpiryService } from './job-expiry.service';
 import { JobService } from './job.service';
 import { PrismaService } from './prisma.service';
 
@@ -23,6 +24,7 @@ import { PrismaService } from './prisma.service';
     PrismaService,
     CompanyClientService,
     JobService,
+    JobExpiryService,
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_INTERCEPTOR, useClass: ApiResponseInterceptor },
