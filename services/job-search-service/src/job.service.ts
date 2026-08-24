@@ -6,6 +6,10 @@ import {
   RecruiterCompany,
 } from './company-client.service';
 import { CreateJobDto, JobDto, UpdateJobDto } from './job.dto';
+import {
+  JobEventAction,
+  JobIndexingService,
+} from './job-indexing.service';
 import { PrismaService } from './prisma.service';
 
 @Injectable()
@@ -13,6 +17,7 @@ export class JobService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly companies: CompanyClientService,
+    private readonly indexing: JobIndexingService,
   ) {}
 
   async create(
@@ -41,6 +46,7 @@ export class JobService {
         status: JobStatus.DRAFT,
       },
     });
+    void this.indexing.schedule(job, 'CREATED');
     return this.toDto(job);
   }
 
@@ -166,12 +172,12 @@ export class JobService {
       data.reviewedAt = null;
     }
 
-    return this.toDto(
-      await this.prisma.job.update({
-        where: { id: jobId },
-        data,
-      }),
-    );
+    const updated = await this.prisma.job.update({
+      where: { id: jobId },
+      data,
+    });
+    void this.indexing.schedule(updated, 'UPDATED');
+    return this.toDto(updated);
   }
 
   async publish(
@@ -196,13 +202,18 @@ export class JobService {
     this.requireStatus(job, JobStatus.DRAFT, 'publish');
     this.requireFutureDeadline(job.deadline);
 
-    return this.transition(jobId, JobStatus.DRAFT, {
-      status: JobStatus.PENDING_APPROVAL,
-      publishedAt: null,
-      rejectionReason: null,
-      reviewedBy: null,
-      reviewedAt: null,
-    });
+    return this.transition(
+      jobId,
+      JobStatus.DRAFT,
+      {
+        status: JobStatus.PENDING_APPROVAL,
+        publishedAt: null,
+        rejectionReason: null,
+        reviewedBy: null,
+        reviewedAt: null,
+      },
+      'UPDATED',
+    );
   }
 
   async close(
@@ -218,9 +229,12 @@ export class JobService {
     this.requireManagePermission(job, company, recruiterId);
     this.requireStatus(job, JobStatus.PUBLISHED, 'close');
 
-    return this.transition(jobId, JobStatus.PUBLISHED, {
-      status: JobStatus.CLOSED,
-    });
+    return this.transition(
+      jobId,
+      JobStatus.PUBLISHED,
+      { status: JobStatus.CLOSED },
+      'CLOSED',
+    );
   }
 
   async approve(adminId: string, jobId: string): Promise<JobDto> {
@@ -229,13 +243,18 @@ export class JobService {
     this.requireFutureDeadline(job.deadline);
     const now = new Date();
 
-    return this.transition(jobId, JobStatus.PENDING_APPROVAL, {
-      status: JobStatus.PUBLISHED,
-      publishedAt: now,
-      rejectionReason: null,
-      reviewedBy: adminId,
-      reviewedAt: now,
-    });
+    return this.transition(
+      jobId,
+      JobStatus.PENDING_APPROVAL,
+      {
+        status: JobStatus.PUBLISHED,
+        publishedAt: now,
+        rejectionReason: null,
+        reviewedBy: adminId,
+        reviewedAt: now,
+      },
+      'UPDATED',
+    );
   }
 
   async reject(
@@ -254,25 +273,45 @@ export class JobService {
       );
     }
 
-    return this.transition(jobId, JobStatus.PENDING_APPROVAL, {
-      status: JobStatus.DRAFT,
-      publishedAt: null,
-      rejectionReason: normalizedReason,
-      reviewedBy: adminId,
-      reviewedAt: new Date(),
-    });
+    return this.transition(
+      jobId,
+      JobStatus.PENDING_APPROVAL,
+      {
+        status: JobStatus.DRAFT,
+        publishedAt: null,
+        rejectionReason: normalizedReason,
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+      },
+      'UPDATED',
+    );
   }
 
   async expirePublishedJobs(now = new Date()): Promise<number> {
     const today = new Date(now);
     today.setUTCHours(0, 0, 0, 0);
+    const candidates = await this.prisma.job.findMany({
+      where: {
+        status: JobStatus.PUBLISHED,
+        deadline: { lt: today },
+      },
+    });
+    if (!candidates.length) return 0;
+    const ids = candidates.map(({ id }) => id);
     const result = await this.prisma.job.updateMany({
       where: {
+        id: { in: ids },
         status: JobStatus.PUBLISHED,
         deadline: { lt: today },
       },
       data: { status: JobStatus.EXPIRED },
     });
+    for (const job of candidates) {
+      void this.indexing.schedule(
+        { ...job, status: JobStatus.EXPIRED },
+        'EXPIRED',
+      );
+    }
     return result.count;
   }
 
@@ -319,6 +358,7 @@ export class JobService {
     jobId: string,
     expectedStatus: JobStatus,
     data: Prisma.JobUpdateManyMutationInput,
+    eventAction: JobEventAction,
   ): Promise<JobDto> {
     const result = await this.prisma.job.updateMany({
       where: { id: jobId, status: expectedStatus },
@@ -331,7 +371,9 @@ export class JobService {
         HttpStatus.CONFLICT,
       );
     }
-    return this.toDto(await this.requireJob(jobId));
+    const job = await this.requireJob(jobId);
+    void this.indexing.schedule(job, eventAction);
+    return this.toDto(job);
   }
 
   private requireManagePermission(

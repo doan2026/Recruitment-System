@@ -41,6 +41,7 @@ import {
   JobSearchResultDto,
 } from './job-search.dto';
 import { JobSearchService } from './job-search.service';
+import { JobIndexingService } from './job-indexing.service';
 import { JobService } from './job.service';
 
 const JOB_ID_PIPE = new ParseUUIDPipe({
@@ -76,6 +77,7 @@ export class JobController {
   constructor(
     private readonly jobs: JobService,
     private readonly jobSearch: JobSearchService,
+    private readonly indexing: JobIndexingService,
   ) {}
   @Public()
   @Get('health')
@@ -128,6 +130,14 @@ export class JobController {
   @ApiOkResponse({ schema: searchEnvelope })
   search(@Query() query: JobSearchQueryDto): Promise<JobSearchResultDto> {
     return this.jobSearch.search(query);
+  }
+
+  @Post('reindex')
+  @Roles(SystemRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Queue every PUBLISHED job for reindexing' })
+  reindex(): Promise<{ queued: number }> {
+    return this.indexing.reindexAll().then((queued) => ({ queued }));
   }
 
   @Public()

@@ -105,7 +105,7 @@ export class JobSearchService {
       });
     }
     if (query.skills?.length) {
-      filter.push({ terms: { skills: query.skills } });
+      filter.push({ terms: { 'skills.keyword': query.skills } });
     }
     if (query.jobType) {
       filter.push({ term: { jobType: query.jobType } });
@@ -150,7 +150,7 @@ export class JobSearchService {
       sort: this.elasticsearchSort(query),
       aggs: {
         locations: { terms: { field: 'location.keyword', size: 30 } },
-        skills: { terms: { field: 'skills', size: 50 } },
+        skills: { terms: { field: 'skills.keyword', size: 50 } },
         jobTypes: { terms: { field: 'jobType', size: 10 } },
         companies: { terms: { field: 'companyId', size: 50 } },
       },

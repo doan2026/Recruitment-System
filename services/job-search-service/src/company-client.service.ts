@@ -9,6 +9,11 @@ export interface RecruiterCompany {
   memberRole: 'OWNER' | 'MEMBER';
 }
 
+interface PublicCompany {
+  id: string;
+  name: string;
+}
+
 @Injectable()
 export class CompanyClientService {
   constructor(private readonly config: ConfigService) {}
@@ -54,5 +59,26 @@ export class CompanyClientService {
       );
     }
     return body.data;
+  }
+
+  async getPublicCompanyName(companyId: string): Promise<string> {
+    const baseUrl = this.config.get<string>('COMPANY_SERVICE_URL');
+    if (!baseUrl) throw new Error('COMPANY_SERVICE_URL is required');
+    let response: Response;
+    try {
+      response = await fetch(
+        baseUrl.replace(/\/$/, '') + '/' + companyId,
+        { signal: AbortSignal.timeout(3000) },
+      );
+    } catch {
+      throw new Error('Company Service is unavailable while indexing');
+    }
+    const body = (await response.json().catch(() => ({}))) as {
+      data?: PublicCompany;
+    };
+    if (!response.ok || !body.data?.name) {
+      throw new Error(`Cannot resolve public company ${companyId}`);
+    }
+    return body.data.name;
   }
 }

@@ -1,5 +1,6 @@
 import { Job, JobStatus, JobType, Prisma } from '@prisma/client';
 import { CompanyClientService } from './company-client.service';
+import { JobIndexingService } from './job-indexing.service';
 import { JobService } from './job.service';
 import { PrismaService } from './prisma.service';
 
@@ -41,24 +42,29 @@ function job(status: JobStatus, overrides: Partial<Job> = {}): Job {
 describe('JobService publishing lifecycle', () => {
   let service: JobService;
   let findUnique: jest.Mock;
+  let findMany: jest.Mock;
   let updateMany: jest.Mock;
   let getRecruiterCompany: jest.Mock;
+  let schedule: jest.Mock;
 
   beforeEach(() => {
     findUnique = jest.fn();
+    findMany = jest.fn();
     updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    schedule = jest.fn().mockResolvedValue(undefined);
     getRecruiterCompany = jest.fn().mockResolvedValue({
       companyId: COMPANY_ID,
       memberRole: 'OWNER',
       verifiedStatus: 'VERIFIED',
     });
     const prisma = {
-      job: { findUnique, updateMany },
+      job: { findUnique, findMany, updateMany },
     } as unknown as PrismaService;
     const companies = {
       getRecruiterCompany,
     } as unknown as CompanyClientService;
-    service = new JobService(prisma, companies);
+    const indexing = { schedule } as unknown as JobIndexingService;
+    service = new JobService(prisma, companies, indexing);
   });
 
   it('submits an owned DRAFT job for approval', async () => {
@@ -79,6 +85,13 @@ describe('JobService publishing lifecycle', () => {
         reviewedAt: null,
       },
     });
+    expect(schedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: JOB_ID,
+        status: JobStatus.PENDING_APPROVAL,
+      }),
+      'UPDATED',
+    );
   });
 
   it('prevents a MEMBER from publishing another recruiter job', async () => {
@@ -121,6 +134,13 @@ describe('JobService publishing lifecycle', () => {
         rejectionReason: null,
       }),
     });
+    expect(schedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: JOB_ID,
+        status: JobStatus.PUBLISHED,
+      }),
+      'UPDATED',
+    );
   });
 
   it('returns a rejected job to DRAFT with a normalized reason', async () => {
@@ -157,16 +177,40 @@ describe('JobService publishing lifecycle', () => {
   });
 
   it('expires only published jobs before the current UTC date', async () => {
+    findMany.mockResolvedValue([
+      job(JobStatus.PUBLISHED),
+      job(JobStatus.PUBLISHED, {
+        id: '55555555-5555-4555-8555-555555555555',
+      }),
+      job(JobStatus.PUBLISHED, {
+        id: '66666666-6666-4666-8666-666666666666',
+      }),
+    ]);
     updateMany.mockResolvedValue({ count: 3 });
     const now = new Date('2026-08-24T15:30:00.000Z');
 
     await expect(service.expirePublishedJobs(now)).resolves.toBe(3);
     expect(updateMany).toHaveBeenCalledWith({
       where: {
+        id: {
+          in: [
+            JOB_ID,
+            '55555555-5555-4555-8555-555555555555',
+            '66666666-6666-4666-8666-666666666666',
+          ],
+        },
         status: JobStatus.PUBLISHED,
         deadline: { lt: new Date('2026-08-24T00:00:00.000Z') },
       },
       data: { status: JobStatus.EXPIRED },
     });
+    expect(schedule).toHaveBeenCalledTimes(3);
+    expect(schedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: JOB_ID,
+        status: JobStatus.EXPIRED,
+      }),
+      'EXPIRED',
+    );
   });
 });
