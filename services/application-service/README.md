@@ -1,12 +1,19 @@
 # Application Service
 
-This Spring Boot 3 / Java 21 service owns the recruitment application pipeline.
-This branch implements candidate submission only. Nginx strips the
+This Spring Boot 3 / Java 21 service owns candidate submission, bookmarks,
+application tracking, and the recruiter application pipeline. Nginx strips the
 `/applications` gateway prefix before forwarding requests.
 
 | Internal | Gateway | Access |
 | --- | --- | --- |
-| `POST /` | `POST /applications` | CANDIDATE |
+| `POST /` | `POST /applications/` | CANDIDATE |
+| `GET /my` | `GET /applications/my` | CANDIDATE |
+| `GET /{applicationId}` | `GET /applications/{applicationId}` | CANDIDATE, RECRUITER |
+| `GET /` | `GET /applications/` | RECRUITER |
+| `PATCH /{applicationId}/status` | `PATCH /applications/{applicationId}/status` | RECRUITER |
+| `PATCH /{applicationId}/withdraw` | `PATCH /applications/{applicationId}/withdraw` | CANDIDATE |
+| `POST, GET /bookmarks` | `POST, GET /applications/bookmarks` | CANDIDATE |
+| `DELETE /bookmarks/{jobId}` | `DELETE /applications/bookmarks/{jobId}` | CANDIDATE |
 | `GET /actuator/health` | Direct health check | Public |
 | `GET /docs` | `GET /applications/docs` | Public |
 
@@ -43,4 +50,7 @@ sends `application-events` with a stable `event_id` and exponential retry.
 ```bash
 mvn test
 mvn package
+
+# Requires Docker; starts a disposable PostgreSQL 16 container.
+mvn verify -Pintegration-test
 ```

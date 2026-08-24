@@ -1,8 +1,8 @@
 # BÁO CÁO TIẾN ĐỘ DỰ ÁN HỆ THỐNG TUYỂN DỤNG
 
-> Ngày cập nhật: 24/08/2026  
-> Nhánh đối chiếu chính: `develop` tại commit `8e5093f`  
-> Nhánh đang làm việc: `feature/application-service/application-pipeline`
+> Ngày cập nhật: 25/08/2026
+> Nhánh đối chiếu chính: `develop` tại commit `f63a549`
+> Nhánh đang làm việc: `feature/application-service/application-pipeline-hardening`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -158,7 +158,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Mục tiêu:** chứng minh các luồng xuyên service chạy thật, ổn định và có thể triển khai.
 - **Công nghệ/công cụ:** unit/integration/E2E test, Docker Compose, CI/CD, Swagger/OpenAPI, logging/metrics/tracing.
 - **Đầu ra:** test contract REST/Kafka; migration sạch; test concurrency/idempotency; security test; smoke test; tài liệu môi trường; backup/restore; monitoring.
-- **Trạng thái:** mới có unit test tập trung ở Company, Job/Search và Application; chưa có E2E toàn hệ thống.
+- **Trạng thái:** đã có unit test tập trung ở Company, Job/Search và Application; Application Pipeline đã có integration test với PostgreSQL 16 thật qua Testcontainers; chưa có E2E toàn hệ thống.
 
 ---
 
@@ -255,9 +255,9 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Timeline được sắp xếp tăng dần và không trộn Evaluation nội bộ.
 - Phần đã merge có 17 unit test.
 
-## 2.4 Application Pipeline — đã commit/push nhưng CHƯA merge
+## 2.4 Application Pipeline — đã merge vào `develop`
 
-> Pipeline đã được commit và push tại `c0f5a0c` trên nhánh `feature/application-service/application-pipeline`. Commit này chưa xuất hiện trong snapshot `develop` đang đối chiếu nên chưa được tính là hoàn thành trên `develop`.
+> Pipeline đã được merge qua PR #14 tại merge commit `08cb887`; commit tính năng `c0f5a0c` đã có trong lịch sử `develop`.
 
 - Recruiter lọc hồ sơ theo company, job, status và khoảng thời gian; có pagination và sort theo ngày/điểm match.
 - Recruiter chuyển `APPLIED → REVIEWING → INTERVIEW` hoặc chuyển đơn active sang `REJECTED`.
@@ -265,7 +265,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Candidate rút đơn active sang `WITHDRAWN`.
 - Dùng `expectedVersion` và atomic update để phát hiện hai thao tác đồng thời.
 - Mỗi lần chuyển trạng thái ghi history và outbox `STATUS_CHANGED` trong transaction.
-- Toàn bộ Application Service hiện chạy đạt 26/26 test và build JAR thành công khi tính cả pipeline.
+- Toàn bộ Application Service chạy đạt 26/26 unit test và 5/5 PostgreSQL integration test; build JAR thành công.
 
 ## 2.5 Hạ tầng nền đã có
 
@@ -282,11 +282,11 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## P01 — Hoàn tất và bàn giao Application Pipeline
 
-- [ ] Tạo Pull Request vào `develop`, review và merge.
-- [ ] Sau khi merge, checkout `develop`, pull và xác nhận commit `c0f5a0c` đã có trong lịch sử.
-- [ ] Chạy migration/service với PostgreSQL thật để kiểm tra JPQL atomic update và history insert.
+- [x] Tạo Pull Request vào `develop`, review và merge qua PR #14 (`08cb887`).
+- [x] Xác nhận commit `c0f5a0c` đã có trong lịch sử `develop`.
+- [x] Chạy Flyway/JPA với PostgreSQL 16 thật; kiểm tra JPQL atomic update, history và transactional outbox bằng Testcontainers.
 - [ ] Chạy Kafka thật, xác minh consumer nhận đúng `STATUS_CHANGED` và không xử lý trùng.
-- [ ] Test hai recruiter đổi trạng thái cùng lúc và xác nhận request cũ nhận `409`.
+- [x] Test hai recruiter đổi trạng thái cùng lúc: đúng một request thành công và request còn lại nhận lỗi concurrent `409`.
 - [ ] Chốt quyền MEMBER/OWNER được xem và xử lý toàn bộ job của công ty.
 
 ## P02 — Application Evaluation
@@ -460,7 +460,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## Thứ tự ưu tiên đề xuất
 
-1. Merge Application Pipeline hiện tại.
+1. Hoàn tất hai phần P01 còn lại: kiểm chứng Kafka/idempotency và chốt quyền MEMBER/OWNER.
 2. Hoàn thiện Auth và Profile vì đang chặn xác thực/nộp đơn end-to-end.
 3. Hoàn thiện File/Media để mở khóa CV, logo, attachment và Offer letter.
 4. Làm Application Evaluation, Offer và Dashboard.
@@ -474,6 +474,6 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Profile chưa có API CV nên Application Submission sẽ lỗi tích hợp dù unit test đã đạt.
 - AI provider chưa thống nhất giữa tài liệu (Claude) và dependency hiện tại (Gemini).
 - Event envelope trong `docs/architecture.md` dùng `camelCase`, trong implementation Application/Job có trường `snake_case`; cần thống nhất trước khi Notification/Admin/AI consume.
-- Pipeline đã commit/push nhưng chưa có trong snapshot `develop`; phải hoàn tất PR/merge trước khi bắt đầu feature kế tiếp.
-- Docker Compose chưa được kiểm chứng toàn bộ trên máy hiện tại do Docker daemon chưa hoạt động.
+- Pipeline đã được kiểm chứng với PostgreSQL thật; delivery/idempotency trên Kafka thật và hợp đồng quyền MEMBER/OWNER vẫn chưa được chốt.
+- Docker daemon và Testcontainers đã hoạt động; Docker Compose toàn hệ thống vẫn chưa được kiểm chứng và hiện thiếu file môi trường runtime của một số service.
 - Nginx chưa có route độc lập cho Bookmark/Offer và exact path không có dấu `/` cuối.
