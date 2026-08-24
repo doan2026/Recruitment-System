@@ -11,6 +11,7 @@ import {
 import { CompanyClientService } from './company-client.service';
 import { JobController } from './job.controller';
 import { JobExpiryService } from './job-expiry.service';
+import { JobSearchService } from './job-search.service';
 import { JobService } from './job.service';
 import { PrismaService } from './prisma.service';
 
@@ -25,6 +26,7 @@ import { PrismaService } from './prisma.service';
     CompanyClientService,
     JobService,
     JobExpiryService,
+    JobSearchService,
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_INTERCEPTOR, useClass: ApiResponseInterceptor },
