@@ -1,0 +1,219 @@
+{
+  "info": {
+    "name": "Company Service - Company Profile (C01)",
+    "description": "Requests are written for the Nginx gateway, which strips the /companies prefix before forwarding to Company Service.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "accessToken",
+      "value": ""
+    },
+    {
+      "key": "companyId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/companies/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "companies",
+            "health"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Create company",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('created', () => pm.response.to.have.status(201));",
+              "const body = pm.response.json();",
+              "if (body.data && body.data.id) pm.collectionVariables.set('companyId', body.data.id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{accessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Acme Vietnam\",\n  \"description\": \"A recruitment technology company\",\n  \"industry\": \"Technology\",\n  \"size\": \"51-200\",\n  \"address\": \"Ho Chi Minh City\",\n  \"website\": \"https://acme.example\",\n  \"taxCode\": \"0312345678\",\n  \"logo\": {\n    \"fileId\": \"6105e846-3bb5-4dc0-a6ed-d0f0148c5bc8\",\n    \"url\": \"https://res.cloudinary.com/example/logo.png\"\n  },\n  \"media\": []\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/companies/",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "companies",
+            ""
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get my company",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{accessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/companies/me",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "companies",
+            "me"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get verified public company",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/companies/{{companyId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "companies",
+            "{{companyId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Update company as OWNER",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{accessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"description\": \"Updated company description\",\n  \"website\": \"https://acme.example/careers\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/companies/{{companyId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "companies",
+            "{{companyId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Remove logo reference",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{accessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"removeLogo\": true\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/companies/{{companyId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "companies",
+            "{{companyId}}"
+          ]
+        }
+      }
+    }
+  ]
+}
