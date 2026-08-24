@@ -1,6 +1,6 @@
 {
   "info": {
-    "name": "Company Service - Profile and Verification (C01-C02)",
+    "name": "Company Service - Profile, Verification and Members (C01-C03)",
     "description": "Requests are written for the Nginx gateway, which strips the /companies prefix before forwarding to Company Service.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -19,6 +19,18 @@
     },
     {
       "key": "adminToken",
+      "value": ""
+    },
+    {
+      "key": "memberAccessToken",
+      "value": ""
+    },
+    {
+      "key": "memberUserId",
+      "value": ""
+    },
+    {
+      "key": "invitationToken",
       "value": ""
     }
   ],
@@ -309,6 +321,99 @@
         "method": "POST",
         "header": [],
         "url": "{{baseUrl}}/companies/me/submit-verification"
+      }
+    },
+    {
+      "name": "Owner - Invite company member",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const body = pm.response.json();",
+              "if (body.data && body.data.invitationToken) pm.collectionVariables.set('invitationToken', body.data.invitationToken);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+        },
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"member@example.com\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/companies/{{companyId}}/members"
+      }
+    },
+    {
+      "name": "Member - Accept company invitation",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{memberAccessToken}}", "type": "string" }]
+        },
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"token\": \"{{invitationToken}}\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": "{{baseUrl}}/companies/invitations/accept"
+      }
+    },
+    {
+      "name": "Owner - List company members",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/companies/{{companyId}}/members"
+      }
+    },
+    {
+      "name": "Owner - Remove company member",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+        },
+        "method": "DELETE",
+        "header": [],
+        "url": "{{baseUrl}}/companies/{{companyId}}/members/{{memberUserId}}"
+      }
+    },
+    {
+      "name": "Owner - Transfer company ownership",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+        },
+        "method": "PATCH",
+        "header": [],
+        "url": "{{baseUrl}}/companies/{{companyId}}/members/{{memberUserId}}/transfer-ownership"
+      }
+    },
+    {
+      "name": "Recruiter - Resolve own company",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{memberAccessToken}}", "type": "string" }]
+        },
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/companies/by-user/{{memberUserId}}"
       }
     }
   ]
