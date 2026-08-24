@@ -1,8 +1,54 @@
+server:
+  port: ${PORT:8080}
+
 spring:
-  application: { name: application-service }
+  application:
+    name: application-service
   datasource:
     url: ${DATABASE_URL}
     username: ${POSTGRES_USER}
     password: ${POSTGRES_PASSWORD}
-  jpa: { open-in-view: false, hibernate: { ddl-auto: validate } }
-management: { endpoints: { web: { exposure: { include: health,info } } } }
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: application
+  flyway:
+    enabled: true
+    create-schemas: true
+    default-schema: application
+    schemas: application
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:kafka:9092}
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+    consumer:
+      group-id: application-service
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          public-key-location: file:${JWT_PUBLIC_KEY_PATH}
+
+clients:
+  job-service-url: ${JOB_SERVICE_URL:http://job-search-service:3000}
+  profile-service-url: ${PROFILE_SERVICE_URL:http://profile-service:3000}
+  internal-api-key: ${INTERNAL_API_KEY}
+
+application-events:
+  topic: ${KAFKA_APPLICATION_TOPIC:application-events}
+  publish-delay-ms: ${OUTBOX_PUBLISH_DELAY_MS:1000}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+springdoc:
+  swagger-ui:
+    path: /docs
