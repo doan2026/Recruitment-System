@@ -7,6 +7,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CompanyService } from './company.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
+import {
+  CompanyVerificationDecision,
+  VerifyCompanyDto,
+} from './dto/verify-company.dto';
 
 const RECRUITER_ID = '18c604a4-4be6-4c3d-85ea-c1f45daf17c8';
 const COMPANY_ID = '90eec7f1-fb6e-49d0-89ff-7d65d2438ff7';
@@ -51,23 +55,46 @@ describe('CompanyService', () => {
   let prisma: {
     $transaction: jest.Mock;
     companyMember: { findUnique: jest.Mock };
-    company: { findFirst: jest.Mock; update: jest.Mock };
+    company: {
+      findFirst: jest.Mock;
+      findMany: jest.Mock;
+      count: jest.Mock;
+      update: jest.Mock;
+    };
   };
   let transaction: {
     companyMember: { findUnique: jest.Mock };
-    company: { create: jest.Mock; update: jest.Mock };
+    company: {
+      create: jest.Mock;
+      findUnique: jest.Mock;
+      update: jest.Mock;
+    };
   };
 
   beforeEach(() => {
     transaction = {
       companyMember: { findUnique: jest.fn() },
-      company: { create: jest.fn(), update: jest.fn() },
+      company: {
+        create: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+      },
     };
     prisma = {
-      $transaction: jest.fn(async (callback) => callback(transaction)),
+      $transaction: jest.fn(async (input: unknown) => {
+        if (Array.isArray(input)) {
+          return Promise.all(input);
+        }
+
+        return (
+          input as (client: typeof transaction) => Promise<unknown>
+        )(transaction);
+      }),
       companyMember: { findUnique: jest.fn() },
       company: {
         findFirst: jest.fn(),
+        findMany: jest.fn(),
+        count: jest.fn(),
         update: jest.fn(),
       },
     };
@@ -369,5 +396,172 @@ describe('CompanyService', () => {
       code: 'DUPLICATE_MEDIA_REFERENCE',
     });
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('lists the selected review queue with pagination metadata', async () => {
+    prisma.company.findMany.mockResolvedValue([companyRecord()]);
+    prisma.company.count.mockResolvedValue(21);
+
+    const result = await service.listForReview({
+      verified_status: CompanyVerificationStatus.PENDING,
+      page: 2,
+      limit: 10,
+    });
+
+    expect(prisma.company.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { verifiedStatus: CompanyVerificationStatus.PENDING },
+        skip: 10,
+        take: 10,
+      }),
+    );
+    expect(result.data).toHaveLength(1);
+    expect(result.meta).toEqual({
+      page: 2,
+      limit: 10,
+      total: 21,
+      totalPages: 3,
+    });
+  });
+
+  it('requires a non-blank reason when rejecting a company', async () => {
+    const dto: VerifyCompanyDto = {
+      decision: CompanyVerificationDecision.REJECT,
+      reason: '   ',
+    };
+
+    await expect(service.verify(COMPANY_ID, dto)).rejects.toMatchObject({
+      code: 'VERIFICATION_REASON_REQUIRED',
+      details: { field: 'reason' },
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('approves a PENDING company and clears any stale reason', async () => {
+    transaction.company.findUnique.mockResolvedValue(companyRecord());
+    transaction.company.update.mockResolvedValue(
+      companyRecord({
+        verifiedStatus: CompanyVerificationStatus.VERIFIED,
+      }),
+    );
+
+    const result = await service.verify(COMPANY_ID, {
+      decision: CompanyVerificationDecision.APPROVE,
+    });
+
+    expect(transaction.company.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: COMPANY_ID },
+        data: {
+          verifiedStatus: CompanyVerificationStatus.VERIFIED,
+          rejectReason: null,
+        },
+      }),
+    );
+    expect(result.verifiedStatus).toBe(CompanyVerificationStatus.VERIFIED);
+  });
+
+  it('rejects a PENDING company with the normalized reason', async () => {
+    transaction.company.findUnique.mockResolvedValue(companyRecord());
+    transaction.company.update.mockResolvedValue(
+      companyRecord({
+        verifiedStatus: CompanyVerificationStatus.REJECTED,
+        rejectReason: 'Tax document is unreadable',
+      }),
+    );
+
+    const result = await service.verify(COMPANY_ID, {
+      decision: CompanyVerificationDecision.REJECT,
+      reason: '  Tax document is unreadable  ',
+    });
+
+    expect(transaction.company.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          verifiedStatus: CompanyVerificationStatus.REJECTED,
+          rejectReason: 'Tax document is unreadable',
+        },
+      }),
+    );
+    expect(result.rejectReason).toBe('Tax document is unreadable');
+  });
+
+  it('treats an identical completed review as an idempotent retry', async () => {
+    transaction.company.findUnique.mockResolvedValue(
+      companyRecord({
+        verifiedStatus: CompanyVerificationStatus.VERIFIED,
+      }),
+    );
+
+    const result = await service.verify(COMPANY_ID, {
+      decision: CompanyVerificationDecision.APPROVE,
+    });
+
+    expect(result.verifiedStatus).toBe(CompanyVerificationStatus.VERIFIED);
+    expect(transaction.company.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks a different decision after review is complete', async () => {
+    transaction.company.findUnique.mockResolvedValue(
+      companyRecord({
+        verifiedStatus: CompanyVerificationStatus.VERIFIED,
+      }),
+    );
+
+    await expect(
+      service.verify(COMPANY_ID, {
+        decision: CompanyVerificationDecision.REJECT,
+        reason: 'Different decision',
+      }),
+    ).rejects.toMatchObject({
+      code: 'INVALID_VERIFICATION_TRANSITION',
+      details: {
+        currentStatus: CompanyVerificationStatus.VERIFIED,
+        requestedStatus: CompanyVerificationStatus.REJECTED,
+      },
+    });
+    expect(transaction.company.update).not.toHaveBeenCalled();
+  });
+
+  it('lets an OWNER resubmit a REJECTED company and clears the reason', async () => {
+    transaction.companyMember.findUnique.mockResolvedValue({
+      companyId: COMPANY_ID,
+      role: CompanyMemberRole.OWNER,
+      company: companyRecord({
+        verifiedStatus: CompanyVerificationStatus.REJECTED,
+        rejectReason: 'Missing legal document',
+      }),
+    });
+    transaction.company.update.mockResolvedValue(companyRecord());
+
+    const result = await service.resubmit(RECRUITER_ID);
+
+    expect(transaction.company.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: COMPANY_ID },
+        data: {
+          verifiedStatus: CompanyVerificationStatus.PENDING,
+          rejectReason: null,
+        },
+      }),
+    );
+    expect(result.verifiedStatus).toBe(CompanyVerificationStatus.PENDING);
+    expect(result.rejectReason).toBeNull();
+  });
+
+  it('does not let a VERIFIED company enter the queue through resubmission', async () => {
+    transaction.companyMember.findUnique.mockResolvedValue({
+      companyId: COMPANY_ID,
+      role: CompanyMemberRole.OWNER,
+      company: companyRecord({
+        verifiedStatus: CompanyVerificationStatus.VERIFIED,
+      }),
+    });
+
+    await expect(service.resubmit(RECRUITER_ID)).rejects.toMatchObject({
+      code: 'INVALID_RESUBMISSION_TRANSITION',
+      details: { currentStatus: CompanyVerificationStatus.VERIFIED },
+    });
+    expect(transaction.company.update).not.toHaveBeenCalled();
   });
 });

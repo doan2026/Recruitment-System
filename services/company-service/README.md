@@ -2,12 +2,15 @@
 
 This NestJS service owns company profiles and company membership data.
 
-## C01 company-profile scope
+## C01 company-profile and C02 company-verification scope
 
 | Internal route | Gateway route | Access |
 | --- | --- | --- |
 | `POST /` | `POST /companies/` | RECRUITER |
 | `GET /me` | `GET /companies/me` | RECRUITER |
+| `GET /?verified_status=PENDING&page=1&limit=20` | `GET /companies?verified_status=PENDING&page=1&limit=20` | ADMIN |
+| `PATCH /:id/verify` | `PATCH /companies/:id/verify` | ADMIN |
+| `POST /me/submit-verification` | `POST /companies/me/submit-verification` | Company OWNER |
 | `GET /:id` | `GET /companies/:id` | Public, VERIFIED companies only |
 | `PUT /:id` | `PUT /companies/:id` | Company OWNER |
 | `GET /health` | `GET /companies/health` | Public |
@@ -15,11 +18,16 @@ This NestJS service owns company profiles and company membership data.
 Nginx strips the `/companies` prefix, so controllers intentionally have no
 `companies` prefix.
 
-Creating a profile creates the `Company` and its OWNER membership atomically.
-A recruiter can belong to only one company. A material change to `name` or
-`taxCode` moves a VERIFIED profile back to PENDING. Updating a REJECTED
-profile does not resubmit it; moderation/resubmission belongs to the later
-company-verification task.
+Creating a profile creates the `Company` and its OWNER membership atomically
+in PENDING status. A recruiter can belong to only one company. An ADMIN can
+list a status-specific review queue, then approve or reject a PENDING company.
+A rejection requires a non-blank reason. Repeating the same completed decision
+is idempotent; changing an already completed decision returns a conflict.
+
+Updating a REJECTED profile does not implicitly resubmit it. Its OWNER must call
+`POST /me/submit-verification`, which moves it to PENDING and clears the old
+reason. A material change to `name` or `taxCode` also moves VERIFIED back to
+PENDING.
 
 Public responses omit workflow fields and raw Media Service file identifiers.
 Owner responses include review status and rejection reason.
