@@ -13,6 +13,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
+import { timingSafeEqual } from 'crypto';
 import { readFileSync } from 'fs';
 import { Observable, map } from 'rxjs';
 
@@ -39,8 +40,10 @@ export class ApiException extends HttpException {
 }
 
 const PUBLIC_KEY = 'isPublic';
+const INTERNAL_KEY = 'isInternal';
 const ROLES_KEY = 'roles';
 export const Public = () => SetMetadata(PUBLIC_KEY, true);
+export const Internal = () => SetMetadata(INTERNAL_KEY, true);
 export const Roles = (...roles: SystemRole[]) =>
   SetMetadata(ROLES_KEY, roles);
 export const CurrentUser = createParamDecorator(
@@ -57,6 +60,28 @@ export class AuthGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    const internal = this.reflector.getAllAndOverride<boolean>(INTERNAL_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (internal) {
+      const expected = this.config.get<string>('INTERNAL_API_KEY');
+      if (!expected) throw new Error('INTERNAL_API_KEY is required');
+      const header = context.switchToHttp().getRequest()
+        .headers['x-internal-api-key'];
+      const provided = Array.isArray(header) ? header[0] : header;
+      if (
+        typeof provided !== 'string' ||
+        !this.secureEquals(provided, expected)
+      ) {
+        throw new ApiException(
+          'INVALID_INTERNAL_API_KEY',
+          'A valid internal API key is required',
+          HttpStatus.UNAUTHORIZED,
+        );
+      }
+      return true;
+    }
     if (
       this.reflector.getAllAndOverride<boolean>(PUBLIC_KEY, [
         context.getHandler(),
@@ -105,6 +130,15 @@ export class AuthGuard implements CanActivate {
         HttpStatus.UNAUTHORIZED,
       );
     }
+  }
+
+  private secureEquals(provided: string, expected: string): boolean {
+    const providedBuffer = Buffer.from(provided);
+    const expectedBuffer = Buffer.from(expected);
+    return (
+      providedBuffer.length === expectedBuffer.length &&
+      timingSafeEqual(providedBuffer, expectedBuffer)
+    );
   }
 }
 

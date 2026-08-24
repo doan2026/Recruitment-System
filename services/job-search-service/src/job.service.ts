@@ -10,6 +10,10 @@ import {
   JobEventAction,
   JobIndexingService,
 } from './job-indexing.service';
+import {
+  JobAvailabilityDto,
+  JobAvailabilityReason,
+} from './job-availability.dto';
 import { PrismaService } from './prisma.service';
 
 @Injectable()
@@ -86,6 +90,46 @@ export class JobService {
       rejectionReason: null,
       reviewedBy: null,
       reviewedAt: null,
+    };
+  }
+
+  async getAvailability(jobId: string): Promise<JobAvailabilityDto> {
+    const job = await this.prisma.job.findUnique({
+      where: { id: jobId },
+    });
+    if (!job) {
+      return {
+        jobId,
+        exists: false,
+        acceptingApplications: false,
+        reason: JobAvailabilityReason.NOT_FOUND,
+        companyId: null,
+        recruiterId: null,
+        jobTitle: null,
+        status: null,
+        deadline: null,
+      };
+    }
+
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const deadlinePassed = job.deadline.getTime() < today.getTime();
+    const reason = job.status !== JobStatus.PUBLISHED
+      ? JobAvailabilityReason.NOT_PUBLISHED
+      : deadlinePassed
+        ? JobAvailabilityReason.DEADLINE_PASSED
+        : null;
+
+    return {
+      jobId: job.id,
+      exists: true,
+      acceptingApplications: reason === null,
+      reason,
+      companyId: job.companyId,
+      recruiterId: job.createdBy,
+      jobTitle: job.title,
+      status: job.status,
+      deadline: job.deadline.toISOString().slice(0, 10),
     };
   }
 

@@ -1,5 +1,6 @@
 import { Job, JobStatus, JobType, Prisma } from '@prisma/client';
 import { CompanyClientService } from './company-client.service';
+import { JobAvailabilityReason } from './job-availability.dto';
 import { JobIndexingService } from './job-indexing.service';
 import { JobService } from './job.service';
 import { PrismaService } from './prisma.service';
@@ -110,6 +111,60 @@ describe('JobService publishing lifecycle', () => {
       service.publish(RECRUITER_ID, 'Bearer token', JOB_ID),
     ).rejects.toMatchObject({ code: 'JOB_ACCESS_DENIED' });
     expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it('reports a current PUBLISHED job as accepting applications', async () => {
+    findUnique.mockResolvedValue(job(JobStatus.PUBLISHED));
+
+    await expect(service.getAvailability(JOB_ID)).resolves.toMatchObject({
+      jobId: JOB_ID,
+      exists: true,
+      acceptingApplications: true,
+      reason: null,
+      companyId: COMPANY_ID,
+      recruiterId: RECRUITER_ID,
+    });
+  });
+
+  it('reports a missing job without leaking metadata', async () => {
+    findUnique.mockResolvedValue(null);
+
+    await expect(service.getAvailability(JOB_ID)).resolves.toEqual({
+      jobId: JOB_ID,
+      exists: false,
+      acceptingApplications: false,
+      reason: JobAvailabilityReason.NOT_FOUND,
+      companyId: null,
+      recruiterId: null,
+      jobTitle: null,
+      status: null,
+      deadline: null,
+    });
+  });
+
+  it('does not accept applications for a non-published job', async () => {
+    findUnique.mockResolvedValue(job(JobStatus.CLOSED));
+
+    await expect(service.getAvailability(JOB_ID)).resolves.toMatchObject({
+      exists: true,
+      acceptingApplications: false,
+      reason: JobAvailabilityReason.NOT_PUBLISHED,
+      status: JobStatus.CLOSED,
+    });
+  });
+
+  it('does not accept applications after the UTC deadline', async () => {
+    findUnique.mockResolvedValue(
+      job(JobStatus.PUBLISHED, {
+        deadline: new Date('2020-01-01T00:00:00.000Z'),
+      }),
+    );
+
+    await expect(service.getAvailability(JOB_ID)).resolves.toMatchObject({
+      exists: true,
+      acceptingApplications: false,
+      reason: JobAvailabilityReason.DEADLINE_PASSED,
+    });
   });
 
   it('approves only a pending job and records the admin review', async () => {
