@@ -42,6 +42,9 @@ model Job {
   deadline        DateTime  @db.Date
   status          JobStatus @default(DRAFT)
   publishedAt     DateTime? @map("published_at") @db.Timestamptz(3)
+  rejectionReason String?   @map("rejection_reason") @db.VarChar(1000)
+  reviewedBy      String?   @map("reviewed_by") @db.Uuid
+  reviewedAt      DateTime? @map("reviewed_at") @db.Timestamptz(3)
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 

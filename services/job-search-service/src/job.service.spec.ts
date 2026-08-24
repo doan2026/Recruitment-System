@@ -1,0 +1,172 @@
+import { Job, JobStatus, JobType, Prisma } from '@prisma/client';
+import { CompanyClientService } from './company-client.service';
+import { JobService } from './job.service';
+import { PrismaService } from './prisma.service';
+
+const RECRUITER_ID = '11111111-1111-4111-8111-111111111111';
+const ADMIN_ID = '22222222-2222-4222-8222-222222222222';
+const COMPANY_ID = '33333333-3333-4333-8333-333333333333';
+const JOB_ID = '44444444-4444-4444-8444-444444444444';
+
+function job(status: JobStatus, overrides: Partial<Job> = {}): Job {
+  return {
+    id: JOB_ID,
+    companyId: COMPANY_ID,
+    createdBy: RECRUITER_ID,
+    title: 'Backend Engineer',
+    description: 'Build recruitment services',
+    requirements: 'NestJS',
+    benefits: 'Remote work',
+    salaryMin: new Prisma.Decimal(20_000_000),
+    salaryMax: new Prisma.Decimal(30_000_000),
+    isNegotiable: false,
+    currency: 'VND',
+    location: 'Ha Noi',
+    jobType: JobType.FULL_TIME,
+    experienceYears: 2,
+    quantity: 2,
+    skills: ['NestJS'],
+    deadline: new Date('2099-12-31T00:00:00.000Z'),
+    status,
+    publishedAt: null,
+    rejectionReason: null,
+    reviewedBy: null,
+    reviewedAt: null,
+    createdAt: new Date('2026-08-24T00:00:00.000Z'),
+    updatedAt: new Date('2026-08-24T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+describe('JobService publishing lifecycle', () => {
+  let service: JobService;
+  let findUnique: jest.Mock;
+  let updateMany: jest.Mock;
+  let getRecruiterCompany: jest.Mock;
+
+  beforeEach(() => {
+    findUnique = jest.fn();
+    updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    getRecruiterCompany = jest.fn().mockResolvedValue({
+      companyId: COMPANY_ID,
+      memberRole: 'OWNER',
+      verifiedStatus: 'VERIFIED',
+    });
+    const prisma = {
+      job: { findUnique, updateMany },
+    } as unknown as PrismaService;
+    const companies = {
+      getRecruiterCompany,
+    } as unknown as CompanyClientService;
+    service = new JobService(prisma, companies);
+  });
+
+  it('submits an owned DRAFT job for approval', async () => {
+    findUnique
+      .mockResolvedValueOnce(job(JobStatus.DRAFT))
+      .mockResolvedValueOnce(job(JobStatus.PENDING_APPROVAL));
+
+    const result = await service.publish(RECRUITER_ID, 'Bearer token', JOB_ID);
+
+    expect(result.status).toBe(JobStatus.PENDING_APPROVAL);
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: JOB_ID, status: JobStatus.DRAFT },
+      data: {
+        status: JobStatus.PENDING_APPROVAL,
+        publishedAt: null,
+        rejectionReason: null,
+        reviewedBy: null,
+        reviewedAt: null,
+      },
+    });
+  });
+
+  it('prevents a MEMBER from publishing another recruiter job', async () => {
+    getRecruiterCompany.mockResolvedValue({
+      companyId: COMPANY_ID,
+      memberRole: 'MEMBER',
+      verifiedStatus: 'VERIFIED',
+    });
+    findUnique.mockResolvedValue(
+      job(JobStatus.DRAFT, {
+        createdBy: '55555555-5555-4555-8555-555555555555',
+      }),
+    );
+
+    await expect(
+      service.publish(RECRUITER_ID, 'Bearer token', JOB_ID),
+    ).rejects.toMatchObject({ code: 'JOB_ACCESS_DENIED' });
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it('approves only a pending job and records the admin review', async () => {
+    findUnique
+      .mockResolvedValueOnce(job(JobStatus.PENDING_APPROVAL))
+      .mockResolvedValueOnce(
+        job(JobStatus.PUBLISHED, {
+          publishedAt: new Date(),
+          reviewedBy: ADMIN_ID,
+          reviewedAt: new Date(),
+        }),
+      );
+
+    const result = await service.approve(ADMIN_ID, JOB_ID);
+
+    expect(result.status).toBe(JobStatus.PUBLISHED);
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: JOB_ID, status: JobStatus.PENDING_APPROVAL },
+      data: expect.objectContaining({
+        status: JobStatus.PUBLISHED,
+        reviewedBy: ADMIN_ID,
+        rejectionReason: null,
+      }),
+    });
+  });
+
+  it('returns a rejected job to DRAFT with a normalized reason', async () => {
+    findUnique
+      .mockResolvedValueOnce(job(JobStatus.PENDING_APPROVAL))
+      .mockResolvedValueOnce(
+        job(JobStatus.DRAFT, { rejectionReason: 'Content is incomplete' }),
+      );
+
+    const result = await service.reject(
+      ADMIN_ID,
+      JOB_ID,
+      '  Content is incomplete  ',
+    );
+
+    expect(result.status).toBe(JobStatus.DRAFT);
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: JOB_ID, status: JobStatus.PENDING_APPROVAL },
+      data: expect.objectContaining({
+        status: JobStatus.DRAFT,
+        rejectionReason: 'Content is incomplete',
+        reviewedBy: ADMIN_ID,
+      }),
+    });
+  });
+
+  it('rejects a blank moderation reason', async () => {
+    findUnique.mockResolvedValue(job(JobStatus.PENDING_APPROVAL));
+
+    await expect(
+      service.reject(ADMIN_ID, JOB_ID, '   '),
+    ).rejects.toMatchObject({ code: 'INVALID_REJECTION_REASON' });
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it('expires only published jobs before the current UTC date', async () => {
+    updateMany.mockResolvedValue({ count: 3 });
+    const now = new Date('2026-08-24T15:30:00.000Z');
+
+    await expect(service.expirePublishedJobs(now)).resolves.toBe(3);
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        status: JobStatus.PUBLISHED,
+        deadline: { lt: new Date('2026-08-24T00:00:00.000Z') },
+      },
+      data: { status: JobStatus.EXPIRED },
+    });
+  });
+});

@@ -5,6 +5,7 @@ import {
   Headers,
   HttpStatus,
   Param,
+  Patch,
   ParseUUIDPipe,
   Post,
   Put,
@@ -27,7 +28,12 @@ import {
   Roles,
   SystemRole,
 } from './common';
-import { CreateJobDto, JobDto, UpdateJobDto } from './job.dto';
+import {
+  CreateJobDto,
+  JobDto,
+  RejectJobDto,
+  UpdateJobDto,
+} from './job.dto';
 import { JobService } from './job.service';
 
 const JOB_ID_PIPE = new ParseUUIDPipe({
@@ -88,6 +94,15 @@ export class JobController {
     return this.jobs.listManaged(user.id, authorization);
   }
 
+  @Get('pending')
+  @Roles(SystemRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List up to 50 jobs awaiting Admin approval' })
+  @ApiOkResponse({ schema: envelope(true) })
+  listPending(): Promise<JobDto[]> {
+    return this.jobs.listPending();
+  }
+
   @Public()
   @Get(':id')
   @ApiOperation({ summary: 'Get a PUBLISHED job publicly' })
@@ -112,5 +127,60 @@ export class JobController {
     @Body() dto: UpdateJobDto,
   ): Promise<JobDto> {
     return this.jobs.update(user.id, authorization, jobId, dto);
+  }
+
+  @Patch(':id/publish')
+  @Roles(SystemRole.RECRUITER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Submit a DRAFT job for Admin approval' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOkResponse({ schema: envelope() })
+  publish(
+    @CurrentUser() user: AuthUser,
+    @Headers('authorization') authorization: string,
+    @Param('id', JOB_ID_PIPE) jobId: string,
+  ): Promise<JobDto> {
+    return this.jobs.publish(user.id, authorization, jobId);
+  }
+
+  @Patch(':id/close')
+  @Roles(SystemRole.RECRUITER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Close a PUBLISHED job' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOkResponse({ schema: envelope() })
+  close(
+    @CurrentUser() user: AuthUser,
+    @Headers('authorization') authorization: string,
+    @Param('id', JOB_ID_PIPE) jobId: string,
+  ): Promise<JobDto> {
+    return this.jobs.close(user.id, authorization, jobId);
+  }
+
+  @Patch(':id/approve')
+  @Roles(SystemRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Approve a PENDING_APPROVAL job' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOkResponse({ schema: envelope() })
+  approve(
+    @CurrentUser() user: AuthUser,
+    @Param('id', JOB_ID_PIPE) jobId: string,
+  ): Promise<JobDto> {
+    return this.jobs.approve(user.id, jobId);
+  }
+
+  @Patch(':id/reject')
+  @Roles(SystemRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Reject a PENDING_APPROVAL job to DRAFT' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOkResponse({ schema: envelope() })
+  reject(
+    @CurrentUser() user: AuthUser,
+    @Param('id', JOB_ID_PIPE) jobId: string,
+    @Body() dto: RejectJobDto,
+  ): Promise<JobDto> {
+    return this.jobs.reject(user.id, jobId, dto.reason);
   }
 }
