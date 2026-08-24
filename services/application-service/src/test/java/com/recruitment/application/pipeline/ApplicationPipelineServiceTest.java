@@ -1,0 +1,255 @@
+package com.recruitment.application.pipeline;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.recruitment.application.api.BusinessException;
+import com.recruitment.application.client.CompanyClient;
+import com.recruitment.application.domain.ApplicationEntity;
+import com.recruitment.application.domain.ApplicationEventOutboxEntity;
+import com.recruitment.application.domain.ApplicationSource;
+import com.recruitment.application.domain.ApplicationStatus;
+import com.recruitment.application.repository.ApplicationEventOutboxRepository;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+
+class ApplicationPipelineServiceTest {
+    private static final Instant NOW =
+        Instant.parse("2026-08-24T08:00:00Z");
+
+    private final ApplicationPipelineRepository applications =
+        mock(ApplicationPipelineRepository.class);
+    private final ApplicationHistoryWriter history =
+        mock(ApplicationHistoryWriter.class);
+    private final ApplicationEventOutboxRepository outbox =
+        mock(ApplicationEventOutboxRepository.class);
+    private final CompanyClient companies = mock(CompanyClient.class);
+    private ApplicationPipelineService service;
+
+    private final UUID applicationId = UUID.randomUUID();
+    private final UUID candidateId = UUID.randomUUID();
+    private final UUID recruiterId = UUID.randomUUID();
+    private final UUID companyId = UUID.randomUUID();
+    private final ApplicationEntity applied = ApplicationEntity.applied(
+        applicationId,
+        UUID.randomUUID(),
+        companyId,
+        candidateId,
+        UUID.randomUUID(),
+        UUID.randomUUID(),
+        "Backend Engineer",
+        null,
+        ApplicationSource.SEARCH,
+        NOW.minusSeconds(3600)
+    );
+
+    @BeforeEach
+    void setUp() {
+        service = new ApplicationPipelineService(
+            applications,
+            history,
+            outbox,
+            companies,
+            new ObjectMapper().findAndRegisterModules(),
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            "application-events"
+        );
+        when(applications.findById(applicationId))
+            .thenReturn(Optional.of(applied));
+        when(companies.getRecruiterCompanyId(recruiterId, "Bearer token"))
+            .thenReturn(companyId);
+        when(applications.transition(any(), any(), any(), eq(0L)))
+            .thenReturn(1);
+    }
+
+    @Test
+    void recruiterMovesAppliedToReviewingAndWritesEvent() {
+        StatusTransitionResponse response = service.changeStatus(
+            applicationId,
+            recruiterId,
+            "Bearer token",
+            new ChangeApplicationStatusRequest(
+                ApplicationStatus.REVIEWING,
+                "  Qualified CV  ",
+                0L
+            )
+        );
+
+        assertThat(response.fromStatus()).isEqualTo(ApplicationStatus.APPLIED);
+        assertThat(response.toStatus()).isEqualTo(ApplicationStatus.REVIEWING);
+        assertThat(response.version()).isEqualTo(1L);
+        verify(history).append(
+            applicationId,
+            ApplicationStatus.APPLIED,
+            ApplicationStatus.REVIEWING,
+            recruiterId,
+            "Qualified CV",
+            NOW
+        );
+        ArgumentCaptor<ApplicationEventOutboxEntity> event =
+            ArgumentCaptor.forClass(ApplicationEventOutboxEntity.class);
+        verify(outbox).save(event.capture());
+        assertThat(event.getValue().getPayload())
+            .contains("\"from_status\":\"APPLIED\"")
+            .contains("\"to_status\":\"REVIEWING\"");
+    }
+
+    @Test
+    void recruiterCannotSkipFromAppliedToInterview() {
+        assertThatThrownBy(() -> service.changeStatus(
+            applicationId,
+            recruiterId,
+            "Bearer token",
+            new ChangeApplicationStatusRequest(
+                ApplicationStatus.INTERVIEW,
+                null,
+                0L
+            )
+        ))
+            .isInstanceOf(BusinessException.class)
+            .extracting("code")
+            .isEqualTo("INVALID_APPLICATION_TRANSITION");
+        verify(applications, never()).transition(any(), any(), any(), anyLong());
+    }
+
+    @Test
+    void rejectionRequiresAReason() {
+        assertThatThrownBy(() -> service.changeStatus(
+            applicationId,
+            recruiterId,
+            "Bearer token",
+            new ChangeApplicationStatusRequest(
+                ApplicationStatus.REJECTED,
+                "   ",
+                0L
+            )
+        ))
+            .isInstanceOf(BusinessException.class)
+            .extracting("code")
+            .isEqualTo("REJECTION_REASON_REQUIRED");
+    }
+
+    @Test
+    void candidateWithdrawsOwnActiveApplication() {
+        StatusTransitionResponse response = service.withdraw(
+            applicationId,
+            candidateId,
+            new WithdrawApplicationRequest("Personal reason", 0L)
+        );
+
+        assertThat(response.toStatus()).isEqualTo(ApplicationStatus.WITHDRAWN);
+        verify(history).append(
+            applicationId,
+            ApplicationStatus.APPLIED,
+            ApplicationStatus.WITHDRAWN,
+            candidateId,
+            "Personal reason",
+            NOW
+        );
+    }
+
+    @Test
+    void anotherCandidateCannotWithdrawApplication() {
+        assertThatThrownBy(() -> service.withdraw(
+            applicationId,
+            UUID.randomUUID(),
+            new WithdrawApplicationRequest(null, 0L)
+        ))
+            .isInstanceOf(BusinessException.class)
+            .extracting("code")
+            .isEqualTo("APPLICATION_ACCESS_DENIED");
+        verify(applications, never()).transition(any(), any(), any(), anyLong());
+    }
+
+    @Test
+    void staleVersionIsRejectedBeforeUpdate() {
+        assertThatThrownBy(() -> service.withdraw(
+            applicationId,
+            candidateId,
+            new WithdrawApplicationRequest(null, 2L)
+        ))
+            .isInstanceOf(BusinessException.class)
+            .extracting("code")
+            .isEqualTo("APPLICATION_CHANGED_CONCURRENTLY");
+    }
+
+    @Test
+    void atomicUpdateDetectsAConcurrentChange() {
+        when(applications.transition(any(), any(), any(), eq(0L)))
+            .thenReturn(0);
+
+        assertThatThrownBy(() -> service.withdraw(
+            applicationId,
+            candidateId,
+            new WithdrawApplicationRequest(null, 0L)
+        ))
+            .isInstanceOf(BusinessException.class)
+            .extracting("code")
+            .isEqualTo("APPLICATION_CHANGED_CONCURRENTLY");
+        verify(history, never()).append(any(), any(), any(), any(), any(), any());
+        verify(outbox, never()).save(any());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void recruiterListIsPagedAndCompanyScoped() {
+        when(applications.findAll(
+            any(Specification.class),
+            any(Pageable.class)
+        )).thenReturn(new PageImpl<>(List.of(applied)));
+
+        RecruiterApplicationPageResponse response = service.listForRecruiter(
+            recruiterId,
+            "Bearer token",
+            null,
+            ApplicationStatus.APPLIED,
+            null,
+            null,
+            ApplicationSort.APPLIED_AT_DESC,
+            0,
+            20
+        );
+
+        assertThat(response.items()).hasSize(1);
+        assertThat(response.items().getFirst().candidateId())
+            .isEqualTo(candidateId);
+        verify(companies).getRecruiterCompanyId(recruiterId, "Bearer token");
+    }
+
+    @Test
+    void rejectsInvalidPaginationBeforeCallingCompanyService() {
+        assertThatThrownBy(() -> service.listForRecruiter(
+            recruiterId,
+            "Bearer token",
+            null,
+            null,
+            null,
+            null,
+            ApplicationSort.APPLIED_AT_DESC,
+            0,
+            101
+        ))
+            .isInstanceOf(BusinessException.class)
+            .extracting("code")
+            .isEqualTo("INVALID_PAGINATION");
+        verify(companies, never()).getRecruiterCompanyId(any(), any());
+    }
+}
