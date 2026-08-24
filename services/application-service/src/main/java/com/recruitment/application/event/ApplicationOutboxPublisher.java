@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -22,6 +23,7 @@ public class ApplicationOutboxPublisher {
     private final KafkaTemplate<String, String> kafka;
     private final Clock clock;
 
+    @Autowired
     public ApplicationOutboxPublisher(
         ApplicationEventOutboxRepository outbox,
         KafkaTemplate<String, String> kafka
@@ -39,7 +41,11 @@ public class ApplicationOutboxPublisher {
         this.clock = clock;
     }
 
-    @Scheduled(fixedDelayString = "${application-events.publish-delay-ms}")
+    @Scheduled(
+        fixedDelayString = "${application-events.publish-delay-ms}",
+        initialDelayString =
+            "${application-events.publish-initial-delay-ms}"
+    )
     @Transactional
     public void publishPending() {
         Instant now = clock.instant();

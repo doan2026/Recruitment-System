@@ -1,8 +1,8 @@
 # BÁO CÁO TIẾN ĐỘ DỰ ÁN HỆ THỐNG TUYỂN DỤNG
 
 > Ngày cập nhật: 25/08/2026
-> Nhánh đối chiếu chính: `develop` tại commit `f63a549`
-> Nhánh đang làm việc: `feature/application-service/application-pipeline-hardening`
+> Nhánh đối chiếu chính: `develop` sau khi merge task PostgreSQL/concurrency
+> Nhánh đang làm việc: `feature/application-service/application-pipeline-kafka-integration`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -158,7 +158,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Mục tiêu:** chứng minh các luồng xuyên service chạy thật, ổn định và có thể triển khai.
 - **Công nghệ/công cụ:** unit/integration/E2E test, Docker Compose, CI/CD, Swagger/OpenAPI, logging/metrics/tracing.
 - **Đầu ra:** test contract REST/Kafka; migration sạch; test concurrency/idempotency; security test; smoke test; tài liệu môi trường; backup/restore; monitoring.
-- **Trạng thái:** đã có unit test tập trung ở Company, Job/Search và Application; Application Pipeline đã có integration test với PostgreSQL 16 thật qua Testcontainers; chưa có E2E toàn hệ thống.
+- **Trạng thái:** đã có unit test tập trung ở Company, Job/Search và Application; Application Pipeline đã có integration test với PostgreSQL 16 và Apache Kafka 3.8 thật qua Testcontainers; chưa có E2E toàn hệ thống.
 
 ---
 
@@ -265,7 +265,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Candidate rút đơn active sang `WITHDRAWN`.
 - Dùng `expectedVersion` và atomic update để phát hiện hai thao tác đồng thời.
 - Mỗi lần chuyển trạng thái ghi history và outbox `STATUS_CHANGED` trong transaction.
-- Toàn bộ Application Service chạy đạt 26/26 unit test và 5/5 PostgreSQL integration test; build JAR thành công.
+- Toàn bộ Application Service chạy đạt 26/26 unit test và 6/6 integration test với PostgreSQL/Kafka; build JAR thành công.
 
 ## 2.5 Hạ tầng nền đã có
 
@@ -285,7 +285,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [x] Tạo Pull Request vào `develop`, review và merge qua PR #14 (`08cb887`).
 - [x] Xác nhận commit `c0f5a0c` đã có trong lịch sử `develop`.
 - [x] Chạy Flyway/JPA với PostgreSQL 16 thật; kiểm tra JPQL atomic update, history và transactional outbox bằng Testcontainers.
-- [ ] Chạy Kafka thật, xác minh consumer nhận đúng `STATUS_CHANGED` và không xử lý trùng.
+- [x] Chạy Apache Kafka 3.8 thật: consumer probe nhận đúng `STATUS_CHANGED`; outbox được đánh dấu đã publish và lần chạy publisher kế tiếp không phát lại event.
 - [x] Test hai recruiter đổi trạng thái cùng lúc: đúng một request thành công và request còn lại nhận lỗi concurrent `409`.
 - [ ] Chốt quyền MEMBER/OWNER được xem và xử lý toàn bộ job của công ty.
 
@@ -460,7 +460,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## Thứ tự ưu tiên đề xuất
 
-1. Hoàn tất hai phần P01 còn lại: kiểm chứng Kafka/idempotency và chốt quyền MEMBER/OWNER.
+1. Hoàn tất phần P01 còn lại: chốt quyền MEMBER/OWNER.
 2. Hoàn thiện Auth và Profile vì đang chặn xác thực/nộp đơn end-to-end.
 3. Hoàn thiện File/Media để mở khóa CV, logo, attachment và Offer letter.
 4. Làm Application Evaluation, Offer và Dashboard.
@@ -474,6 +474,6 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Profile chưa có API CV nên Application Submission sẽ lỗi tích hợp dù unit test đã đạt.
 - AI provider chưa thống nhất giữa tài liệu (Claude) và dependency hiện tại (Gemini).
 - Event envelope trong `docs/architecture.md` dùng `camelCase`, trong implementation Application/Job có trường `snake_case`; cần thống nhất trước khi Notification/Admin/AI consume.
-- Pipeline đã được kiểm chứng với PostgreSQL thật; delivery/idempotency trên Kafka thật và hợp đồng quyền MEMBER/OWNER vẫn chưa được chốt.
+- Pipeline đã được kiểm chứng với PostgreSQL và Kafka thật; hợp đồng quyền MEMBER/OWNER vẫn chưa được chốt.
 - Docker daemon và Testcontainers đã hoạt động; Docker Compose toàn hệ thống vẫn chưa được kiểm chứng và hiện thiếu file môi trường runtime của một số service.
 - Nginx chưa có route độc lập cho Bookmark/Offer và exact path không có dấu `/` cuối.

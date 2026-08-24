@@ -51,6 +51,10 @@ sends `application-events` with a stable `event_id` and exponential retry.
 mvn test
 mvn package
 
-# Requires Docker; starts a disposable PostgreSQL 16 container.
+# Requires Docker; starts disposable PostgreSQL 16 and Apache Kafka containers.
 mvn verify -Pintegration-test
 ```
+
+The integration profile verifies Flyway/JPA against PostgreSQL, transactional
+pipeline updates, outbox delivery to a real Kafka consumer, and that an outbox
+row already marked as published is not sent again.

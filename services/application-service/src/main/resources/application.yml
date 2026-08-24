@@ -24,6 +24,8 @@ spring:
     bootstrap-servers: ${KAFKA_BROKERS:kafka:9092}
     producer:
       acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
       properties:
         enable.idempotence: true
     consumer:
@@ -42,6 +44,7 @@ clients:
 application-events:
   topic: ${KAFKA_APPLICATION_TOPIC:application-events}
   publish-delay-ms: ${OUTBOX_PUBLISH_DELAY_MS:1000}
+  publish-initial-delay-ms: ${OUTBOX_PUBLISH_INITIAL_DELAY_MS:0}
 
 management:
   endpoints:
