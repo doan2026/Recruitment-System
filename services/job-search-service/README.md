@@ -12,6 +12,7 @@ Nginx strips the `/jobs` gateway prefix before forwarding requests.
 | `GET /pending` | `GET /jobs/pending` | ADMIN |
 | `GET /search` | `GET /jobs/search` | Public |
 | `POST /reindex` | `POST /jobs/reindex` | ADMIN |
+| `GET /:id/exists` | `GET /jobs/:id/exists` | Internal |
 | `GET /:id` | `GET /jobs/:id` | Public, PUBLISHED only |
 | `PUT /:id` | `PUT /jobs/:id` | OWNER or creating MEMBER |
 | `PATCH /:id/publish` | `PATCH /jobs/:id/publish` | OWNER or creating MEMBER |
@@ -66,6 +67,12 @@ The same worker publishes `job-events` with:
 `event_id` is created before BullMQ processing and remains stable across
 retries, so consumers can deduplicate. `POST /jobs/reindex` lets an Admin
 rebuild the searchable set from PostgreSQL after an Elasticsearch outage.
+
+Application Service checks `GET /jobs/:id/exists` before accepting a new
+application. It must send `X-Internal-Api-Key` matching `INTERNAL_API_KEY`.
+The response distinguishes a missing job, a non-published job, and a passed
+deadline, and includes `companyId`, `recruiterId`, and `jobTitle` when the
+job exists.
 
 ```bash
 npm install

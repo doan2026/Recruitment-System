@@ -15,6 +15,7 @@ import {
   ApiBearerAuth,
   ApiCreatedResponse,
   ApiExtraModels,
+  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
@@ -25,6 +26,7 @@ import {
   ApiException,
   AuthUser,
   CurrentUser,
+  Internal,
   Public,
   Roles,
   SystemRole,
@@ -35,6 +37,7 @@ import {
   RejectJobDto,
   UpdateJobDto,
 } from './job.dto';
+import { JobAvailabilityDto } from './job-availability.dto';
 import {
   JobSearchItemDto,
   JobSearchQueryDto,
@@ -69,9 +72,21 @@ const searchEnvelope = {
     meta: { type: 'object', nullable: true },
   },
 };
+const availabilityEnvelope = {
+  type: 'object',
+  properties: {
+    data: { $ref: getSchemaPath(JobAvailabilityDto) },
+    meta: { type: 'object', nullable: true },
+  },
+};
 
 @ApiTags('jobs')
-@ApiExtraModels(JobDto, JobSearchItemDto, JobSearchResultDto)
+@ApiExtraModels(
+  JobDto,
+  JobAvailabilityDto,
+  JobSearchItemDto,
+  JobSearchResultDto,
+)
 @Controller()
 export class JobController {
   constructor(
@@ -138,6 +153,24 @@ export class JobController {
   @ApiOperation({ summary: 'Queue every PUBLISHED job for reindexing' })
   reindex(): Promise<{ queued: number }> {
     return this.indexing.reindexAll().then((queued) => ({ queued }));
+  }
+
+  @Internal()
+  @Get(':id/exists')
+  @ApiHeader({
+    name: 'X-Internal-Api-Key',
+    required: true,
+    description: 'Shared service-to-service secret',
+  })
+  @ApiOperation({
+    summary: 'Check whether a job can accept a new application',
+  })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOkResponse({ schema: availabilityEnvelope })
+  getAvailability(
+    @Param('id', JOB_ID_PIPE) jobId: string,
+  ): Promise<JobAvailabilityDto> {
+    return this.jobs.getAvailability(jobId);
   }
 
   @Public()
