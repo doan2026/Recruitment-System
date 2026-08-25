@@ -41,7 +41,7 @@ class PsycopgMatchRepository:
         job AS (
             SELECT vector, model_name
             FROM ai.job_embeddings
-            WHERE job_id = %s
+            WHERE job_id = %s AND is_active
         )
         SELECT
             EXISTS (SELECT 1 FROM cv) AS cv_exists,

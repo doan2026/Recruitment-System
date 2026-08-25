@@ -64,7 +64,7 @@ def test_migration_creates_versioned_private_vector_store(
         "cv_embeddings",
         "job_embeddings",
     }
-    assert migration_version == ("20260825_01",)
+    assert migration_version == ("20260826_02",)
     assert index_definition is not None
     assert "USING hnsw" in index_definition[0]
     assert "WHERE is_active" in index_definition[0]
@@ -134,6 +134,18 @@ def test_repository_returns_stable_missing_embedding_reason(
 
     assert result.score is None
     assert result.reason == expected_reason
+
+
+def test_repository_treats_inactive_job_embedding_as_missing(
+    database_url: str,
+) -> None:
+    _insert_cv(database_url)
+    _insert_job(database_url, is_active=False)
+
+    result = _repository(database_url).calculate(CV_ID, JOB_ID)
+
+    assert result.score is None
+    assert result.reason == "JOB_EMBEDDING_NOT_FOUND"
 
 
 def test_repository_rejects_embeddings_from_different_models(
@@ -238,15 +250,16 @@ def _insert_job(
     *,
     vector: str | None = None,
     model_name: str = MODEL_NAME,
+    is_active: bool = True,
 ) -> None:
     with psycopg.connect(database_url) as connection:
         connection.execute(
             """
             INSERT INTO ai.job_embeddings (
                 job_id, vector, text_hash, model_name, is_active
-            ) VALUES (%s, %s::vector, %s, %s, TRUE)
+            ) VALUES (%s, %s::vector, %s, %s, %s)
             """,
-            (JOB_ID, vector or _vector(1.0, 0.0), "b" * 64, model_name),
+            (JOB_ID, vector or _vector(1.0, 0.0), "b" * 64, model_name, is_active),
         )
 
 

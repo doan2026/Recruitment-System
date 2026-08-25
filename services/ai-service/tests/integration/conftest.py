@@ -29,4 +29,14 @@ def database_url() -> str:
 @pytest.fixture(autouse=True)
 def clean_embedding_tables(database_url: str) -> None:
     with psycopg.connect(database_url) as connection:
-        connection.execute("TRUNCATE ai.cv_embeddings, ai.job_embeddings")
+        connection.execute(
+            """
+            TRUNCATE
+                ai.embedding_dead_letters,
+                ai.embedding_event_ledger,
+                ai.embedding_aggregate_cursors,
+                ai.cv_embeddings,
+                ai.job_embeddings
+            RESTART IDENTITY
+            """
+        )

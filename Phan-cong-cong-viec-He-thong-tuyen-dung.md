@@ -96,9 +96,9 @@ Ba luồng có tổng điểm bằng nhau. Rủi ro lệch lớn nhất nằm �
                                               (Notification),   job_title, candidate_id, recruiter_id,
                                               Người 1           from_status, to_status, occurred_at }
                                               (Thống kê)
- Kafka job-events            Người 2          Người 2 (AI),     { event_id, action, job_id, company_id, title,
-                                              Người 1           description, skills[], location, occurred_at }
-                                              (Thống kê)
+ Kafka job-events            Người 2          Người 2 (AI),     key=job_id; value flat snake_case { event_id,
+                                              Người 1           action, job_id, company_id, title, description,
+                                              (Thống kê)        skills[], location, status, occurred_at }
  Kafka interview-events      Người 3          Người 3           { event_id, action, interview_id, application_id,
                                               (Notification)    candidate_id, recruiter_id, scheduled_at,
                                                                 room_url }
@@ -126,6 +126,8 @@ Ba hợp đồng phải chốt sớm nhất, theo thứ tự ưu tiên: (1) JWT 
 - Đặt tên endpoint theo REST resource số nhiều, chữ thường, phân cách bằng dấu gạch ngang.
 - Mọi mốc thời gian dùng ISO-8601 kèm múi giờ (UTC lưu trong database, quy đổi ở frontend).
 - Mọi event Kafka bắt buộc có event_id (UUID) và occurred_at để consumer chống xử lý trùng.
+- `job-events` dùng Kafka key `job_id` và payload flat snake_case; không dùng envelope camelCase.
+- Producer có xử lý song song phải phát `aggregate_version` tăng đơn điệu hoặc có outbox tương đương để consumer sắp thứ tự chắc chắn.
 - Consumer group đặt theo mẫu {service-name}-group.
 - Mỗi service tự có Swagger/OpenAPI; hai người còn lại chỉ đọc Swagger, không đọc code của nhau.
 - Repo dùng nhánh theo mẫu feature/{ten-service}/{ten-tinh-nang}; merge vào develop qua pull request.
@@ -870,11 +872,13 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 7. Nhận event DELETED → xoá vector tương ứng.
 8. Lỗi (file hỏng, không đọc được text) → retry 3 lần, sau đó ghi vào bảng dead-letter kèm lý do.
 #### Luồng 2: Cập nhật embedding Job
-1. Consumer lắng nghe topic job-events.
-2. Ghép nội dung có ý nghĩa so khớp: tiêu đề + mô tả + yêu cầu + danh sách kỹ năng.
-3. Sinh vector bằng cùng model để nằm chung không gian vector với CV.
-4. Upsert vào bảng JobEmbedding kèm metadata phục vụ lọc (location, salary_min, salary_max, job_type, status).
-5. Nhận CLOSED/EXPIRED → đánh dấu vector là không còn hoạt động (không xoá, để phục vụ phân tích sau).
+1. Consumer lắng nghe topic `job-events`, bắt buộc Kafka key trùng `job_id`.
+2. Với producer hiện tại, ghép tiêu đề + mô tả + danh sách kỹ năng; bổ sung yêu cầu khi producer phát trường này.
+3. Sinh vector 384 chiều bằng cùng model và revision bất biến để nằm chung không gian vector với CV.
+4. Upsert JobEmbedding cùng metadata được producer cung cấp; salary/job_type hiện để trống vì producer chưa phát.
+5. Chỉ `PUBLISHED` là active; `DRAFT/PENDING_APPROVAL/CLOSED/EXPIRED` đều deactivate vector và API match phải bỏ qua.
+6. Ledger chống trùng theo `event_id`; ưu tiên `aggregate_version`, fallback `occurred_at + partition + offset`.
+7. Event vĩnh viễn không hợp lệ vào DLQ hash-only; không lưu raw payload, key hoặc mô tả job.
 #### Luồng 3: Gợi ý việc làm phù hợp
 1. Job & Search Service gọi POST /ai/recommend/jobs?cv_id=... kèm bộ lọc tuỳ chọn (location, salary tối thiểu).
 2. Lấy vector của CV; nếu chưa có → trả về rỗng kèm mã lý do để bên gọi fallback.
@@ -895,9 +899,9 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 
 ### 2. Tài liệu nghiệp vụ
 ### 2.1. Quy tắc nghiệp vụ (business rules)
-- AI Service KHÔNG lưu trữ nội dung CV hay job gốc — chỉ lưu vector và metadata tối thiểu.
-- Dùng đúng một model embedding cho cả CV và Job; đổi model thì phải reindex toàn bộ.
-- Consumer Kafka phải idempotent theo event_id.
+- AI Service KHÔNG lưu trữ nội dung CV/job gốc trong vector store, event ledger hay dead-letter — chỉ lưu vector, hash, provenance và metadata tối thiểu.
+- Dùng đúng một model embedding cùng revision bất biến cho cả CV và Job; đổi model/revision thì phải reindex toàn bộ.
+- Consumer Kafka phải idempotent theo `event_id`, commit offset sau durable outcome và không để event cũ ghi đè state mới.
 - Chatbot chỉ trả lời trong phạm vi nghiệp vụ tuyển dụng; câu hỏi ngoài phạm vi thì lịch sự từ chối và hướng về chức năng của hệ thống.
 - Không đưa thông tin cá nhân của ứng viên khác vào prompt của chatbot.
 - Điểm phù hợp trả về là số thực 0–1, chuẩn hóa từ cosine bằng `(cosine_similarity + 1) / 2` (không clamp); khi hiển thị thì quy đổi ra phần trăm và làm tròn.
@@ -909,7 +913,9 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 - CvEmbedding(cv_id, user_id, vector vector(384), text_hash, model_name, updated_at)
 - JobEmbedding(job_id, vector vector(384), text_hash, model_name, location, salary_min, salary_max, job_type, is_active, updated_at)
 - ChatSession(session_id, user_id, history_json, updated_at) — lưu chính ở Redis, đồng bộ xuống Postgres nếu cần phân tích
-- DeadLetter(id, topic, event_id, payload, error, created_at)
+- EmbeddingEventLedger(event_id, topic, partition, offset, aggregate_id, version, payload_hash, state_hash, outcome, processed_at)
+- EmbeddingAggregateCursor(aggregate_type, aggregate_id, last_version/occurred_at/offset, state_hash, tombstoned)
+- DeadLetter(id, event_id nullable, topic, partition, offset, key_hash, payload_hash, error_code, safe_message, attempt_count, created_at) — tuyệt đối không lưu raw payload
 ### 2.3. API chính
 ```text
  Endpoint                            Mô tả                                         Quyền truy cập
@@ -917,12 +923,15 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
  POST /ai/recommend/jobs?cv_id=      Gợi ý top-N job phù hợp                       Nội bộ (Job Service)
  POST /ai/match                      Chấm điểm phù hợp giữa 1 CV và 1 job          Nội bộ (Application)
  POST /ai/embeddings/refresh         Tính lại embedding thủ công                   Admin / nội bộ
- GET /ai/health                      Kiểm tra model đã nạp xong chưa               Nội bộ
+ GET /ai/health                      Liveness của API process                     Nội bộ
+ GET /ai/ready                       Kiểm tra pgvector và schema                    Nội bộ
 ```
 
 
 ### 2.4. Sự kiện Kafka
 - CONSUME: cv-events (Người 1), job-events (Người 2).
+- Contract `job-events` hiện tại: key=`job_id`; value flat snake_case gồm `event_id, action, job_id, company_id, title, description, skills, location, status, occurred_at`.
+- Các trường `requirements/salary/job_type/schema_version/aggregate_version` là extension consumer đã hỗ trợ nhưng producer chưa phát.
 - Không produce event. Kết quả gợi ý được lấy qua REST khi cần.
 ### 2.5. Phụ thuộc giữa các service
 - Phụ thuộc: schema của cv-events (chốt với Người 1) và job-events (tự chốt).

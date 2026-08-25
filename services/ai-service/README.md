@@ -2,7 +2,9 @@
 
 FastAPI service for CV-to-job semantic matching. This vertical slice owns the
 pgvector schema and the internal `POST /match` provider used by Application
-Service. Kafka ingestion, recommendation and chatbot implementation remain
+Service. A dedicated non-root worker now consumes `job-events`, generates pinned
+384-dimensional CPU embeddings and persists only vectors, hashes and filtering
+metadata. CV ingestion, recommendation and chatbot implementation remain
 separate P11 tasks.
 
 ## Internal match API
@@ -53,7 +55,12 @@ Missing/invalid internal credentials return 401, invalid request bodies return
 
 ## Vector storage and migrations
 
-Alembic owns `ai.cv_embeddings`, `ai.job_embeddings` and its version table.
+Alembic owns `ai.cv_embeddings`, `ai.job_embeddings`, the terminal event ledger,
+aggregate cursor/tombstone state, sanitized dead-letter metadata and its version
+table. The ledger and DLQ store hashes and Kafka metadata, never raw payloads,
+CV text or job descriptions. Source event/version/timestamp provenance is kept
+with each embedding.
+
 Both vector columns are fixed at 384 dimensions. Job vectors have a partial
 HNSW cosine index for the future recommendation query. Only vectors, hashes,
 model identity and minimal filtering metadata are stored; original CV/job text
@@ -71,6 +78,51 @@ The container runs the same command before Uvicorn starts. PostgreSQL must use
 the pgvector image/extension and `DATABASE_URL` must be a normal libpq URL,
 without Prisma's unsupported `?schema=ai` query parameter.
 
+## Job embedding worker
+
+The current Job producer uses Kafka key `job_id` and a flat snake_case payload:
+
+```json
+{
+  "event_id": "11111111-1111-4111-8111-111111111111",
+  "action": "UPDATED",
+  "job_id": "22222222-2222-4222-8222-222222222222",
+  "company_id": "33333333-3333-4333-8333-333333333333",
+  "title": "Backend Engineer",
+  "description": "Build recruitment services",
+  "skills": ["NestJS", "Kafka"],
+  "location": "Ha Noi",
+  "status": "PUBLISHED",
+  "occurred_at": "2026-08-26T00:00:00Z"
+}
+```
+
+The consumer intentionally rejects the old camelCase envelope. It also accepts
+forward-compatible v1 fields `schema_version`, `aggregate_version`,
+`requirements`, `salary_min`, `salary_max` and `job_type`; the current
+producer does not emit those optional fields yet.
+
+Only `PUBLISHED` jobs are active and embedded. `DRAFT`,
+`PENDING_APPROVAL`, `CLOSED` and `EXPIRED` deactivate the stored vector,
+and `/match` ignores inactive jobs. Delivery is at-least-once: the worker
+disables automatic offset commit/store, commits synchronously only after a
+durable terminal outcome, checks per-partition commit errors and reconnects
+without advancing the offset on transient failures.
+
+An event ledger prevents duplicate inference by `event_id`. Aggregate cursors
+use `aggregate_version` when available, otherwise
+`occurred_at + partition + offset`; the current producer still needs a
+monotonic version/outbox enhancement for fully deterministic cross-worker
+ordering. Permanently invalid records are dead-lettered with hashes, Kafka
+position and a stable error code only. Raw keys, payloads and source text are
+never stored or logged.
+
+The worker image pins
+`sentence-transformers/all-MiniLM-L6-v2@1110a243fdf4706b3f48f1d95db1a4f5529b4d41`,
+warms it before joining the consumer group and stores Hugging Face caches in
+the `ai-model-cache` volume. The API image remains lightweight and never loads
+the model during `/match`.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and set at least:
@@ -79,21 +131,31 @@ Copy `.env.example` to `.env` and set at least:
 - `INTERNAL_API_KEY` — exactly the same secret as Application Service
 - `DATABASE_CONNECT_TIMEOUT_SECONDS` (default 2)
 - `DATABASE_STATEMENT_TIMEOUT_MS` (default 2000)
+- `KAFKA_BROKERS`, `KAFKA_JOB_TOPIC`, consumer group and client ID
+- `KAFKA_MAX_ATTEMPTS` plus poll/retry/reconnect timing
+- `EMBEDDING_MODEL_NAME`
+- `EMBEDDING_MODEL_REVISION` — immutable model commit SHA
+- `EMBEDDING_MODEL_CACHE` (default `/models`)
+- `EMBEDDING_MODEL_LOCAL_FILES_ONLY`
+- `EMBEDDING_DIMENSION` — must remain 384
 
-The process fails at startup if `DATABASE_URL` or `INTERNAL_API_KEY` is empty.
-Define `INTERNAL_API_KEY` once in the repository root `.env`; the Application,
-Job and AI service environment files reference that same value so callers and
-the provider cannot silently drift to different credentials.
+The API fails at startup if `DATABASE_URL` or `INTERNAL_API_KEY` is empty. The
+worker independently validates its database, Kafka, retry and pinned-model
+configuration before loading the model or consuming events. Define
+`INTERNAL_API_KEY` once in the repository root `.env`; the Application, Job and
+AI service environment files reference that same value so callers and the
+provider cannot silently drift to different credentials.
 
 `GET /health` is a process liveness probe. `GET /ready` also verifies the
 pgvector extension and both embedding tables, and returns 503 while storage is
 unavailable. Docker Compose uses `/ready` for the AI Service health check.
 
-The runtime image installs only `requirements.txt`. Heavy model providers live
-in `requirements-ml.txt` and are intentionally deferred until the Kafka
-embedding consumers or real chatbot are implemented; the on-demand `/match`
-path does not need GPU/CUDA packages. The runtime process uses a non-root user
-and applies Alembic migrations before starting Uvicorn.
+The API `runtime` image installs only `requirements.txt`. The dedicated
+`worker` image installs the CPU-only dependencies in `requirements-ml.txt`;
+chatbot-only dependencies remain separate in `requirements-chat.txt`. Neither
+image requires CUDA. Both run as non-root users. The API applies Alembic
+migrations before starting Uvicorn, and the root Compose worker waits for API
+readiness before starting ingestion.
 
 ## Tests
 
@@ -107,14 +169,20 @@ docker compose -f compose.test.yml up \
 docker compose -f compose.test.yml down -v
 ```
 
-The PostgreSQL suite verifies repeatable migration-at-head behavior, schema
-privacy, vector dimensions, missing/model-mismatch results, cosine boundary
-mapping and the HTTP contract against the real repository. The current suite
-contains 37 unit tests and 12 PostgreSQL integration tests (49 total).
+The full suite verifies migration-at-head behavior, privacy, vector dimensions,
+inactive/missing/model-mismatch results, cosine boundaries, event ordering,
+idempotency, retry/DLQ behavior and the HTTP contract. A real Kafka broker test
+covers publish → consume → pgvector, duplicate delivery, hash-only malformed
+DLQ and committed offsets. The current suite contains 159 unit tests and 29
+PostgreSQL/Kafka integration tests (188 total). The production worker image also
+successfully generated a normalized 384-dimensional vector with the pinned
+model revision.
 
 ## Current boundary
 
 `/match` intentionally reads precomputed vectors and never loads the embedding
-model in a request. Until the idempotent `cv-events` and `job-events` consumers
-are implemented, production requests normally return a not-ready reason unless
-vectors have been seeded by an approved ingestion process.
+model in a request. Job embeddings are now populated automatically from
+`job-events`. CV ingestion remains pending because Profile Service does not yet
+provide the canonical CV event/file contract, so end-to-end matching still
+normally returns a missing-CV reason. Recommendation and chatbot APIs are also
+outside this task.
