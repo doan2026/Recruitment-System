@@ -24,8 +24,8 @@ contract test before implementation.
 
 ### `job-events` v1
 
-The Kafka key is the canonical `job_id` UUID. Job & Search currently publishes
-this flat snake_case value:
+The Kafka key is the canonical `job_id` UUID. Job & Search publishes this exact
+16-field flat snake_case value:
 
 ```json
 {
@@ -38,20 +38,36 @@ this flat snake_case value:
   "skills": ["string"],
   "location": "string",
   "status": "DRAFT | PENDING_APPROVAL | PUBLISHED | CLOSED | EXPIRED",
-  "occurred_at": "ISO-8601 timestamp with timezone"
+  "occurred_at": "ISO-8601 timestamp with timezone",
+  "schema_version": 1,
+  "aggregate_version": 1,
+  "requirements": "string",
+  "salary_min": "fixed two-decimal string | null",
+  "salary_max": "fixed two-decimal string | null",
+  "job_type": "FULL_TIME | PART_TIME | REMOTE | INTERNSHIP"
 }
 ```
 
-The AI consumer rejects the obsolete camelCase envelope. It accepts optional v1
-extensions `schema_version`, `aggregate_version`, `requirements`,
-`salary_min`, `salary_max` and `job_type`, but the Job producer does not
-emit them yet. In particular, deterministic ordering across concurrent producer
-workers still requires a monotonic `aggregate_version` and durable outbox on
-the producer side.
+The AI consumer rejects the obsolete camelCase envelope and unknown fields.
+Salary strings map to `NUMERIC(15,2)` in both the Job source of truth and the AI
+filtering projection.
+
+The Job mutation and immutable outbox event are one PostgreSQL transaction.
+Publication is independent from BullMQ/Elasticsearch, and Admin reindex only
+rebuilds Elasticsearch. Delivery is at-least-once: `event_id` is stable for
+deduplication and the positive monotonic `aggregate_version` orders each Job.
+The publisher prevents a later version from overtaking an unpublished earlier
+version, renews its database lease during Kafka I/O, bounds each Kafka request
+and retry sequence, then defers failures with capped exponential backoff.
+
+Rollout precondition: the outbox migration intentionally does not auto-backfill
+historical events. A populated database needs a reviewed baseline/replay before
+the producer is enabled. Automated cleanup/retention for published outbox rows
+is not implemented yet.
 
 | Topic | Producer | Consumer | Contract status |
 | --- | --- | --- | --- |
-| `job-events` | Job & Search | AI, Admin | Flat snake_case v1 locked for AI |
+| `job-events` | Job & Search | AI, Admin | Exact 16-field snake_case v1; transactional outbox |
 | `cv-events` | Profile | AI | Pending |
 | `application-events` | Application | Notification, Admin | Topic-specific contract; verify before new consumers |
 | `interview-events` | Interview | Notification | Pending |

@@ -96,9 +96,12 @@ Ba luồng có tổng điểm bằng nhau. Rủi ro lệch lớn nhất nằm �
                                               (Notification),   job_title, candidate_id, recruiter_id,
                                               Người 1           from_status, to_status, occurred_at }
                                               (Thống kê)
- Kafka job-events            Người 2          Người 2 (AI),     key=job_id; value flat snake_case { event_id,
-                                              Người 1           action, job_id, company_id, title, description,
-                                              (Thống kê)        skills[], location, status, occurred_at }
+ Kafka job-events            Người 2          Người 2 (AI),     key=job_id; schema v1, value flat snake_case gồm
+                                              Người 1           đúng 16 trường { event_id, action, job_id,
+                                              (Thống kê)        company_id, title, description, skills, location,
+                                                                 status, occurred_at, schema_version,
+                                                                 aggregate_version, requirements, salary_min,
+                                                                 salary_max, job_type }
  Kafka interview-events      Người 3          Người 3           { event_id, action, interview_id, application_id,
                                               (Notification)    candidate_id, recruiter_id, scheduled_at,
                                                                 room_url }
@@ -127,7 +130,7 @@ Ba hợp đồng phải chốt sớm nhất, theo thứ tự ưu tiên: (1) JWT 
 - Mọi mốc thời gian dùng ISO-8601 kèm múi giờ (UTC lưu trong database, quy đổi ở frontend).
 - Mọi event Kafka bắt buộc có event_id (UUID) và occurred_at để consumer chống xử lý trùng.
 - `job-events` dùng Kafka key `job_id` và payload flat snake_case; không dùng envelope camelCase.
-- Producer có xử lý song song phải phát `aggregate_version` tăng đơn điệu hoặc có outbox tương đương để consumer sắp thứ tự chắc chắn.
+- Job producer dùng `aggregate_version` tăng đơn điệu và compare-and-set (CAS); bản ghi Job và event outbox phải cùng commit hoặc cùng rollback trong một transaction PostgreSQL.
 - Consumer group đặt theo mẫu {service-name}-group.
 - Mỗi service tự có Swagger/OpenAPI; hai người còn lại chỉ đọc Swagger, không đọc code của nhau.
 - Repo dùng nhánh theo mẫu feature/{ten-service}/{ten-tinh-nang}; merge vào develop qua pull request.
@@ -627,8 +630,9 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 3. Lưu nháp: trạng thái DRAFT, chưa hiển thị công khai, không index Elasticsearch.
 4. Recruiter bấm "Đăng tin" → trạng thái chuyển PENDING_APPROVAL, gửi vào hàng chờ duyệt của Admin.
 5. Admin duyệt → trạng thái PUBLISHED.
-6. Đẩy job vào hàng đợi nội bộ (BullMQ) để index lên Elasticsearch.
-7. Publish sự kiện lên topic Kafka job-events để AI Service tính embedding.
+6. Trong cùng transaction PostgreSQL, ghi thay đổi Job và một bản ghi JobEventOutbox; lỗi ở bất kỳ bước nào thì cùng rollback.
+7. Sau khi commit, đẩy job vào hàng đợi nội bộ BullMQ để index lên Elasticsearch; luồng này độc lập với publisher Kafka.
+8. Publisher lấy event từ outbox và publish lên topic Kafka job-events để AI Service tính embedding.
 #### Luồng 2: Vòng đời trạng thái tin tuyển dụng
 1. DRAFT: đang soạn, chỉ recruiter thấy.
 2. PENDING_APPROVAL: chờ Admin duyệt.
@@ -645,13 +649,13 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 6. Nếu Elasticsearch không phản hồi → fallback truy vấn LIKE trên Postgres (kết quả kém hơn nhưng không chết trang tìm kiếm).
 #### Luồng 4: Đồng bộ dữ liệu sang Elasticsearch
 1. Mọi thay đổi job LUÔN ghi vào PostgreSQL trước (nguồn sự thật).
-2. Sau khi commit, đẩy một job vào hàng đợi BullMQ (index/update/delete).
+2. Sau khi commit, đẩy một job vào hàng đợi BullMQ (index/update/delete); hàng đợi chỉ phục vụ Elasticsearch, không chịu trách nhiệm phát domain event.
 3. Worker lấy từ hàng đợi và ghi vào Elasticsearch; lỗi thì retry với backoff.
 
 <!-- Page 20 -->
 
 4. Không index đồng bộ trong cùng transaction — tránh trường hợp ES chậm/chết làm hỏng nghiệp vụ ghi job.
-5. Có lệnh reindex toàn bộ để dựng lại chỉ mục từ Postgres khi cần.
+5. Có lệnh reindex toàn bộ để dựng lại chỉ mục từ Postgres khi cần; reindex chỉ ghi Elasticsearch và không phát `job-events`.
 #### Luồng 5: Gợi ý "Việc làm phù hợp với bạn"
 1. Ứng viên mở trang chủ hoặc trang gợi ý.
 2. Job & Search Service gọi AI Service: POST /ai/recommend/jobs?cv_id={cv mặc định của ứng viên}.
@@ -669,9 +673,12 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 - Tin EXPIRED và CLOSED không nhận đơn ứng tuyển mới (Application Service kiểm tra trước khi cho nộp).
 - Elasticsearch chỉ chứa tin PUBLISHED.
 - PostgreSQL là nguồn sự thật duy nhất; Elasticsearch có thể dựng lại bất cứ lúc nào từ Postgres.
+- Mỗi mutation dùng CAS trên `aggregate_version`; chỉ mutation thắng mới tăng version và tạo đúng một outbox event có cùng version.
+- `event_id` được tạo một lần khi ghi outbox và giữ nguyên qua mọi lần retry, vì delivery Kafka là at-least-once.
 - Số lượng kết quả trả về mỗi trang tối đa 50.
 ### 2.2. Mô hình dữ liệu
-- Job(id, company_id, created_by, title, description, requirements, benefits, salary_min, salary_max, is_negotiable, currency, location, job_type, experience_years, quantity, skills[], deadline, status, published_at, created_at, updated_at)
+- Job(id, company_id, created_by, title, description, requirements, benefits, salary_min, salary_max, is_negotiable, currency, location, job_type, experience_years, quantity, skills[], deadline, status, aggregate_version, published_at, created_at, updated_at)
+- JobEventOutbox(event_id, job_id, aggregate_version, topic, event_key, action, payload, attempts, next_attempt_at, lease_owner, lease_expires_at, published_at, last_error, created_at) — unique(job_id, aggregate_version), payload bất biến.
 - JobView(id, job_id, user_id, viewed_at) — phục vụ thống kê lượt xem
 - Chỉ mục Elasticsearch: job_index(job_id, title, description, skills, location, salary_min, salary_max, job_type, company_name, published_at)
 ### 2.3. API chính
@@ -701,7 +708,8 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 
 ### 2.4. Sự kiện Kafka
 - PRODUCE topic job-events khi tin được tạo/sửa/đóng/hết hạn.
-- Payload gợi ý: { event_id, action: CREATED|UPDATED|CLOSED|EXPIRED, job_id, company_id, title, description, skills[], location, occurred_at }.
+- Contract v1: Kafka key=`job_id`; value flat snake_case gồm đúng 16 trường `{ event_id, action, job_id, company_id, title, description, skills, location, status, occurred_at, schema_version, aggregate_version, requirements, salary_min, salary_max, job_type }`. `schema_version=1`; action thuộc `CREATED|UPDATED|CLOSED|EXPIRED`; salary là chuỗi thập phân hai chữ số hoặc `null`.
+- Mutation Job và bản ghi outbox nằm trong cùng transaction PostgreSQL. Publisher claim theo lease có heartbeat, giữ thứ tự tăng của `aggregate_version` trên từng job và retry Kafka có backoff/cận trên; cùng một `event_id` được gửi lại nên consumer phải idempotent. Delivery là at-least-once.
 - Consumer: AI Service (chính Người 2) và Admin & Statistics Service (Người 1).
 ### 2.5. Phụ thuộc giữa các service
 - Phụ thuộc: Company Service (kiểm tra VERIFIED), Admin Service (duyệt tin), AI Service (gợi ý).
@@ -710,7 +718,12 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 - Tạo tin → duyệt → tìm thấy được trên trang tìm kiếm.
 - Bộ lọc và sắp xếp hoạt động đúng trên Elasticsearch.
 - Scheduler chuyển tin hết hạn chạy đúng.
-- job-events publish được và Người 1 nhận được để thống kê.
+- job-events publish được, giữ đúng key/version/contract và Người 1 nhận được để thống kê.
+
+### 2.7. Khoảng trống rollout/vận hành còn lại
+- Database đã có dữ liệu phải dùng baseline/replay được review trước khi bật publisher; migration không tự backfill hoặc tự phát lại event lịch sử.
+- Chính sách dọn bản ghi outbox đã publish (retention/cleanup) chưa triển khai.
+- Kiểm thử tích hợp đầy đủ Redis/BullMQ và Elasticsearch cho luồng index/reindex vẫn còn thiếu; hai hệ này độc lập với tính nguyên tử Job + outbox.
 
 <!-- Page 22 -->
 
@@ -873,9 +886,9 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 8. Lỗi (file hỏng, không đọc được text) → retry 3 lần, sau đó ghi vào bảng dead-letter kèm lý do.
 #### Luồng 2: Cập nhật embedding Job
 1. Consumer lắng nghe topic `job-events`, bắt buộc Kafka key trùng `job_id`.
-2. Với producer hiện tại, ghép tiêu đề + mô tả + danh sách kỹ năng; bổ sung yêu cầu khi producer phát trường này.
+2. Ghép tiêu đề + mô tả + yêu cầu + danh sách kỹ năng từ contract v1 để tạo nội dung embedding.
 3. Sinh vector 384 chiều bằng cùng model và revision bất biến để nằm chung không gian vector với CV.
-4. Upsert JobEmbedding cùng metadata được producer cung cấp; salary/job_type hiện để trống vì producer chưa phát.
+4. Upsert JobEmbedding cùng metadata `location`, `salary_min`, `salary_max`, `job_type`; hai cột salary dùng `NUMERIC(15,2)` để khớp miền giá trị của Job producer.
 5. Chỉ `PUBLISHED` là active; `DRAFT/PENDING_APPROVAL/CLOSED/EXPIRED` đều deactivate vector và API match phải bỏ qua.
 6. Ledger chống trùng theo `event_id`; ưu tiên `aggregate_version`, fallback `occurred_at + partition + offset`.
 7. Event vĩnh viễn không hợp lệ vào DLQ hash-only; không lưu raw payload, key hoặc mô tả job.
@@ -911,7 +924,7 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 - API key của Claude chỉ nằm trong biến môi trường của service này.
 ### 2.2. Mô hình dữ liệu
 - CvEmbedding(cv_id, user_id, vector vector(384), text_hash, model_name, updated_at)
-- JobEmbedding(job_id, vector vector(384), text_hash, model_name, location, salary_min, salary_max, job_type, is_active, updated_at)
+- JobEmbedding(job_id, vector vector(384), text_hash, model_name, location, salary_min NUMERIC(15,2), salary_max NUMERIC(15,2), job_type, is_active, updated_at)
 - ChatSession(session_id, user_id, history_json, updated_at) — lưu chính ở Redis, đồng bộ xuống Postgres nếu cần phân tích
 - EmbeddingEventLedger(event_id, topic, partition, offset, aggregate_id, version, payload_hash, state_hash, outcome, processed_at)
 - EmbeddingAggregateCursor(aggregate_type, aggregate_id, last_version/occurred_at/offset, state_hash, tombstoned)
@@ -930,8 +943,8 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 
 ### 2.4. Sự kiện Kafka
 - CONSUME: cv-events (Người 1), job-events (Người 2).
-- Contract `job-events` hiện tại: key=`job_id`; value flat snake_case gồm `event_id, action, job_id, company_id, title, description, skills, location, status, occurred_at`.
-- Các trường `requirements/salary/job_type/schema_version/aggregate_version` là extension consumer đã hỗ trợ nhưng producer chưa phát.
+- Contract `job-events` v1: key=`job_id`; value flat snake_case gồm đúng 16 trường `event_id, action, job_id, company_id, title, description, skills, location, status, occurred_at, schema_version, aggregate_version, requirements, salary_min, salary_max, job_type`.
+- Consumer xử lý at-least-once theo `event_id` và từ chối state cũ dựa trên `aggregate_version`; salary nhận chuỗi thập phân hai chữ số hoặc `null` rồi lưu bằng `NUMERIC(15,2)`.
 - Không produce event. Kết quả gợi ý được lấy qua REST khi cần.
 ### 2.5. Phụ thuộc giữa các service
 - Phụ thuộc: schema của cv-events (chốt với Người 1) và job-events (tự chốt).

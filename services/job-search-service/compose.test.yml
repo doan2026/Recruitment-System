@@ -1,0 +1,58 @@
+name: recruitment-job-search-service-test
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: job_test
+      POSTGRES_USER: job_test
+      POSTGRES_PASSWORD: job_test_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U job_test -d job_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  kafka-test:
+    image: apache/kafka:3.8.0
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-test:29093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:29093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-test:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  job-tests:
+    build:
+      context: .
+      target: test
+    environment:
+      DATABASE_URL: postgresql://job_test:job_test_password@postgres-test:5432/job_test?schema=job
+      JOB_INTEGRATION_TEST: "1"
+      KAFKA_BROKERS: kafka-test:9092
+      KAFKA_JOB_TOPIC: job-events
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      kafka-test:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -c
+      - npx prisma migrate deploy && npm run test:integration

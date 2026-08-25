@@ -66,7 +66,8 @@ HNSW cosine index for the future recommendation query. Only vectors, hashes,
 model identity and minimal filtering metadata are stored; original CV/job text
 is intentionally absent. A CV nearest-neighbor index is intentionally deferred
 until the recommend-candidates query and its filtering/load profile are
-implemented.
+implemented. Job salary filtering columns use `NUMERIC(15,2)`, matching the Job
+source of truth.
 
 Run migrations from this directory:
 
@@ -80,7 +81,8 @@ without Prisma's unsupported `?schema=ai` query parameter.
 
 ## Job embedding worker
 
-The current Job producer uses Kafka key `job_id` and a flat snake_case payload:
+The Job producer uses Kafka key `job_id` and the exact 16-field flat snake_case
+`job-events` v1 payload:
 
 ```json
 {
@@ -93,14 +95,19 @@ The current Job producer uses Kafka key `job_id` and a flat snake_case payload:
   "skills": ["NestJS", "Kafka"],
   "location": "Ha Noi",
   "status": "PUBLISHED",
-  "occurred_at": "2026-08-26T00:00:00Z"
+  "occurred_at": "2026-08-26T00:00:00.000Z",
+  "schema_version": 1,
+  "aggregate_version": 42,
+  "requirements": "Three years of backend experience",
+  "salary_min": "30000000.00",
+  "salary_max": "50000000.00",
+  "job_type": "FULL_TIME"
 }
 ```
 
-The consumer intentionally rejects the old camelCase envelope. It also accepts
-forward-compatible v1 fields `schema_version`, `aggregate_version`,
-`requirements`, `salary_min`, `salary_max` and `job_type`; the current
-producer does not emit those optional fields yet.
+The consumer intentionally rejects the old camelCase envelope and any unknown
+field. The producer now emits all 16 fields; salary bounds are fixed two-decimal
+strings or null and fit the shared `NUMERIC(15,2)` range.
 
 Only `PUBLISHED` jobs are active and embedded. `DRAFT`,
 `PENDING_APPROVAL`, `CLOSED` and `EXPIRED` deactivate the stored vector,
@@ -109,13 +116,20 @@ disables automatic offset commit/store, commits synchronously only after a
 durable terminal outcome, checks per-partition commit errors and reconnects
 without advancing the offset on transient failures.
 
-An event ledger prevents duplicate inference by `event_id`. Aggregate cursors
-use `aggregate_version` when available, otherwise
-`occurred_at + partition + offset`; the current producer still needs a
-monotonic version/outbox enhancement for fully deterministic cross-worker
-ordering. Permanently invalid records are dead-lettered with hashes, Kafka
-position and a stable error code only. Raw keys, payloads and source text are
-never stored or logged.
+An event ledger prevents duplicate inference by `event_id`. The producer writes
+the event and monotonic `aggregate_version` in the same PostgreSQL transaction,
+then publishes from a leased outbox independently of BullMQ/Elasticsearch. The
+producer renews its lease during Kafka I/O, uses finite Kafka request/retry
+bounds, and retains failed rows for later backoff retries. The consumer's
+aggregate cursor orders by `aggregate_version`; its legacy timestamp/partition/
+offset fallback remains only for older records. Permanently invalid records are
+dead-lettered with hashes, Kafka position and a stable error code only. Raw
+keys, payloads and source text are never stored or logged.
+
+The producer migration intentionally does not backfill historical outbox
+events. A populated environment needs a reviewed baseline/replay before the new
+producer is enabled. The Job service also does not yet automate retention
+cleanup for published outbox rows.
 
 The worker image pins
 `sentence-transformers/all-MiniLM-L6-v2@1110a243fdf4706b3f48f1d95db1a4f5529b4d41`,

@@ -33,10 +33,16 @@ CURRENT_JOB_EVENT: dict[str, object] = {
     "location": "Ha Noi",
     "status": "PUBLISHED",
     "occurred_at": "2026-08-24T00:00:00.000Z",
+    "schema_version": 1,
+    "aggregate_version": 42,
+    "requirements": "NestJS, PostgreSQL and Kafka",
+    "salary_min": "9999999999998.45",
+    "salary_max": "9999999999999.45",
+    "job_type": "FULL_TIME",
 }
 
 
-def test_parses_exact_current_job_producer_fixture() -> None:
+def test_parses_exact_v1_job_producer_fixture() -> None:
     event = parse_job_event(
         json.dumps(CURRENT_JOB_EVENT).encode(),
         message_key=JOB_ID.encode(),
@@ -53,26 +59,27 @@ def test_parses_exact_current_job_producer_fixture() -> None:
     assert event.status is JobStatus.PUBLISHED
     assert event.occurred_at == datetime(2026, 8, 24, tzinfo=UTC)
     assert event.schema_version == 1
-    assert event.aggregate_version is None
-    assert event.requirements is None
-    assert event.salary_min is None
-    assert event.salary_max is None
-    assert event.job_type is None
+    assert event.aggregate_version == 42
+    assert event.requirements == "NestJS, PostgreSQL and Kafka"
+    assert event.salary_min == Decimal("9999999999998.45")
+    assert event.salary_max == Decimal("9999999999999.45")
+    assert event.job_type is JobType.FULL_TIME
     assert event.is_active is True
 
     document = build_job_embedding_document(event)
     assert document.text == (
         "title: Backend Engineer\n"
         "description: Build recruitment services\n"
+        "requirements: NestJS, PostgreSQL and Kafka\n"
         "skills: nestjs"
     )
     assert document.text_hash == (
-        "443081eff105dedaa75e43975f6fb6da7d814a51fff0029df04b68cdb471040f"
+        "da77f5ea91f7e15bee71d7852316f331deee97e2dc6c17f5d56ade32402e5f95"
     )
     assert not hasattr(event, "raw_payload")
 
 
-def test_accepts_and_types_optional_v1_fields() -> None:
+def test_accepts_typed_v1_fields_and_legacy_omissions() -> None:
     payload = current_event(
         schema_version=1,
         aggregate_version=0,
@@ -104,6 +111,26 @@ def test_accepts_and_types_optional_v1_fields() -> None:
         "requirements: APIs and queues\n"
         "skills: nestjs, python, sql"
     )
+
+    legacy_fields = (
+        "schema_version",
+        "aggregate_version",
+        "requirements",
+        "salary_min",
+        "salary_max",
+        "job_type",
+    )
+    legacy_payload = current_event()
+    for field in legacy_fields:
+        legacy_payload.pop(field)
+    legacy = parse_current(legacy_payload)
+
+    assert legacy.schema_version == 1
+    assert legacy.aggregate_version is None
+    assert legacy.requirements is None
+    assert legacy.salary_min is None
+    assert legacy.salary_max is None
+    assert legacy.job_type is None
 
 
 def test_normalization_produces_stable_text_and_hash() -> None:
@@ -253,7 +280,7 @@ def test_rejects_invalid_aggregate_version(aggregate_version: object) -> None:
         ("salary_max", float("inf")),
         ("salary_max", True),
         ("salary_max", "not-money"),
-        ("salary_max", "1000000000000.00"),
+        ("salary_max", "10000000000000.00"),
         ("salary_max", "1.001"),
     ],
 )

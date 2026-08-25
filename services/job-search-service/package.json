@@ -11,7 +11,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "pretest": "prisma generate",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "test:integration": "JOB_INTEGRATION_TEST=1 jest --runInBand --testPathPattern=job-outbox.integration.spec.ts"
   },
   "dependencies": {
     "@elastic/elasticsearch": "^8.15.0",

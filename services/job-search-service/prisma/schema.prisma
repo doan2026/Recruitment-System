@@ -22,34 +22,67 @@ enum JobType {
   INTERNSHIP
 }
 
+enum JobEventAction {
+  CREATED
+  UPDATED
+  CLOSED
+  EXPIRED
+}
+
 model Job {
-  id              String    @id @default(uuid()) @db.Uuid
-  companyId       String    @map("company_id") @db.Uuid
-  createdBy       String    @map("created_by") @db.Uuid
-  title           String    @db.VarChar(200)
-  description     String    @db.Text
-  requirements    String    @db.Text
-  benefits        String    @db.Text
-  salaryMin       Decimal?  @map("salary_min") @db.Decimal(15, 2)
-  salaryMax       Decimal?  @map("salary_max") @db.Decimal(15, 2)
-  isNegotiable    Boolean   @default(false) @map("is_negotiable")
-  currency        String    @default("VND") @db.Char(3)
-  location        String    @db.VarChar(255)
-  jobType         JobType   @map("job_type")
-  experienceYears Int       @map("experience_years")
-  quantity        Int
-  skills          String[]
-  deadline        DateTime  @db.Date
-  status          JobStatus @default(DRAFT)
-  publishedAt     DateTime? @map("published_at") @db.Timestamptz(3)
-  rejectionReason String?   @map("rejection_reason") @db.VarChar(1000)
-  reviewedBy      String?   @map("reviewed_by") @db.Uuid
-  reviewedAt      DateTime? @map("reviewed_at") @db.Timestamptz(3)
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id               String           @id @default(uuid()) @db.Uuid
+  companyId        String           @map("company_id") @db.Uuid
+  createdBy        String           @map("created_by") @db.Uuid
+  title            String           @db.VarChar(200)
+  description      String           @db.Text
+  requirements     String           @db.Text
+  benefits         String           @db.Text
+  salaryMin        Decimal?         @map("salary_min") @db.Decimal(15, 2)
+  salaryMax        Decimal?         @map("salary_max") @db.Decimal(15, 2)
+  isNegotiable     Boolean          @default(false) @map("is_negotiable")
+  currency         String           @default("VND") @db.Char(3)
+  location         String           @db.VarChar(255)
+  jobType          JobType          @map("job_type")
+  experienceYears  Int              @map("experience_years")
+  quantity         Int
+  skills           String[]
+  deadline         DateTime         @db.Date
+  status           JobStatus        @default(DRAFT)
+  aggregateVersion Int              @default(1) @map("aggregate_version")
+  publishedAt      DateTime?        @map("published_at") @db.Timestamptz(3)
+  rejectionReason  String?          @map("rejection_reason") @db.VarChar(1000)
+  reviewedBy       String?          @map("reviewed_by") @db.Uuid
+  reviewedAt       DateTime?        @map("reviewed_at") @db.Timestamptz(3)
+  createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+  eventOutbox      JobEventOutbox[]
 
   @@index([companyId, status])
   @@index([createdBy, status])
   @@index([status, deadline])
   @@map("jobs")
+}
+
+/// The migration enforces immutable event identity/payload and partial dispatch
+/// indexes that Prisma 5 cannot express.
+model JobEventOutbox {
+  id               String         @id @default(uuid()) @map("event_id") @db.Uuid
+  jobId            String         @map("job_id") @db.Uuid
+  aggregateVersion Int            @map("aggregate_version")
+  action           JobEventAction
+  topic            String         @default("job-events") @db.VarChar(100)
+  eventKey         String         @map("event_key") @db.Uuid
+  payload          Json           @db.JsonB
+  attempts         Int            @default(0)
+  nextAttemptAt    DateTime       @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
+  leaseOwner       String?        @map("lease_owner") @db.VarChar(200)
+  leaseExpiresAt   DateTime?      @map("lease_expires_at") @db.Timestamptz(3)
+  publishedAt      DateTime?      @map("published_at") @db.Timestamptz(3)
+  lastError        String?        @map("last_error") @db.VarChar(2000)
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  job              Job            @relation(fields: [jobId], references: [id], onDelete: Restrict)
+
+  @@unique([jobId, aggregateVersion])
+  @@index([leaseExpiresAt], map: "job_event_outbox_lease_expires_at_idx")
+  @@map("job_event_outbox")
 }

@@ -1,15 +1,13 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import { Job, JobStatus, Prisma } from '@prisma/client';
+import { Job, JobEventAction, JobStatus, Prisma } from '@prisma/client';
 import { ApiException } from './common';
 import {
   CompanyClientService,
   RecruiterCompany,
 } from './company-client.service';
 import { CreateJobDto, JobDto, UpdateJobDto } from './job.dto';
-import {
-  JobEventAction,
-  JobIndexingService,
-} from './job-indexing.service';
+import { JobEventPublisherService } from './job-event-publisher.service';
+import { JobIndexingService } from './job-indexing.service';
 import {
   JobAvailabilityDto,
   JobAvailabilityReason,
@@ -17,12 +15,20 @@ import {
 import { ActiveJobStatsDto } from './job-stats.dto';
 import { PrismaService } from './prisma.service';
 
+interface CommittedJobChange {
+  job: Job;
+  eventId: string;
+}
+
+const JOB_EXPIRY_BATCH_SIZE = 100;
+
 @Injectable()
 export class JobService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly companies: CompanyClientService,
     private readonly indexing: JobIndexingService,
+    private readonly events: JobEventPublisherService,
   ) {}
 
   async create(
@@ -43,15 +49,18 @@ export class JobService {
       );
     }
     const data = this.validateAndMap(dto);
-    const job = await this.prisma.job.create({
-      data: {
-        ...data,
-        companyId: company.companyId,
-        createdBy: recruiterId,
-        status: JobStatus.DRAFT,
-      },
-    });
-    void this.indexing.schedule(job, 'CREATED');
+    const job = await this.commitChange(
+      JobEventAction.CREATED,
+      (transaction) => transaction.job.create({
+        data: {
+          ...data,
+          companyId: company.companyId,
+          createdBy: recruiterId,
+          status: JobStatus.DRAFT,
+          aggregateVersion: 1,
+        },
+      }),
+    );
     return this.toDto(job);
   }
 
@@ -213,7 +222,7 @@ export class JobService {
       deadline:
         dto.deadline ?? current.deadline.toISOString().slice(0, 10),
     };
-    const data: Prisma.JobUpdateInput = this.validateAndMap(merged);
+    const data: Prisma.JobUpdateManyMutationInput = this.validateAndMap(merged);
     const criticalChanged = [
       'title',
       'description',
@@ -233,11 +242,29 @@ export class JobService {
       data.reviewedAt = null;
     }
 
-    const updated = await this.prisma.job.update({
-      where: { id: jobId },
-      data,
-    });
-    void this.indexing.schedule(updated, 'UPDATED');
+    const updated = await this.commitChange(
+      JobEventAction.UPDATED,
+      async (transaction) => {
+        const result = await transaction.job.updateMany({
+          where: {
+            id: jobId,
+            aggregateVersion: current.aggregateVersion,
+          },
+          data: {
+            ...data,
+            aggregateVersion: { increment: 1 },
+          },
+        });
+        if (result.count !== 1) {
+          throw new ApiException(
+            'JOB_STATE_CHANGED',
+            'Job changed during this request; please retry',
+            HttpStatus.CONFLICT,
+          );
+        }
+        return this.requireJob(jobId, transaction);
+      },
+    );
     return this.toDto(updated);
   }
 
@@ -266,6 +293,7 @@ export class JobService {
     return this.transition(
       jobId,
       JobStatus.DRAFT,
+      job.aggregateVersion,
       {
         status: JobStatus.PENDING_APPROVAL,
         publishedAt: null,
@@ -273,7 +301,7 @@ export class JobService {
         reviewedBy: null,
         reviewedAt: null,
       },
-      'UPDATED',
+      JobEventAction.UPDATED,
     );
   }
 
@@ -293,8 +321,9 @@ export class JobService {
     return this.transition(
       jobId,
       JobStatus.PUBLISHED,
+      job.aggregateVersion,
       { status: JobStatus.CLOSED },
-      'CLOSED',
+      JobEventAction.CLOSED,
     );
   }
 
@@ -307,6 +336,7 @@ export class JobService {
     return this.transition(
       jobId,
       JobStatus.PENDING_APPROVAL,
+      job.aggregateVersion,
       {
         status: JobStatus.PUBLISHED,
         publishedAt: now,
@@ -314,7 +344,7 @@ export class JobService {
         reviewedBy: adminId,
         reviewedAt: now,
       },
-      'UPDATED',
+      JobEventAction.UPDATED,
     );
   }
 
@@ -337,6 +367,7 @@ export class JobService {
     return this.transition(
       jobId,
       JobStatus.PENDING_APPROVAL,
+      job.aggregateVersion,
       {
         status: JobStatus.DRAFT,
         publishedAt: null,
@@ -344,40 +375,73 @@ export class JobService {
         reviewedBy: adminId,
         reviewedAt: new Date(),
       },
-      'UPDATED',
+      JobEventAction.UPDATED,
     );
   }
 
   async expirePublishedJobs(now = new Date()): Promise<number> {
     const today = new Date(now);
     today.setUTCHours(0, 0, 0, 0);
-    const candidates = await this.prisma.job.findMany({
-      where: {
-        status: JobStatus.PUBLISHED,
-        deadline: { lt: today },
-      },
-    });
-    if (!candidates.length) return 0;
-    const ids = candidates.map(({ id }) => id);
-    const result = await this.prisma.job.updateMany({
-      where: {
-        id: { in: ids },
-        status: JobStatus.PUBLISHED,
-        deadline: { lt: today },
-      },
-      data: { status: JobStatus.EXPIRED },
-    });
-    for (const job of candidates) {
-      void this.indexing.schedule(
-        { ...job, status: JobStatus.EXPIRED },
-        'EXPIRED',
-      );
+    let expired = 0;
+    let cursor: string | undefined;
+
+    while (true) {
+      const candidates = await this.prisma.job.findMany({
+        where: {
+          status: JobStatus.PUBLISHED,
+          deadline: { lt: today },
+        },
+        orderBy: { id: 'asc' },
+        take: JOB_EXPIRY_BATCH_SIZE,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      if (!candidates.length) break;
+      cursor = candidates.at(-1)?.id;
+
+      for (const candidate of candidates) {
+        const change = await this.prisma.$transaction(
+          async (transaction): Promise<CommittedJobChange | null> => {
+            const result = await transaction.job.updateMany({
+              where: {
+                id: candidate.id,
+                status: JobStatus.PUBLISHED,
+                deadline: { lt: today },
+                aggregateVersion: candidate.aggregateVersion,
+              },
+              data: {
+                status: JobStatus.EXPIRED,
+                aggregateVersion: { increment: 1 },
+              },
+            });
+            if (result.count !== 1) return null;
+            const job = await this.requireJob(
+              candidate.id,
+              transaction,
+            );
+            const eventId = await this.events.append(
+              transaction,
+              job,
+              JobEventAction.EXPIRED,
+            );
+            return { job, eventId };
+          },
+        );
+        if (!change) continue;
+        expired += 1;
+        this.afterCommit([change]);
+      }
+
+      if (candidates.length < JOB_EXPIRY_BATCH_SIZE) break;
     }
-    return result.count;
+
+    return expired;
   }
 
-  private async requireJob(jobId: string): Promise<Job> {
-    const job = await this.prisma.job.findUnique({ where: { id: jobId } });
+  private async requireJob(
+    jobId: string,
+    database: Pick<Prisma.TransactionClient, 'job'> = this.prisma,
+  ): Promise<Job> {
+    const job = await database.job.findUnique({ where: { id: jobId } });
     if (!job) {
       throw new ApiException(
         'JOB_NOT_FOUND',
@@ -418,23 +482,61 @@ export class JobService {
   private async transition(
     jobId: string,
     expectedStatus: JobStatus,
+    expectedVersion: number,
     data: Prisma.JobUpdateManyMutationInput,
     eventAction: JobEventAction,
   ): Promise<JobDto> {
-    const result = await this.prisma.job.updateMany({
-      where: { id: jobId, status: expectedStatus },
-      data,
-    });
-    if (result.count !== 1) {
-      throw new ApiException(
-        'JOB_STATE_CHANGED',
-        'Job status changed during this request; please retry',
-        HttpStatus.CONFLICT,
-      );
-    }
-    const job = await this.requireJob(jobId);
-    void this.indexing.schedule(job, eventAction);
+    const job = await this.commitChange(
+      eventAction,
+      async (transaction) => {
+        const result = await transaction.job.updateMany({
+          where: {
+            id: jobId,
+            status: expectedStatus,
+            aggregateVersion: expectedVersion,
+          },
+          data: {
+            ...data,
+            aggregateVersion: { increment: 1 },
+          },
+        });
+        if (result.count !== 1) {
+          throw new ApiException(
+            'JOB_STATE_CHANGED',
+            'Job changed during this request; please retry',
+            HttpStatus.CONFLICT,
+          );
+        }
+        return this.requireJob(jobId, transaction);
+      },
+    );
     return this.toDto(job);
+  }
+
+  private async commitChange(
+    action: JobEventAction,
+    mutation: (transaction: Prisma.TransactionClient) => Promise<Job>,
+  ): Promise<Job> {
+    const change = await this.prisma.$transaction(
+      async (transaction): Promise<CommittedJobChange> => {
+        const job = await mutation(transaction);
+        const eventId = await this.events.append(
+          transaction,
+          job,
+          action,
+        );
+        return { job, eventId };
+      },
+    );
+    this.afterCommit([change]);
+    return change.job;
+  }
+
+  private afterCommit(changes: CommittedJobChange[]): void {
+    for (const { job } of changes) {
+      void this.indexing.schedule(job.id);
+    }
+    if (changes.length) this.events.wake();
   }
 
   private requireManagePermission(
@@ -525,11 +627,27 @@ export class JobService {
 
   private toDto(job: Job): JobDto {
     return {
-      ...job,
+      id: job.id,
+      companyId: job.companyId,
+      createdBy: job.createdBy,
+      title: job.title,
+      description: job.description,
+      requirements: job.requirements,
+      benefits: job.benefits,
       salaryMin: job.salaryMin?.toString() ?? null,
       salaryMax: job.salaryMax?.toString() ?? null,
+      isNegotiable: job.isNegotiable,
+      currency: job.currency,
+      location: job.location,
+      jobType: job.jobType,
+      experienceYears: job.experienceYears,
+      quantity: job.quantity,
+      skills: job.skills,
       deadline: job.deadline.toISOString().slice(0, 10),
+      status: job.status,
       publishedAt: job.publishedAt?.toISOString() ?? null,
+      rejectionReason: job.rejectionReason,
+      reviewedBy: job.reviewedBy,
       reviewedAt: job.reviewedAt?.toISOString() ?? null,
       createdAt: job.createdAt.toISOString(),
       updatedAt: job.updatedAt.toISOString(),

@@ -7,28 +7,13 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Client } from '@elastic/elasticsearch';
-import { Job, JobStatus } from '@prisma/client';
+import { JobStatus } from '@prisma/client';
 import { Job as QueueJob, Queue, Worker } from 'bullmq';
-import { randomUUID } from 'crypto';
-import { Kafka, Producer } from 'kafkajs';
 import { CompanyClientService } from './company-client.service';
 import { PrismaService } from './prisma.service';
 
-export type JobEventAction = 'CREATED' | 'UPDATED' | 'CLOSED' | 'EXPIRED';
-
 interface JobIndexTask {
-  eventId: string;
-  action: JobEventAction;
   jobId: string;
-  occurredAt: string;
-  event: {
-    companyId: string;
-    title: string;
-    description: string;
-    skills: string[];
-    location: string;
-    status: JobStatus;
-  };
 }
 
 const QUEUE_NAME = 'job-search-indexing';
@@ -38,7 +23,6 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(JobIndexingService.name);
   private readonly elastic: Client;
   private readonly index: string;
-  private readonly topic: string;
   private readonly connection: {
     host: string;
     port: number;
@@ -48,9 +32,7 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
     tls?: Record<string, never>;
   };
   private readonly queue: Queue<JobIndexTask>;
-  private readonly producer: Producer;
   private worker?: Worker<JobIndexTask>;
-  private producerConnection?: Promise<void>;
   private indexReady?: Promise<void>;
 
   constructor(
@@ -62,7 +44,6 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
     if (!redisUrl) throw new Error('REDIS_URL is required');
     this.connection = this.redisConnection(redisUrl);
     this.index = config.get<string>('ELASTICSEARCH_INDEX') ?? 'job_index';
-    this.topic = config.get<string>('KAFKA_JOB_TOPIC') ?? 'job-events';
     const configuredTimeout = Number(
       config.get<string>('ELASTICSEARCH_REQUEST_TIMEOUT_MS') ?? '5000',
     );
@@ -87,19 +68,6 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
     this.queue.on('error', (error) =>
       this.logger.error(`BullMQ queue error: ${error.message}`),
     );
-
-    const brokers = (config.get<string>('KAFKA_BROKERS') ?? 'kafka:9092')
-      .split(',')
-      .map((broker) => broker.trim())
-      .filter(Boolean);
-    this.producer = new Kafka({
-      clientId: 'job-search-service',
-      brokers,
-    }).producer({
-      allowAutoTopicCreation: false,
-      idempotent: true,
-      maxInFlightRequests: 1,
-    });
   }
 
   onModuleInit(): void {
@@ -125,19 +93,16 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
   async onModuleDestroy(): Promise<void> {
     await this.worker?.close();
     await this.queue.close();
-    if (this.producerConnection) {
-      await this.producer.disconnect().catch(() => undefined);
-    }
     await this.elastic.close();
   }
 
-  async schedule(job: Job, action: JobEventAction): Promise<void> {
+  async schedule(jobId: string): Promise<void> {
     try {
-      await this.addTask(job, action);
+      await this.queue.add('sync-job', { jobId });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(
-        `Job ${job.id} committed but indexing could not be queued: ${message}`,
+        `Job ${jobId} committed but indexing could not be queued: ${message}`,
       );
     }
   }
@@ -156,7 +121,7 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
       await this.queue.addBulk(
         jobs.map((job) => ({
           name: 'sync-job',
-          data: this.task(job, 'UPDATED'),
+          data: { jobId: job.id },
         })),
       );
       queued += jobs.length;
@@ -165,38 +130,14 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
     return queued;
   }
 
-  private async addTask(
-    job: Job,
-    action: JobEventAction,
-  ): Promise<void> {
-    await this.queue.add('sync-job', this.task(job, action));
-  }
-
-  private task(job: Job, action: JobEventAction): JobIndexTask {
-    return {
-      eventId: randomUUID(),
-      action,
-      jobId: job.id,
-      occurredAt: new Date().toISOString(),
-      event: {
-        companyId: job.companyId,
-        title: job.title,
-        description: job.description,
-        skills: job.skills,
-        location: job.location,
-        status: job.status,
-      },
-    };
-  }
 
   private async process(queueJob: QueueJob<JobIndexTask>): Promise<void> {
-    const task = queueJob.data;
+    const { jobId } = queueJob.data;
     const job = await this.prisma.job.findUnique({
-      where: { id: task.jobId },
+      where: { id: jobId },
     });
     if (!job) {
-      await this.deleteFromIndex(task.jobId);
-      await this.publishEvent(task);
+      await this.deleteFromIndex(jobId);
       return;
     }
 
@@ -236,7 +177,6 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
       await this.deleteFromIndex(job.id);
     }
 
-    await this.publishEvent(task);
   }
 
   private async deleteFromIndex(jobId: string): Promise<void> {
@@ -250,40 +190,6 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async publishEvent(task: JobIndexTask): Promise<void> {
-    await this.ensureProducer();
-    await this.producer.send({
-      topic: this.topic,
-      messages: [{
-        key: task.jobId,
-        value: JSON.stringify({
-          event_id: task.eventId,
-          action: task.action,
-          job_id: task.jobId,
-          company_id: task.event.companyId,
-          title: task.event.title,
-          description: task.event.description,
-          skills: task.event.skills,
-          location: task.event.location,
-          status: task.event.status,
-          occurred_at: task.occurredAt,
-        }),
-      }],
-    });
-  }
-
-  private async ensureProducer(): Promise<void> {
-    if (!this.producerConnection) {
-      const attempt = this.producer.connect();
-      this.producerConnection = attempt;
-      void attempt.catch(() => {
-        if (this.producerConnection === attempt) {
-          this.producerConnection = undefined;
-        }
-      });
-    }
-    await this.producerConnection;
-  }
 
   private async ensureIndex(): Promise<void> {
     if (!this.indexReady) {
