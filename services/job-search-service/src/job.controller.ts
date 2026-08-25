@@ -19,6 +19,7 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger';
@@ -37,6 +38,7 @@ import {
   RejectJobDto,
   UpdateJobDto,
 } from './job.dto';
+import { ActiveJobStatsDto } from './job-stats.dto';
 import { JobAvailabilityDto } from './job-availability.dto';
 import {
   JobSearchItemDto,
@@ -53,6 +55,15 @@ const JOB_ID_PIPE = new ParseUUIDPipe({
     new ApiException(
       'INVALID_JOB_ID',
       'job id must be a UUID v4',
+      HttpStatus.BAD_REQUEST,
+    ),
+});
+const COMPANY_ID_PIPE = new ParseUUIDPipe({
+  version: '4',
+  exceptionFactory: () =>
+    new ApiException(
+      'INVALID_COMPANY_ID',
+      'company_id must be a UUID v4',
       HttpStatus.BAD_REQUEST,
     ),
 });
@@ -79,11 +90,19 @@ const availabilityEnvelope = {
     meta: { type: 'object', nullable: true },
   },
 };
+const activeJobStatsEnvelope = {
+  type: 'object',
+  properties: {
+    data: { $ref: getSchemaPath(ActiveJobStatsDto) },
+    meta: { type: 'object', nullable: true },
+  },
+};
 
 @ApiTags('jobs')
 @ApiExtraModels(
   JobDto,
   JobAvailabilityDto,
+  ActiveJobStatsDto,
   JobSearchItemDto,
   JobSearchResultDto,
 )
@@ -153,6 +172,26 @@ export class JobController {
   @ApiOperation({ summary: 'Queue every PUBLISHED job for reindexing' })
   reindex(): Promise<{ queued: number }> {
     return this.indexing.reindexAll().then((queued) => ({ queued }));
+  }
+
+  @Internal()
+  @Get('stats/active')
+  @ApiHeader({
+    name: 'X-Internal-Api-Key',
+    required: true,
+    description: 'Shared service-to-service secret',
+  })
+  @ApiOperation({ summary: 'Count active published jobs for a company' })
+  @ApiQuery({
+    name: 'company_id',
+    required: true,
+    schema: { type: 'string', format: 'uuid' },
+  })
+  @ApiOkResponse({ schema: activeJobStatsEnvelope })
+  getActiveJobStats(
+    @Query('company_id', COMPANY_ID_PIPE) companyId: string,
+  ): Promise<ActiveJobStatsDto> {
+    return this.jobs.getActiveJobStats(companyId);
   }
 
   @Internal()

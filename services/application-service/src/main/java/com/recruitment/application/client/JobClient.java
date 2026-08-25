@@ -8,6 +8,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -33,21 +36,75 @@ public class JobClient {
                 .retrieve()
                 .body(new ParameterizedTypeReference<>() {});
             if (response == null || response.data() == null) {
-                throw unavailable();
+                throw availabilityUnavailable();
             }
             return response.data();
         } catch (BusinessException exception) {
             throw exception;
         } catch (RestClientException exception) {
-            throw unavailable();
+            throw availabilityUnavailable();
         }
     }
 
-    private BusinessException unavailable() {
+    public ActiveJobStats getActiveJobStats(UUID companyId) {
+        try {
+            ApiResponse<ActiveJobStats> response = restClient.get()
+                .uri(uriBuilder -> uriBuilder
+                    .path("/stats/active")
+                    .queryParam("company_id", companyId)
+                    .build())
+                .header("X-Internal-Api-Key", internalApiKey)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+            ActiveJobStats stats = response == null
+                ? null
+                : response.data();
+            if (
+                stats == null ||
+                !companyId.equals(stats.companyId()) ||
+                stats.activeJobCount() == null ||
+                stats.activeJobCount() < 0
+            ) {
+                throw activeStatsInvalidResponse();
+            }
+            return stats;
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (
+            HttpServerErrorException | ResourceAccessException exception
+        ) {
+            throw activeStatsUnavailable();
+        } catch (HttpClientErrorException exception) {
+            if (exception.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS) {
+                throw activeStatsUnavailable();
+            }
+            throw activeStatsInvalidResponse();
+        } catch (RestClientException exception) {
+            throw activeStatsInvalidResponse();
+        }
+    }
+
+    private BusinessException availabilityUnavailable() {
         return new BusinessException(
             "JOB_SERVICE_UNAVAILABLE",
             "Cannot verify whether the job accepts applications",
             HttpStatus.SERVICE_UNAVAILABLE
+        );
+    }
+
+    private BusinessException activeStatsUnavailable() {
+        return new BusinessException(
+            "JOB_SERVICE_UNAVAILABLE",
+            "Cannot load active job statistics",
+            HttpStatus.SERVICE_UNAVAILABLE
+        );
+    }
+
+    private BusinessException activeStatsInvalidResponse() {
+        return new BusinessException(
+            "JOB_SERVICE_INVALID_RESPONSE",
+            "Job Service returned an invalid active job statistics response",
+            HttpStatus.BAD_GATEWAY
         );
     }
 
@@ -63,4 +120,7 @@ public class JobClient {
         String status,
         String deadline
     ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record ActiveJobStats(UUID companyId, Long activeJobCount) {}
 }
