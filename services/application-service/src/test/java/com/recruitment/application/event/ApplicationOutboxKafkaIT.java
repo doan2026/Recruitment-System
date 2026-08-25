@@ -8,6 +8,8 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.recruitment.application.client.CompanyClient;
+import com.recruitment.application.client.CompanyMemberRole;
+import com.recruitment.application.client.RecruiterCompanyMembership;
 import com.recruitment.application.domain.ApplicationEntity;
 import com.recruitment.application.domain.ApplicationSource;
 import com.recruitment.application.domain.ApplicationStatus;
@@ -138,10 +140,13 @@ class ApplicationOutboxKafkaIT {
             CASCADE
             """
         );
-        when(companies.getRecruiterCompanyId(
+        when(companies.getRecruiterMembership(
             any(UUID.class),
             anyString()
-        )).thenReturn(COMPANY_ID);
+        )).thenReturn(new RecruiterCompanyMembership(
+            COMPANY_ID,
+            CompanyMemberRole.MEMBER
+        ));
         createTopic();
     }
 

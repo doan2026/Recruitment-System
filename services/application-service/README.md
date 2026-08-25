@@ -17,6 +17,15 @@ application tracking, and the recruiter application pipeline. Nginx strips the
 | `GET /actuator/health` | Direct health check | Public |
 | `GET /docs` | `GET /applications/docs` | Public |
 
+Recruiter access is scoped by Company Service membership. The
+`GET /by-user/{userId}` contract must return both `companyId` and
+`memberRole`. Both `MEMBER` and `OWNER` can list, view, and transition
+applications for every job in their company, including jobs created by another
+recruiter. A recruiter from another company is denied. This company-wide
+Application Pipeline policy does not change Job Service ownership rules:
+`MEMBER` can still edit or delete only jobs they created, while `OWNER` can
+manage every job.
+
 Submission performs these checks in order:
 
 1. Verify the Job through `GET /jobs/:id/exists` using
@@ -56,5 +65,6 @@ mvn verify -Pintegration-test
 ```
 
 The integration profile verifies Flyway/JPA against PostgreSQL, transactional
-pipeline updates, outbox delivery to a real Kafka consumer, and that an outbox
-row already marked as published is not sent again.
+pipeline updates, MEMBER/OWNER company-wide access and cross-company denial,
+outbox delivery to a real Kafka consumer, and that an outbox row already marked
+as published is not sent again.

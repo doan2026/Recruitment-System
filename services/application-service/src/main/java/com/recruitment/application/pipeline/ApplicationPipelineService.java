@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.recruitment.application.api.BusinessException;
 import com.recruitment.application.client.CompanyClient;
+import com.recruitment.application.client.RecruiterCompanyMembership;
 import com.recruitment.application.domain.ApplicationEntity;
 import com.recruitment.application.domain.ApplicationEventOutboxEntity;
 import com.recruitment.application.domain.ApplicationStatus;
@@ -90,10 +91,7 @@ public class ApplicationPipelineService {
         int size
     ) {
         validatePageAndRange(page, size, appliedFrom, appliedTo);
-        UUID companyId = companies.getRecruiterCompanyId(
-            recruiterId,
-            authorization
-        );
+        UUID companyId = authorizedCompanyId(recruiterId, authorization);
         Page<ApplicationEntity> result = applications.findAll(
             ApplicationSpecifications.recruiterFilter(
                 companyId,
@@ -276,13 +274,25 @@ public class ApplicationPipelineService {
         UUID recruiterId,
         String authorization
     ) {
-        UUID companyId = companies.getRecruiterCompanyId(
-            recruiterId,
-            authorization
-        );
+        UUID companyId = authorizedCompanyId(recruiterId, authorization);
         if (!application.getCompanyId().equals(companyId)) {
             throw denied();
         }
+    }
+
+    private UUID authorizedCompanyId(
+        UUID recruiterId,
+        String authorization
+    ) {
+        RecruiterCompanyMembership membership =
+            companies.getRecruiterMembership(
+                recruiterId,
+                authorization
+            );
+        if (!membership.canManageAllCompanyApplications()) {
+            throw denied();
+        }
+        return membership.companyId();
     }
 
     private void ensureVersion(ApplicationEntity application, long expected) {
