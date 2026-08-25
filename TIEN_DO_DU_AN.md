@@ -89,7 +89,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** recruiter tạo/sửa tin nháp; gửi duyệt; Admin duyệt/từ chối; đóng/hết hạn tin; tìm kiếm và lọc; đồng bộ Elasticsearch; phát `job-events`; lấy gợi ý từ AI.
 - **Chức năng chính:** Job CRUD, state machine `DRAFT → PENDING_APPROVAL → PUBLISHED/REJECTED → CLOSED/EXPIRED`, tìm kiếm full-text và filter, reindex, PostgreSQL fallback, endpoint kiểm tra job còn nhận hồ sơ.
 - **Phụ thuộc:** Auth, Company, Admin, Elasticsearch, Redis, Kafka và AI.
-- **Trạng thái:** CRUD, publishing, search, indexing/event và availability đã merge; recommendation từ AI chưa có.
+- **Trạng thái:** CRUD, publishing, search, indexing/event và availability đã merge; endpoint thống kê job active đã hoàn thành trên nhánh Dashboard hiện tại; recommendation từ AI chưa có.
 
 ## T07 — Application Service
 
@@ -98,7 +98,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** nộp đơn; Bookmark; Candidate theo dõi timeline; HR lọc và quản lý hồ sơ; state machine; đánh giá nội bộ; gửi/phản hồi Offer; thống kê recruiter.
 - **Chức năng chính:** Application, ApplicationHistory, Evaluation, Offer, Bookmark; optimistic locking; phân quyền theo Candidate/công ty; phát `application-events`.
 - **Phụ thuộc:** Auth, Profile, Job, Company, AI, File/Media và Notification qua Kafka.
-- **Trạng thái:** submission, Bookmark, tracking, pipeline, quyền MEMBER/OWNER và Evaluation đã merge; Offer hoàn thành, verify trên nhánh hiện tại nhưng chưa merge; recruiter stats chưa làm.
+- **Trạng thái:** submission, Bookmark, tracking, pipeline, Evaluation và Offer đã merge; Recruiter Dashboard hoàn thành/verify trên nhánh hiện tại; AI Match và filter kỹ năng chưa làm.
 
 ## T08 — AI Service
 
@@ -158,7 +158,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Mục tiêu:** chứng minh các luồng xuyên service chạy thật, ổn định và có thể triển khai.
 - **Công nghệ/công cụ:** unit/integration/E2E test, Docker Compose, CI/CD, Swagger/OpenAPI, logging/metrics/tracing.
 - **Đầu ra:** test contract REST/Kafka; migration sạch; test concurrency/idempotency; security test; smoke test; tài liệu môi trường; backup/restore; monitoring.
-- **Trạng thái:** đã có unit test tập trung ở Company, Job/Search và Application; Application Service hiện đạt 100 unit test và 23 integration test với PostgreSQL 16/Apache Kafka qua Testcontainers; chưa có E2E toàn hệ thống.
+- **Trạng thái:** đã có unit test tập trung ở Company, Job/Search và Application; Application Service hiện đạt 126 unit test và 29 integration test với PostgreSQL 16/Apache Kafka qua Testcontainers; chưa có E2E toàn hệ thống.
 
 ---
 
@@ -281,7 +281,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Evaluation là dữ liệu nội bộ: API Candidate, chi tiết đơn và timeline không trả dữ liệu đánh giá.
 - Full verify đạt 67/67 unit test và 14/14 integration test; `BUILD SUCCESS` với PostgreSQL/Kafka qua Testcontainers.
 
-## 2.6 Application Offer — hoàn thành trên nhánh hiện tại (chưa merge)
+## 2.6 Application Offer — đã merge vào `develop`
 
 - Flyway V4 tạo bảng `offers`, unique một Offer/Application, khóa ngoại cascade, check constraint dữ liệu/phản hồi và partial index cho Offer `SENT` chờ hết hạn.
 - `POST /applications/:id/offer` dành cho MEMBER/OWNER cùng công ty, chỉ nhận Application `INTERVIEW`; `PATCH /offers/:id/respond` chỉ dành cho đúng Candidate.
@@ -293,7 +293,17 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - File reference đã được kiểm tra cấu trúc; xác minh canonical metadata và ownership nội bộ còn phụ thuộc contract File/Media ở P09.
 - Full verify đạt 100/100 unit test và 23/23 integration test; PostgreSQL/Flyway/JPA, authorization, expiry, rollback và concurrent response đều đạt.
 
-## 2.7 Hạ tầng nền đã có
+## 2.7 Application Recruiter Dashboard — hoàn thành trên nhánh hiện tại (chưa merge)
+
+- `GET /applications/stats?company_id=` dành cho MEMBER/OWNER đúng công ty; từ chối khác công ty trước khi đọc Application DB hoặc gọi Job Service.
+- Cohort lọc theo `applied_at` trong khoảng `[from,to)` tối đa 366 ngày; mặc định 30 ngày lịch địa phương gồm hôm nay.
+- Tổng hợp current status/source/per-job, conversion funnel từ các stage từng đạt và time series zero-fill theo `DAY/WEEK/MONTH`.
+- Timezone phải là IANA zone được cả Java và PostgreSQL hỗ trợ; đã kiểm tra ranh giới tuần/tháng và ngày DST 23 giờ.
+- Job Service có endpoint nội bộ `GET /stats/active?company_id=` đếm trực tiếp job `PUBLISHED` còn hạn; timeout/5xx/429 fallback có warning, còn lỗi 4xx/contract trả 502.
+- Flyway V5 bổ sung index `applications(company_id, applied_at)` và `application_history(application_id, to_status)`.
+- Application Service full verify đạt 126/126 unit test và 29/29 integration test; Job Service đạt 16/16 test và build thành công.
+
+## 2.8 Hạ tầng nền đã có
 
 - Monorepo tách 11 service, frontend, Dockerfile và `.env.example`.
 - Docker Compose định nghĩa API Gateway, PostgreSQL/pgvector, MongoDB, Redis, Kafka KRaft, Elasticsearch, 11 backend service và frontend.
@@ -328,7 +338,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## P03 — Application Offer
 
-> Đã hoàn thành và verify trên nhánh `feature/application-service/application-offer`; chưa merge vào `develop`.
+> Đã hoàn thành, verify và merge vào `develop` theo xác nhận của người dùng.
 
 - [x] Tạo bảng `Offer` và trạng thái `SENT/ACCEPTED/DECLINED`.
 - [x] Implement `POST /applications/:id/offer`, chỉ cho phép từ `INTERVIEW`.
@@ -341,12 +351,14 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## P04 — Application Recruiter Dashboard và AI Match
 
-- [ ] Implement `GET /applications/stats?company_id=`.
-- [ ] Tổng hợp số đơn theo job/status, tỷ lệ chuyển đổi, biểu đồ thời gian và nguồn Candidate.
-- [ ] Tích hợp Job Service để lấy tổng số tin đang tuyển.
+> Phần Recruiter Dashboard đã hoàn thành và verify trên nhánh `feature/application-service/recruiter-dashboard`; AI Match và filter kỹ năng được tách sang task/nhánh tiếp theo.
+
+- [x] Implement `GET /applications/stats?company_id=`.
+- [x] Tổng hợp số đơn theo job/status, tỷ lệ chuyển đổi, biểu đồ thời gian và nguồn Candidate.
+- [x] Tích hợp Job Service để lấy tổng số tin đang tuyển.
 - [ ] Gọi AI `/ai/match` khi cần và lưu/cập nhật `match_score`.
 - [ ] Bổ sung filter theo kỹ năng sau khi Profile/AI contract sẵn sàng.
-- [ ] Test dữ liệu rỗng, timezone, range lớn và quyền theo công ty.
+- [x] Test dữ liệu rỗng, range thiếu/sai/quá 366 ngày, quyền công ty, timezone PostgreSQL, `DAY/WEEK/MONTH` và DST.
 
 ## P05 — Hoàn thiện Job & Search
 
@@ -493,7 +505,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 1. Hoàn thiện Auth và Profile vì đang chặn xác thực/nộp đơn end-to-end.
 2. Hoàn thiện File/Media để mở khóa CV, logo, attachment và Offer letter.
-3. Làm Application Recruiter Dashboard và AI Match.
+3. Làm tiếp Application AI Match, cập nhật `match_score` và filter kỹ năng sau khi chốt Profile/AI contract.
 4. Làm AI embedding/recommendation rồi nối Job/Application.
 5. Làm Interview, Notification và Chat theo hợp đồng event đã chốt.
 6. Hoàn thiện Admin, Frontend, Jitsi và kiểm thử end-to-end.
@@ -507,6 +519,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Pipeline, Kafka và hợp đồng quyền MEMBER/OWNER đã được kiểm chứng; Application Pipeline dùng quyền toàn công ty, còn quyền sửa/xóa Job vẫn do Job Service kiểm soát.
 - Application Evaluation đã được kiểm chứng với JSONB trên PostgreSQL thật, gồm quyền công ty, validation, chống đánh giá trùng và Candidate privacy; P02 đã merge vào `develop` theo xác nhận của người dùng.
 - Application Offer đã verify đạt 100 unit test và 23 integration test. Event không lộ salary/note/file, nhưng xác minh canonical file metadata và ownership vẫn chờ API nội bộ của File/Media ở P09.
+- Recruiter Dashboard đã verify đạt 126 unit test và 29 integration test, gồm PostgreSQL timezone/DST và Kafka regression; AI Match/filter kỹ năng vẫn phụ thuộc contract Profile/AI.
 - Pipeline chung vẫn cho phép Application ở `OFFER` chuyển thẳng sang `REJECTED` hoặc `WITHDRAWN`; khi đó bản ghi Offer có thể còn `SENT` dù phản hồi tiếp theo đã bị chặn. Cần chốt quy tắc đồng bộ/hủy Offer trong task lifecycle tiếp theo.
 - Docker daemon và Testcontainers đã hoạt động; Docker Compose toàn hệ thống vẫn chưa được kiểm chứng và hiện thiếu file môi trường runtime của một số service.
 - Nginx đã có route độc lập `/offers/`; route `/bookmarks` và exact path không có dấu `/` cuối vẫn còn pending.

@@ -14,6 +14,7 @@ import {
   JobAvailabilityDto,
   JobAvailabilityReason,
 } from './job-availability.dto';
+import { ActiveJobStatsDto } from './job-stats.dto';
 import { PrismaService } from './prisma.service';
 
 @Injectable()
@@ -132,6 +133,22 @@ export class JobService {
       deadline: job.deadline.toISOString().slice(0, 10),
     };
   }
+  async getActiveJobStats(
+    companyId: string,
+    now = new Date(),
+  ): Promise<ActiveJobStatsDto> {
+    const today = new Date(now);
+    today.setUTCHours(0, 0, 0, 0);
+    const activeJobCount = await this.prisma.job.count({
+      where: {
+        companyId,
+        status: JobStatus.PUBLISHED,
+        deadline: { gte: today },
+      },
+    });
+    return { companyId, activeJobCount };
+  }
+
 
   async listPending(): Promise<JobDto[]> {
     const jobs = await this.prisma.job.findMany({

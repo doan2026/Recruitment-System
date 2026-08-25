@@ -12,6 +12,7 @@ Nginx strips the `/jobs` gateway prefix before forwarding requests.
 | `GET /pending` | `GET /jobs/pending` | ADMIN |
 | `GET /search` | `GET /jobs/search` | Public |
 | `POST /reindex` | `POST /jobs/reindex` | ADMIN |
+| `GET /stats/active?company_id=` | `GET /jobs/stats/active?company_id=` | Internal |
 | `GET /:id/exists` | `GET /jobs/:id/exists` | Internal |
 | `GET /:id` | `GET /jobs/:id` | Public, PUBLISHED only |
 | `PUT /:id` | `PUT /jobs/:id` | OWNER or creating MEMBER |
@@ -73,6 +74,13 @@ application. It must send `X-Internal-Api-Key` matching `INTERNAL_API_KEY`.
 The response distinguishes a missing job, a non-published job, and a passed
 deadline, and includes `companyId`, `recruiterId`, and `jobTitle` when the
 job exists.
+
+Application Service reads the Recruiter Dashboard active-job total from
+`GET /stats/active?company_id=<uuid>` using the same internal API key. The
+count comes directly from PostgreSQL and includes only the company's
+`PUBLISHED` jobs whose deadline is today or later in UTC, so it does not depend
+on eventual Elasticsearch indexing.
+
 
 ```bash
 npm install

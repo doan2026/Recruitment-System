@@ -197,7 +197,7 @@ class ApplicationPipelinePostgresIT {
             String.class
         );
 
-        assertThat(appliedVersions).containsExactly("1", "2", "3", "4");
+        assertThat(appliedVersions).containsExactly("1", "2", "3", "4", "5");
         assertThat(tables).contains(
             "applications",
             "application_history",

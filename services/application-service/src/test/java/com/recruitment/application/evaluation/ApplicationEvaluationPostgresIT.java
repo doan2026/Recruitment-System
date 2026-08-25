@@ -176,7 +176,7 @@ class ApplicationEvaluationPostgresIT {
             String.class
         );
 
-        assertThat(appliedVersions).containsExactly("1", "2", "3", "4");
+        assertThat(appliedVersions).containsExactly("1", "2", "3", "4", "5");
         assertThat(criteriaType).isEqualTo("jsonb");
         assertThat(tables).contains("evaluations", "offers");
     }

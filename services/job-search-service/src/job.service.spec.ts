@@ -44,6 +44,7 @@ describe('JobService publishing lifecycle', () => {
   let service: JobService;
   let findUnique: jest.Mock;
   let findMany: jest.Mock;
+  let count: jest.Mock;
   let updateMany: jest.Mock;
   let getRecruiterCompany: jest.Mock;
   let schedule: jest.Mock;
@@ -51,6 +52,7 @@ describe('JobService publishing lifecycle', () => {
   beforeEach(() => {
     findUnique = jest.fn();
     findMany = jest.fn();
+    count = jest.fn();
     updateMany = jest.fn().mockResolvedValue({ count: 1 });
     schedule = jest.fn().mockResolvedValue(undefined);
     getRecruiterCompany = jest.fn().mockResolvedValue({
@@ -59,7 +61,7 @@ describe('JobService publishing lifecycle', () => {
       verifiedStatus: 'VERIFIED',
     });
     const prisma = {
-      job: { findUnique, findMany, updateMany },
+      job: { findUnique, findMany, count, updateMany },
     } as unknown as PrismaService;
     const companies = {
       getRecruiterCompany,
@@ -123,6 +125,28 @@ describe('JobService publishing lifecycle', () => {
       reason: null,
       companyId: COMPANY_ID,
       recruiterId: RECRUITER_ID,
+    });
+  });
+
+  it('counts only current PUBLISHED jobs for the requested company', async () => {
+    count.mockResolvedValue(4);
+    const now = new Date('2026-08-24T15:30:00.000Z');
+
+    await expect(
+      service.getActiveJobStats(
+        COMPANY_ID,
+        now,
+      ),
+    ).resolves.toEqual({
+      companyId: COMPANY_ID,
+      activeJobCount: 4,
+    });
+    expect(count).toHaveBeenCalledWith({
+      where: {
+        companyId: COMPANY_ID,
+        status: JobStatus.PUBLISHED,
+        deadline: { gte: new Date('2026-08-24T00:00:00.000Z') },
+      },
     });
   });
 

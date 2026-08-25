@@ -1,9 +1,10 @@
 # Application Service
 
 This Spring Boot 3 / Java 21 service owns candidate submission, bookmarks,
-application tracking, recruiter evaluations, the application pipeline, and
-job offers. Nginx strips the `/applications` gateway prefix before forwarding
-those requests. The dedicated `/offers` gateway route preserves its prefix.
+application tracking, recruiter evaluations, the application pipeline, job
+offers, and the company-wide Recruiter Dashboard. Nginx strips the
+`/applications` gateway prefix before forwarding those requests. The dedicated
+`/offers` gateway route preserves its prefix.
 
 | Internal | Gateway | Access |
 | --- | --- | --- |
@@ -11,6 +12,7 @@ those requests. The dedicated `/offers` gateway route preserves its prefix.
 | `GET /my` | `GET /applications/my` | CANDIDATE |
 | `GET /{applicationId}` | `GET /applications/{applicationId}` | CANDIDATE, RECRUITER |
 | `GET /` | `GET /applications/` | RECRUITER |
+| `GET /stats` | `GET /applications/stats` | RECRUITER |
 | `PATCH /{applicationId}/status` | `PATCH /applications/{applicationId}/status` | RECRUITER |
 | `POST /{applicationId}/evaluation` | `POST /applications/{applicationId}/evaluation` | RECRUITER |
 | `POST /{applicationId}/offer` | `POST /applications/{applicationId}/offer` | RECRUITER |
@@ -29,6 +31,35 @@ recruiter. A recruiter from another company is denied. This company-wide
 Application Pipeline policy does not change Job Service ownership rules:
 `MEMBER` can still edit or delete only jobs they created, while `OWNER` can
 manage every job.
+
+Recruiter Dashboard is available through
+`GET /applications/stats?company_id=<uuid>`. The requested company must match
+the Company Service membership resolved from the Recruiter JWT; both `MEMBER`
+and `OWNER` receive company-wide aggregates. Authorization fails closed before
+Application DB or Job Service access.
+
+Optional `from` and `to` are ISO-8601 instants and must be supplied together.
+The range is half-open (`from` inclusive, `to` exclusive) and limited to 366
+days. Without them, the service returns 30 local calendar dates including
+today: from the start of 29 days ago through the start of tomorrow in the
+requested timezone. `timezone` accepts an IANA zone supported by both Java and
+PostgreSQL (default `UTC`), and `granularity` is `DAY`, `WEEK`, or `MONTH`
+(default `DAY`).
+
+Every Application aggregate selects the cohort whose `applied_at` is in that
+range. Status/source maps and the time series are zero-filled. Per-job counts
+use current statuses and include only jobs with at least one Application in the
+cohort. The funnel counts distinct cohort Applications that ever reached each
+stage in `ApplicationHistory`, including transitions after `to`; this keeps it
+consistent with the current-status summary.
+
+The active-job total comes from Job Service's authoritative internal
+`GET /stats/active?company_id=` endpoint. Network failures, rate limiting, and
+HTTP 5xx responses use a fail-soft result:
+`summary.activeJobs.count=null`, `available=false`, and a
+`JOB_SERVICE_UNAVAILABLE` warning. Other HTTP 4xx responses or an invalid
+success payload fail with `JOB_SERVICE_INVALID_RESPONSE` and HTTP 502 instead
+of hiding a service contract or credential error.
 
 Recruiter evaluations are internal records. A `MEMBER` or `OWNER` can create
 one evaluation for each application in their company, even when another
@@ -116,6 +147,8 @@ mvn verify -Pintegration-test
 The integration profile verifies Flyway/JPA against PostgreSQL, transactional
 pipeline and Offer updates, Offer expiry/concurrency/rollback, MEMBER/OWNER
 company-wide access and cross-company denial, Evaluation JSONB persistence and
-privacy, outbox delivery to a real Kafka consumer, and that an outbox row
-already marked as published is not sent again. The verified Application Service
-suite passes 100 unit tests and 23 PostgreSQL/Kafka integration tests.
+privacy, Recruiter Dashboard cohort/funnel semantics, `DAY/WEEK/MONTH`
+time-series buckets and DST boundaries, outbox delivery to a real Kafka
+consumer, and that an outbox row already marked as published is not sent again.
+The verified Application Service suite passes 126 unit tests and 29
+PostgreSQL/Kafka integration tests.
