@@ -39,6 +39,7 @@ spring:
 clients:
   job-service-url: ${JOB_SERVICE_URL:http://job-search-service:3000}
   profile-service-url: ${PROFILE_SERVICE_URL:http://profile-service:3000}
+  ai-service-url: ${AI_SERVICE_URL:http://ai-service:8000}
   internal-api-key: ${INTERNAL_API_KEY}
 
 application-events:

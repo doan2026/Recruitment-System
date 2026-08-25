@@ -1,8 +1,8 @@
 # BÁO CÁO TIẾN ĐỘ DỰ ÁN HỆ THỐNG TUYỂN DỤNG
 
 > Ngày cập nhật: 25/08/2026
-> Nhánh đối chiếu chính: `develop` (P02 Evaluation đã merge theo xác nhận của người dùng)
-> Nhánh đang làm việc: `feature/application-service/application-offer`
+> Nhánh đối chiếu chính: `develop` (Recruiter Dashboard đã merge theo xác nhận của người dùng)
+> Nhánh đang làm việc: `feature/application-service/ai-match-integration`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -24,7 +24,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 | Admin & Statistics Service | Người 1 | ⏳ Scaffold |
 | Company Service | Người 2 | ✅ Nghiệp vụ chính đã merge |
 | Job & Search Service | Người 2 | 🟡 Phần cốt lõi đã merge; AI recommendation và tích hợp thật còn thiếu |
-| Application Service | Người 2 | 🟡 Submission, Bookmark, Tracking, Pipeline, quyền MEMBER/OWNER và Evaluation đã merge; Offer hoàn thành, verify trên nhánh hiện tại nhưng chưa merge |
+| Application Service | Người 2 | 🟡 Các luồng từ Submission đến Recruiter Dashboard đã merge; AI Match phía Application hoàn thành và verify trên nhánh hiện tại, chưa merge |
 | AI Service | Người 2 | ⏳ Scaffold |
 | Interview & Video Call Service | Người 3 | ⏳ Scaffold |
 | Chat Service | Người 3 | ⏳ Prototype realtime |
@@ -89,16 +89,16 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** recruiter tạo/sửa tin nháp; gửi duyệt; Admin duyệt/từ chối; đóng/hết hạn tin; tìm kiếm và lọc; đồng bộ Elasticsearch; phát `job-events`; lấy gợi ý từ AI.
 - **Chức năng chính:** Job CRUD, state machine `DRAFT → PENDING_APPROVAL → PUBLISHED/REJECTED → CLOSED/EXPIRED`, tìm kiếm full-text và filter, reindex, PostgreSQL fallback, endpoint kiểm tra job còn nhận hồ sơ.
 - **Phụ thuộc:** Auth, Company, Admin, Elasticsearch, Redis, Kafka và AI.
-- **Trạng thái:** CRUD, publishing, search, indexing/event và availability đã merge; endpoint thống kê job active đã hoàn thành trên nhánh Dashboard hiện tại; recommendation từ AI chưa có.
+- **Trạng thái:** CRUD, publishing, search, indexing/event, availability và endpoint thống kê job active đã merge; recommendation từ AI chưa có.
 
 ## T07 — Application Service
 
 - **Mục tiêu:** quản lý toàn bộ vòng đời ứng tuyển từ lúc Candidate nộp đơn đến khi tuyển hoặc bị loại.
 - **Công nghệ:** Spring Boot 3, Java 21, Spring Security Resource Server, Spring Data JPA, Flyway, PostgreSQL, Spring Kafka, transactional outbox.
-- **Luồng hoạt động:** nộp đơn; Bookmark; Candidate theo dõi timeline; HR lọc và quản lý hồ sơ; state machine; đánh giá nội bộ; gửi/phản hồi Offer; thống kê recruiter.
-- **Chức năng chính:** Application, ApplicationHistory, Evaluation, Offer, Bookmark; optimistic locking; phân quyền theo Candidate/công ty; phát `application-events`.
+- **Luồng hoạt động:** nộp đơn; Bookmark; Candidate theo dõi timeline; HR lọc và quản lý hồ sơ; state machine; đánh giá nội bộ; gửi/phản hồi Offer; thống kê recruiter; tính lại điểm AI theo yêu cầu.
+- **Chức năng chính:** Application, ApplicationHistory, Evaluation, Offer, Bookmark; optimistic locking; phân quyền theo Candidate/công ty; refresh `match_score`; phát `application-events`.
 - **Phụ thuộc:** Auth, Profile, Job, Company, AI, File/Media và Notification qua Kafka.
-- **Trạng thái:** submission, Bookmark, tracking, pipeline, Evaluation và Offer đã merge; Recruiter Dashboard hoàn thành/verify trên nhánh hiện tại; AI Match và filter kỹ năng chưa làm.
+- **Trạng thái:** các luồng đến Recruiter Dashboard đã merge; AI Match phía Application hoàn thành/verify trên nhánh hiện tại; filter kỹ năng chưa làm và AI provider thật còn ở P11.
 
 ## T08 — AI Service
 
@@ -351,14 +351,18 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## P04 — Application Recruiter Dashboard và AI Match
 
-> Phần Recruiter Dashboard đã hoàn thành và verify trên nhánh `feature/application-service/recruiter-dashboard`; AI Match và filter kỹ năng được tách sang task/nhánh tiếp theo.
+> Recruiter Dashboard đã merge vào `develop` theo xác nhận của người dùng. Tích hợp AI Match phía Application đã hoàn thành và verify trên nhánh `feature/application-service/ai-match-integration`; endpoint/vector/consumer thật của AI Service vẫn thuộc P11, còn filter kỹ năng chờ Profile/AI contract.
 
 - [x] Implement `GET /applications/stats?company_id=`.
 - [x] Tổng hợp số đơn theo job/status, tỷ lệ chuyển đổi, biểu đồ thời gian và nguồn Candidate.
 - [x] Tích hợp Job Service để lấy tổng số tin đang tuyển.
-- [ ] Gọi AI `/ai/match` khi cần và lưu/cập nhật `match_score`.
+- [x] Gọi AI `/ai/match` khi cần và lưu/cập nhật `match_score`.
+  - [x] Thêm `POST /applications/:id/match-score/refresh`, chỉ MEMBER/OWNER đúng công ty và lấy `cv_id/job_id` từ Application.
+  - [x] Chốt contract nội bộ, kiểm tra echoed IDs/score `0..1`, đổi sang phần trăm và làm tròn 2 chữ số; phân loại not-ready/unavailable/invalid response; cấu hình connect timeout 1 giây và read timeout 3 giây.
+  - [x] Ghi điểm bằng `expectedVersion`/atomic compare-and-set; lỗi giữ nguyên điểm, không đổi status/`updated_at`, không ghi history hoặc outbox.
 - [ ] Bổ sung filter theo kỹ năng sau khi Profile/AI contract sẵn sàng.
 - [x] Test dữ liệu rỗng, range thiếu/sai/quá 366 ngày, quyền công ty, timezone PostgreSQL, `DAY/WEEK/MONTH` và DST.
+- [x] Verify AI Match đạt tổng cộng 162 unit test và 35 integration test PostgreSQL/Kafka; riêng task mới bổ sung 36 unit test và 6 integration test.
 
 ## P05 — Hoàn thiện Job & Search
 
@@ -505,8 +509,8 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 1. Hoàn thiện Auth và Profile vì đang chặn xác thực/nộp đơn end-to-end.
 2. Hoàn thiện File/Media để mở khóa CV, logo, attachment và Offer letter.
-3. Làm tiếp Application AI Match, cập nhật `match_score` và filter kỹ năng sau khi chốt Profile/AI contract.
-4. Làm AI embedding/recommendation rồi nối Job/Application.
+3. Hoàn thiện AI Service `/match`, pgvector và consumer embedding để kích hoạt contract Application vừa nối.
+4. Hoàn thiện Profile rồi bổ sung filter kỹ năng của Application và recommendation của Job.
 5. Làm Interview, Notification và Chat theo hợp đồng event đã chốt.
 6. Hoàn thiện Admin, Frontend, Jitsi và kiểm thử end-to-end.
 
@@ -519,7 +523,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Pipeline, Kafka và hợp đồng quyền MEMBER/OWNER đã được kiểm chứng; Application Pipeline dùng quyền toàn công ty, còn quyền sửa/xóa Job vẫn do Job Service kiểm soát.
 - Application Evaluation đã được kiểm chứng với JSONB trên PostgreSQL thật, gồm quyền công ty, validation, chống đánh giá trùng và Candidate privacy; P02 đã merge vào `develop` theo xác nhận của người dùng.
 - Application Offer đã verify đạt 100 unit test và 23 integration test. Event không lộ salary/note/file, nhưng xác minh canonical file metadata và ownership vẫn chờ API nội bộ của File/Media ở P09.
-- Recruiter Dashboard đã verify đạt 126 unit test và 29 integration test, gồm PostgreSQL timezone/DST và Kafka regression; AI Match/filter kỹ năng vẫn phụ thuộc contract Profile/AI.
+- Application AI Match phía consumer đã verify đạt tổng cộng 162 unit test và 35 integration test, gồm contract/lỗi AI, quyền công ty, optimistic locking, PostgreSQL constraint và regression Kafka. AI Service hiện chưa có `/match`, embedding hoặc consumer nên end-to-end điểm thật vẫn chờ P11; filter kỹ năng vẫn chờ Profile/AI.
 - Pipeline chung vẫn cho phép Application ở `OFFER` chuyển thẳng sang `REJECTED` hoặc `WITHDRAWN`; khi đó bản ghi Offer có thể còn `SENT` dù phản hồi tiếp theo đã bị chặn. Cần chốt quy tắc đồng bộ/hủy Offer trong task lifecycle tiếp theo.
 - Docker daemon và Testcontainers đã hoạt động; Docker Compose toàn hệ thống vẫn chưa được kiểm chứng và hiện thiếu file môi trường runtime của một số service.
 - Nginx đã có route độc lập `/offers/`; route `/bookmarks` và exact path không có dấu `/` cuối vẫn còn pending.

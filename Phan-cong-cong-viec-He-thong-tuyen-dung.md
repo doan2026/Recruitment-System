@@ -110,6 +110,9 @@ Ba luồng có tổng điểm bằng nhau. Rủi ro lệch lớn nhất nằm �
                                               (Admin)           refresh token
  REST danh sách CV           Người 1          Người 2           GET /profile/cv?user_id= — trả cv_id, title,
                              (Profile)        (Application)     file_url, is_default
+ REST AI Match              Người 2 (AI)    Người 2           POST /ai/match; X-Internal-Api-Key; body
+                                             (Application)     { cv_id, job_id }; response { data: { cv_id,
+                                                               job_id, score, reason }, meta }
  REST xác thực đơn ứng       Người 2          Người 3           GET /applications/:id — kiểm tra tồn tại, trạng
  tuyển                       (Application)    (Interview)       thái và quyền công ty
 ```
@@ -737,11 +740,16 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 4. Tin đã lưu nhưng đã hết hạn thì vẫn hiển thị kèm nhãn "Đã hết hạn".
 #### Luồng 3: HR quản lý và lọc hồ sơ ứng viên
 1. HR mở màn quản lý ứng viên theo từng job.
-2. Danh sách hiển thị: tên ứng viên, CV, ngày nộp, trạng thái hiện tại, điểm phù hợp (lấy từ AI Service nếu có).
-3. Lọc theo trạng thái, khoảng thời gian nộp, kỹ năng; sắp xếp theo ngày nộp hoặc điểm phù hợp.
-4. HR mở CV xem trực tiếp (iframe PDF từ Cloudinary).
-5. HR ghi đánh giá nội bộ: điểm số theo tiêu chí + ghi chú (ứng viên không nhìn thấy).
-6. HR chuyển trạng thái đơn theo state machine ở luồng 4.
+2. Danh sách hiển thị: tên ứng viên, CV, ngày nộp, trạng thái hiện tại và `match_score` đã lưu nếu có.
+3. Khi điểm chưa có hoặc cần tính lại, HR gọi `POST /applications/:id/match-score/refresh` kèm `expectedVersion`; việc nộp đơn của Candidate không gọi AI đồng bộ.
+4. Application Service lấy `cv_id/job_id` từ Application, không tin dữ liệu định danh do client gửi.
+5. Xác minh Recruiter là MEMBER/OWNER đúng công ty trước khi gọi AI; người ngoài công ty bị chặn trước downstream call.
+6. Gọi nội bộ `POST /ai/match` bằng `X-Internal-Api-Key`; AI trả envelope có echoed IDs, score `0..1` hoặc `reason` khi embedding chưa sẵn sàng.
+7. Score hợp lệ được nhân 100, làm tròn 2 chữ số và lưu bằng atomic compare-and-set; version Application tăng 1.
+8. AI lỗi/payload sai/embedding chưa sẵn sàng giữ nguyên điểm cũ; refresh điểm không đổi status/`updated_at`, không ghi history hoặc outbox.
+9. Lọc theo trạng thái, khoảng thời gian nộp, kỹ năng; sắp xếp theo ngày nộp hoặc điểm phù hợp.
+10. HR mở CV xem trực tiếp (iframe PDF từ Cloudinary).
+11. HR ghi đánh giá nội bộ rồi chuyển trạng thái đơn theo state machine ở luồng 4.
 #### Luồng 4: State machine trạng thái đơn ứng tuyển
 1. APPLIED — vừa nộp, chờ HR xem.
 2. REVIEWING — HR đang xem xét hồ sơ.
@@ -775,6 +783,9 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 - Không nộp đơn được vào tin đã CLOSED hoặc EXPIRED.
 - Bắt buộc chọn CV khi nộp đơn; cover letter là tuỳ chọn, tối đa 2000 ký tự.
 - Dùng @Version (optimistic locking) trên Application — hai HR đổi trạng thái cùng lúc thì người sau nhận lỗi và phải tải lại.
+- AI Match là thao tác on-demand của Recruiter, không nằm trong transaction nộp đơn; chỉ MEMBER/OWNER đúng công ty được refresh.
+- Refresh `match_score` bắt buộc `expectedVersion`, ghi bằng compare-and-set và tăng version nhưng không đổi status/`updated_at`, không tạo ApplicationHistory hoặc event.
+- AI trả score `0..1`; Application kiểm tra echoed `cv_id/job_id`, đổi sang `0..100` với 2 chữ số. Mọi lỗi phải giữ nguyên điểm cũ.
 - Mọi lần đổi trạng thái đều ghi ApplicationHistory (ai đổi, từ trạng thái nào sang trạng thái nào, lúc nào, ghi chú) — dùng để đối soát và hiển thị timeline cho ứng viên.
 - Đánh giá nội bộ của HR không bao giờ hiển thị cho ứng viên.
 - Mỗi recruiter chỉ tạo một Evaluation cho mỗi đơn; recruiter khác trong cùng công ty vẫn có thể tạo đánh giá riêng. Điểm tổng và từng tiêu chí dùng thang 0–100, tối đa 2 chữ số thập phân; criteria là JSON object có 1–20 tiêu chí và note là tuỳ chọn, tối đa 2000 ký tự.
@@ -815,6 +826,7 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
  POST /bookmarks | DELETE              Lưu / bỏ lưu việc                          Candidate
  /bookmarks/:jobId
  GET /applications/stats?company_id=   Số liệu dashboard recruiter                Recruiter
+ POST /applications/:id/match-score/refresh  Tính/làm mới điểm AI (expectedVersion)       Recruiter
 ```
 
 
@@ -826,7 +838,7 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 - Consumer: Notification Service (Người 3) và Admin & Statistics Service (Người 1).
 - Đây là hợp đồng liên người quan trọng nhất của Người 2 — chốt schema với Người 3 trong tuần đầu.
 ### 2.5. Phụ thuộc giữa các service
-- Phụ thuộc REST: Profile Service (Người 1) lấy CV, Job Service (chính Người 2) kiểm tra tin; Offer sẽ gọi API nội bộ File/Media để xác minh file khi contract P09 hoàn thành.
+- Phụ thuộc REST: Profile Service lấy CV, Job Service kiểm tra tin, Company Service xác minh quyền recruiter và AI Service tính `match_score`; Offer sẽ gọi File/Media để xác minh file khi contract P09 hoàn thành.
 - Được phụ thuộc bởi: Interview Service (Người 3) tham chiếu application_id, Notification Service (Người 3) qua Kafka.
 ### 2.6. Tiêu chí hoàn thành (Definition of Done)
 - Nộp đơn → HR đổi trạng thái → ứng viên thấy timeline cập nhật: chạy thông suốt.
@@ -889,6 +901,9 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 - Chatbot chỉ trả lời trong phạm vi nghiệp vụ tuyển dụng; câu hỏi ngoài phạm vi thì lịch sự từ chối và hướng về chức năng của hệ thống.
 - Không đưa thông tin cá nhân của ứng viên khác vào prompt của chatbot.
 - Điểm phù hợp trả về là số thực 0–1, khi hiển thị thì quy đổi ra phần trăm và làm tròn.
+- `/ai/match` là API nội bộ, bắt buộc `X-Internal-Api-Key`; request dùng snake_case `{ cv_id, job_id }` và không nhận nội dung CV/job gốc.
+- Response dùng envelope `{ data, meta }`, phải echo đúng `cv_id/job_id` và chỉ có một trong hai: `score` hợp lệ hoặc `reason` khác rỗng khi embedding chưa sẵn sàng.
+- Thiếu embedding trả HTTP 200 với `score: null`; sai key trả 401, request sai trả 422, database/model chưa sẵn sàng trả 503. Không clamp score ngoài `0..1`.
 - API key của Claude chỉ nằm trong biến môi trường của service này.
 ### 2.2. Mô hình dữ liệu
 - CvEmbedding(cv_id, user_id, vector vector(384), text_hash, updated_at)

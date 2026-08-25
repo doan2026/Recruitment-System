@@ -2,9 +2,9 @@
 
 This Spring Boot 3 / Java 21 service owns candidate submission, bookmarks,
 application tracking, recruiter evaluations, the application pipeline, job
-offers, and the company-wide Recruiter Dashboard. Nginx strips the
-`/applications` gateway prefix before forwarding those requests. The dedicated
-`/offers` gateway route preserves its prefix.
+offers, the company-wide Recruiter Dashboard, and on-demand AI match
+scores. Nginx strips the `/applications` gateway prefix before forwarding those
+requests. The dedicated `/offers` gateway route preserves its prefix.
 
 | Internal | Gateway | Access |
 | --- | --- | --- |
@@ -13,6 +13,7 @@ offers, and the company-wide Recruiter Dashboard. Nginx strips the
 | `GET /{applicationId}` | `GET /applications/{applicationId}` | CANDIDATE, RECRUITER |
 | `GET /` | `GET /applications/` | RECRUITER |
 | `GET /stats` | `GET /applications/stats` | RECRUITER |
+| `POST /{applicationId}/match-score/refresh` | `POST /applications/{applicationId}/match-score/refresh` | RECRUITER |
 | `PATCH /{applicationId}/status` | `PATCH /applications/{applicationId}/status` | RECRUITER |
 | `POST /{applicationId}/evaluation` | `POST /applications/{applicationId}/evaluation` | RECRUITER |
 | `POST /{applicationId}/offer` | `POST /applications/{applicationId}/offer` | RECRUITER |
@@ -60,6 +61,57 @@ HTTP 5xx responses use a fail-soft result:
 `JOB_SERVICE_UNAVAILABLE` warning. Other HTTP 4xx responses or an invalid
 success payload fail with `JOB_SERVICE_INVALID_RESPONSE` and HTTP 502 instead
 of hiding a service contract or credential error.
+
+AI match scoring is an explicit recruiter action through
+`POST /applications/{applicationId}/match-score/refresh`. It is deliberately
+not part of Candidate submission, so an unavailable AI Service cannot block the
+core application flow. The request contains only the aggregate version:
+
+```json
+{
+  "expectedVersion": 2
+}
+```
+
+The service loads the authoritative `cvId` and `jobId` from the Application,
+then authorizes the Recruiter through Company Service before making an AI call.
+It calls AI Service directly at `POST /match` (gateway contract:
+`POST /ai/match`) with `X-Internal-Api-Key` and this snake-case payload:
+
+```json
+{
+  "cv_id": "uuid",
+  "job_id": "uuid"
+}
+```
+
+The expected response follows the shared envelope and echoes both identifiers:
+
+```json
+{
+  "data": {
+    "cv_id": "uuid",
+    "job_id": "uuid",
+    "score": 0.85456,
+    "reason": null
+  },
+  "meta": null
+}
+```
+
+AI scores must be in `0..1`; Application Service verifies the echoed IDs,
+converts the score to `0..100`, and rounds half-up to two decimal places before
+storage. A null score with a non-blank reason returns `AI_MATCH_NOT_READY`
+(409). Network errors, HTTP 429, and HTTP 5xx return
+`AI_SERVICE_UNAVAILABLE` (503); malformed data and other HTTP 4xx responses
+return `AI_SERVICE_INVALID_RESPONSE` (502). Every failure preserves the
+previous score.
+
+The write uses `expectedVersion` in one atomic compare-and-set and returns the
+incremented version. Refreshing a score does not change application status or
+`updated_at`, and does not create ApplicationHistory or outbox events. The
+actual AI `/match` implementation, embedding tables, and Kafka consumers
+remain tracked under P11; this service is contract-ready for that provider.
 
 Recruiter evaluations are internal records. A `MEMBER` or `OWNER` can create
 one evaluation for each application in their company, even when another
@@ -145,10 +197,11 @@ mvn verify -Pintegration-test
 ```
 
 The integration profile verifies Flyway/JPA against PostgreSQL, transactional
-pipeline and Offer updates, Offer expiry/concurrency/rollback, MEMBER/OWNER
-company-wide access and cross-company denial, Evaluation JSONB persistence and
-privacy, Recruiter Dashboard cohort/funnel semantics, `DAY/WEEK/MONTH`
-time-series buckets and DST boundaries, outbox delivery to a real Kafka
-consumer, and that an outbox row already marked as published is not sent again.
-The verified Application Service suite passes 126 unit tests and 29
-PostgreSQL/Kafka integration tests.
+pipeline, Offer, and AI match-score updates, MEMBER/OWNER company-wide access,
+cross-company denial, Evaluation JSONB persistence and privacy, Recruiter
+Dashboard cohort/funnel semantics, `DAY/WEEK/MONTH` time-series buckets and DST
+boundaries, outbox delivery to a real Kafka consumer, and published-row
+idempotency. AI Match verification covers score replacement, optimistic-lock
+conflicts, downstream failure preservation, the `0..100` database constraint,
+and the absence of history/outbox side effects. The verified Application
+Service suite passes 162 unit tests and 35 PostgreSQL/Kafka integration tests.
