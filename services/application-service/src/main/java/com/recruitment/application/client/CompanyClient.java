@@ -1,6 +1,5 @@
 package com.recruitment.application.client;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.recruitment.application.api.ApiResponse;
 import com.recruitment.application.api.BusinessException;
 import java.util.UUID;
@@ -25,31 +24,46 @@ public class CompanyClient {
         this.restClient = builder.baseUrl(baseUrl).build();
     }
 
-    public UUID getRecruiterCompanyId(
+    public RecruiterCompanyMembership getRecruiterMembership(
         UUID recruiterId,
         String authorization
     ) {
         try {
-            ApiResponse<RecruiterCompany> response = restClient.get()
+            ApiResponse<RecruiterCompanyMembership> response = restClient.get()
                 .uri("/by-user/{userId}", recruiterId)
                 .header(HttpHeaders.AUTHORIZATION, authorization)
                 .retrieve()
                 .body(new ParameterizedTypeReference<>() {});
-            if (response == null || response.data() == null) {
+            if (
+                response == null ||
+                response.data() == null ||
+                response.data().companyId() == null ||
+                !response.data().canManageAllCompanyApplications()
+            ) {
                 throw unavailable();
             }
-            return response.data().companyId();
+            return response.data();
         } catch (HttpClientErrorException exception) {
-            throw new BusinessException(
-                "APPLICATION_ACCESS_DENIED",
-                "Recruiter does not belong to the application's company",
-                HttpStatus.FORBIDDEN
-            );
+            if (
+                exception.getStatusCode() == HttpStatus.FORBIDDEN ||
+                exception.getStatusCode() == HttpStatus.NOT_FOUND
+            ) {
+                throw denied();
+            }
+            throw unavailable();
         } catch (BusinessException exception) {
             throw exception;
         } catch (RestClientException exception) {
             throw unavailable();
         }
+    }
+
+    private BusinessException denied() {
+        return new BusinessException(
+            "APPLICATION_ACCESS_DENIED",
+            "Recruiter does not belong to the application's company",
+            HttpStatus.FORBIDDEN
+        );
     }
 
     private BusinessException unavailable() {
@@ -59,7 +73,4 @@ public class CompanyClient {
             HttpStatus.SERVICE_UNAVAILABLE
         );
     }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public record RecruiterCompany(UUID companyId) {}
 }

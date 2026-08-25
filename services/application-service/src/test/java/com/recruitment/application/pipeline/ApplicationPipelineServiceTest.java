@@ -13,6 +13,8 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.recruitment.application.api.BusinessException;
 import com.recruitment.application.client.CompanyClient;
+import com.recruitment.application.client.CompanyMemberRole;
+import com.recruitment.application.client.RecruiterCompanyMembership;
 import com.recruitment.application.domain.ApplicationEntity;
 import com.recruitment.application.domain.ApplicationEventOutboxEntity;
 import com.recruitment.application.domain.ApplicationSource;
@@ -26,6 +28,8 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -47,13 +51,14 @@ class ApplicationPipelineServiceTest {
     private final UUID applicationId = UUID.randomUUID();
     private final UUID candidateId = UUID.randomUUID();
     private final UUID recruiterId = UUID.randomUUID();
+    private final UUID jobOwnerRecruiterId = UUID.randomUUID();
     private final UUID companyId = UUID.randomUUID();
     private final ApplicationEntity applied = ApplicationEntity.applied(
         applicationId,
         UUID.randomUUID(),
         companyId,
         candidateId,
-        UUID.randomUUID(),
+        jobOwnerRecruiterId,
         UUID.randomUUID(),
         "Backend Engineer",
         null,
@@ -74,14 +79,23 @@ class ApplicationPipelineServiceTest {
         );
         when(applications.findById(applicationId))
             .thenReturn(Optional.of(applied));
-        when(companies.getRecruiterCompanyId(recruiterId, "Bearer token"))
-            .thenReturn(companyId);
+        when(companies.getRecruiterMembership(recruiterId, "Bearer token"))
+            .thenReturn(new RecruiterCompanyMembership(
+                companyId,
+                CompanyMemberRole.MEMBER
+            ));
         when(applications.transition(any(), any(), any(), eq(0L)))
             .thenReturn(1);
     }
 
-    @Test
-    void recruiterMovesAppliedToReviewingAndWritesEvent() {
+    @ParameterizedTest
+    @EnumSource(CompanyMemberRole.class)
+    void companyMemberRolesManageApplicationFromAnotherRecruitersJob(
+        CompanyMemberRole role
+    ) {
+        when(companies.getRecruiterMembership(recruiterId, "Bearer token"))
+            .thenReturn(new RecruiterCompanyMembership(companyId, role));
+
         StatusTransitionResponse response = service.changeStatus(
             applicationId,
             recruiterId,
@@ -96,6 +110,9 @@ class ApplicationPipelineServiceTest {
         assertThat(response.fromStatus()).isEqualTo(ApplicationStatus.APPLIED);
         assertThat(response.toStatus()).isEqualTo(ApplicationStatus.REVIEWING);
         assertThat(response.version()).isEqualTo(1L);
+        assertThat(applied.getRecruiterId())
+            .isEqualTo(jobOwnerRecruiterId)
+            .isNotEqualTo(recruiterId);
         verify(history).append(
             applicationId,
             ApplicationStatus.APPLIED,
@@ -128,6 +145,32 @@ class ApplicationPipelineServiceTest {
             .extracting("code")
             .isEqualTo("INVALID_APPLICATION_TRANSITION");
         verify(applications, never()).transition(any(), any(), any(), anyLong());
+    }
+
+    @Test
+    void recruiterFromAnotherCompanyCannotChangeStatus() {
+        when(companies.getRecruiterMembership(recruiterId, "Bearer token"))
+            .thenReturn(new RecruiterCompanyMembership(
+                UUID.randomUUID(),
+                CompanyMemberRole.MEMBER
+            ));
+
+        assertThatThrownBy(() -> service.changeStatus(
+            applicationId,
+            recruiterId,
+            "Bearer token",
+            new ChangeApplicationStatusRequest(
+                ApplicationStatus.REVIEWING,
+                null,
+                0L
+            )
+        ))
+            .isInstanceOf(BusinessException.class)
+            .extracting("code")
+            .isEqualTo("APPLICATION_ACCESS_DENIED");
+        verify(applications, never()).transition(any(), any(), any(), anyLong());
+        verify(history, never()).append(any(), any(), any(), any(), any(), any());
+        verify(outbox, never()).save(any());
     }
 
     @Test
@@ -208,9 +251,14 @@ class ApplicationPipelineServiceTest {
         verify(outbox, never()).save(any());
     }
 
-    @Test
+    @ParameterizedTest
+    @EnumSource(CompanyMemberRole.class)
     @SuppressWarnings("unchecked")
-    void recruiterListIsPagedAndCompanyScoped() {
+    void companyMemberRolesListApplicationsAcrossCompanyJobs(
+        CompanyMemberRole role
+    ) {
+        when(companies.getRecruiterMembership(recruiterId, "Bearer token"))
+            .thenReturn(new RecruiterCompanyMembership(companyId, role));
         when(applications.findAll(
             any(Specification.class),
             any(Pageable.class)
@@ -231,7 +279,7 @@ class ApplicationPipelineServiceTest {
         assertThat(response.items()).hasSize(1);
         assertThat(response.items().getFirst().candidateId())
             .isEqualTo(candidateId);
-        verify(companies).getRecruiterCompanyId(recruiterId, "Bearer token");
+        verify(companies).getRecruiterMembership(recruiterId, "Bearer token");
     }
 
     @Test
@@ -250,6 +298,6 @@ class ApplicationPipelineServiceTest {
             .isInstanceOf(BusinessException.class)
             .extracting("code")
             .isEqualTo("INVALID_PAGINATION");
-        verify(companies, never()).getRecruiterCompanyId(any(), any());
+        verify(companies, never()).getRecruiterMembership(any(), any());
     }
 }

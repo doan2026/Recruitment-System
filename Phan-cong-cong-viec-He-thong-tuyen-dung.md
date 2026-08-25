@@ -777,6 +777,7 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 - Mọi lần đổi trạng thái đều ghi ApplicationHistory (ai đổi, từ trạng thái nào sang trạng thái nào, lúc nào, ghi chú) — dùng để đối soát và hiển thị timeline cho ứng viên.
 - Đánh giá nội bộ của HR không bao giờ hiển thị cho ứng viên.
 - Ứng viên chỉ xem được đơn của chính mình; HR chỉ xem được đơn thuộc job của công ty mình.
+- Trong Application Pipeline, cả MEMBER và OWNER được xem và xử lý đơn của mọi job thuộc công ty, kể cả job do recruiter khác tạo. Giới hạn MEMBER chỉ sửa/xoá job do mình tạo chỉ áp dụng cho Job Service.
 - Publish event là bước bắt buộc sau mỗi lần đổi trạng thái — Notification phụ thuộc hoàn toàn vào đây.
 ### 2.2. Mô hình dữ liệu
 - Application(id, job_id, company_id, candidate_id, cv_id, cover_letter, status, source, match_score, applied_at, updated_at, version)

@@ -2,6 +2,7 @@ package com.recruitment.application.tracking;
 
 import com.recruitment.application.api.BusinessException;
 import com.recruitment.application.client.CompanyClient;
+import com.recruitment.application.client.RecruiterCompanyMembership;
 import com.recruitment.application.domain.ApplicationEntity;
 import java.util.List;
 import java.util.UUID;
@@ -67,11 +68,12 @@ public class ApplicationTrackingService {
             return;
         }
 
-        UUID recruiterCompanyId = companies.getRecruiterCompanyId(
-            viewerId,
-            authorization
-        );
-        if (!application.getCompanyId().equals(recruiterCompanyId)) {
+        RecruiterCompanyMembership membership =
+            companies.getRecruiterMembership(viewerId, authorization);
+        if (
+            !membership.canManageAllCompanyApplications() ||
+            !application.getCompanyId().equals(membership.companyId())
+        ) {
             throw denied();
         }
     }

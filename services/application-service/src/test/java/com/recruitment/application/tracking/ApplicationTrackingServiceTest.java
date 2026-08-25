@@ -9,6 +9,8 @@ import static org.mockito.Mockito.when;
 
 import com.recruitment.application.api.BusinessException;
 import com.recruitment.application.client.CompanyClient;
+import com.recruitment.application.client.CompanyMemberRole;
+import com.recruitment.application.client.RecruiterCompanyMembership;
 import com.recruitment.application.domain.ApplicationEntity;
 import com.recruitment.application.domain.ApplicationSource;
 import com.recruitment.application.domain.ApplicationStatus;
@@ -18,6 +20,8 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class ApplicationTrackingServiceTest {
     private static final Instant APPLIED_AT =
@@ -93,8 +97,8 @@ class ApplicationTrackingServiceTest {
 
         assertThat(result.candidateId()).isEqualTo(candidateId);
         assertThat(result.timeline()).containsExactly(entry);
-        verify(companies, never()).getRecruiterCompanyId(
-            recruiterId,
+        verify(companies, never()).getRecruiterMembership(
+            candidateId,
             "Bearer token"
         );
     }
@@ -116,13 +120,16 @@ class ApplicationTrackingServiceTest {
         verify(history, never()).findTimeline(applicationId);
     }
 
-    @Test
-    void recruiterInTheSameCompanyCanViewDetail() {
+    @ParameterizedTest
+    @EnumSource(CompanyMemberRole.class)
+    void companyMemberRolesCanViewDetailAcrossCompanyJobs(
+        CompanyMemberRole role
+    ) {
         UUID viewerId = UUID.randomUUID();
         when(applications.findById(applicationId))
             .thenReturn(Optional.of(application));
-        when(companies.getRecruiterCompanyId(viewerId, "Bearer token"))
-            .thenReturn(companyId);
+        when(companies.getRecruiterMembership(viewerId, "Bearer token"))
+            .thenReturn(new RecruiterCompanyMembership(companyId, role));
         when(history.findTimeline(applicationId)).thenReturn(List.of());
 
         ApplicationDetailResponse result = service.getDetail(
@@ -133,6 +140,7 @@ class ApplicationTrackingServiceTest {
         );
 
         assertThat(result.companyId()).isEqualTo(companyId);
+        assertThat(application.getRecruiterId()).isNotEqualTo(viewerId);
     }
 
     @Test
@@ -140,8 +148,11 @@ class ApplicationTrackingServiceTest {
         UUID viewerId = UUID.randomUUID();
         when(applications.findById(applicationId))
             .thenReturn(Optional.of(application));
-        when(companies.getRecruiterCompanyId(viewerId, "Bearer token"))
-            .thenReturn(UUID.randomUUID());
+        when(companies.getRecruiterMembership(viewerId, "Bearer token"))
+            .thenReturn(new RecruiterCompanyMembership(
+                UUID.randomUUID(),
+                CompanyMemberRole.MEMBER
+            ));
 
         assertThatThrownBy(() -> service.getDetail(
             applicationId,

@@ -2,13 +2,15 @@ package com.recruitment.application.pipeline;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.recruitment.application.api.BusinessException;
 import com.recruitment.application.client.CompanyClient;
+import com.recruitment.application.client.CompanyMemberRole;
+import com.recruitment.application.client.RecruiterCompanyMembership;
 import com.recruitment.application.domain.ApplicationEntity;
 import com.recruitment.application.domain.ApplicationSource;
 import com.recruitment.application.domain.ApplicationStatus;
@@ -70,11 +72,26 @@ class ApplicationPipelinePostgresIT {
     private static final UUID COMPANY_ID = UUID.fromString(
         "10000000-0000-0000-0000-000000000001"
     );
+    private static final UUID OTHER_COMPANY_ID = UUID.fromString(
+        "10000000-0000-0000-0000-000000000002"
+    );
     private static final UUID RECRUITER_ID = UUID.fromString(
         "20000000-0000-0000-0000-000000000001"
     );
     private static final UUID SECOND_RECRUITER_ID = UUID.fromString(
         "20000000-0000-0000-0000-000000000002"
+    );
+    private static final UUID OUTSIDE_RECRUITER_ID = UUID.fromString(
+        "20000000-0000-0000-0000-000000000003"
+    );
+    private static final UUID OWNER_JOB_ID = UUID.fromString(
+        "30000000-0000-0000-0000-000000000001"
+    );
+    private static final UUID MEMBER_JOB_ID = UUID.fromString(
+        "30000000-0000-0000-0000-000000000002"
+    );
+    private static final UUID OTHER_COMPANY_JOB_ID = UUID.fromString(
+        "30000000-0000-0000-0000-000000000003"
     );
     private static final String AUTHORIZATION = "Bearer integration-test";
     private static final String OUTBOX_TOPIC_CONSTRAINT =
@@ -132,10 +149,20 @@ class ApplicationPipelinePostgresIT {
             CASCADE
             """
         );
-        when(companies.getRecruiterCompanyId(
-            any(UUID.class),
-            anyString()
-        )).thenReturn(COMPANY_ID);
+        when(companies.getRecruiterMembership(
+            RECRUITER_ID,
+            AUTHORIZATION
+        )).thenReturn(new RecruiterCompanyMembership(
+            COMPANY_ID,
+            CompanyMemberRole.MEMBER
+        ));
+        when(companies.getRecruiterMembership(
+            SECOND_RECRUITER_ID,
+            AUTHORIZATION
+        )).thenReturn(new RecruiterCompanyMembership(
+            COMPANY_ID,
+            CompanyMemberRole.MEMBER
+        ));
     }
 
     @AfterEach
@@ -232,6 +259,160 @@ class ApplicationPipelinePostgresIT {
             .contains("\"action\":\"STATUS_CHANGED\"")
             .contains("\"application_id\":\"" + applicationId + "\"")
             .contains("\"to_status\":\"REVIEWING\"");
+    }
+
+    @Test
+    void memberAndOwnerHaveCompanyWideAccessButOutsiderIsDenied() {
+        UUID ownerJobApplication = saveAppliedApplication(
+            OWNER_JOB_ID,
+            COMPANY_ID,
+            SECOND_RECRUITER_ID,
+            Instant.parse("2026-08-24T00:00:00Z")
+        );
+        UUID memberJobApplication = saveAppliedApplication(
+            MEMBER_JOB_ID,
+            COMPANY_ID,
+            RECRUITER_ID,
+            Instant.parse("2026-08-24T01:00:00Z")
+        );
+        UUID otherCompanyApplication = saveAppliedApplication(
+            OTHER_COMPANY_JOB_ID,
+            OTHER_COMPANY_ID,
+            OUTSIDE_RECRUITER_ID,
+            Instant.parse("2026-08-24T02:00:00Z")
+        );
+        when(companies.getRecruiterMembership(
+            RECRUITER_ID,
+            AUTHORIZATION
+        )).thenReturn(new RecruiterCompanyMembership(
+            COMPANY_ID,
+            CompanyMemberRole.MEMBER
+        ));
+        when(companies.getRecruiterMembership(
+            SECOND_RECRUITER_ID,
+            AUTHORIZATION
+        )).thenReturn(new RecruiterCompanyMembership(
+            COMPANY_ID,
+            CompanyMemberRole.OWNER
+        ));
+        when(companies.getRecruiterMembership(
+            OUTSIDE_RECRUITER_ID,
+            AUTHORIZATION
+        )).thenReturn(new RecruiterCompanyMembership(
+            OTHER_COMPANY_ID,
+            CompanyMemberRole.MEMBER
+        ));
+
+        RecruiterApplicationPageResponse memberPage =
+            pipeline.listForRecruiter(
+                RECRUITER_ID,
+                AUTHORIZATION,
+                null,
+                null,
+                null,
+                null,
+                ApplicationSort.APPLIED_AT_DESC,
+                0,
+                20
+            );
+        RecruiterApplicationPageResponse ownerPage =
+            pipeline.listForRecruiter(
+                SECOND_RECRUITER_ID,
+                AUTHORIZATION,
+                null,
+                null,
+                null,
+                null,
+                ApplicationSort.APPLIED_AT_DESC,
+                0,
+                20
+            );
+        RecruiterApplicationPageResponse memberOwnerJobPage =
+            pipeline.listForRecruiter(
+                RECRUITER_ID,
+                AUTHORIZATION,
+                OWNER_JOB_ID,
+                null,
+                null,
+                null,
+                ApplicationSort.APPLIED_AT_DESC,
+                0,
+                20
+            );
+
+        assertThat(memberPage.items())
+            .extracting(RecruiterApplicationItemResponse::id)
+            .containsExactly(memberJobApplication, ownerJobApplication);
+        assertThat(ownerPage.items())
+            .extracting(RecruiterApplicationItemResponse::id)
+            .containsExactly(memberJobApplication, ownerJobApplication);
+        assertThat(memberPage.items())
+            .extracting(RecruiterApplicationItemResponse::id)
+            .doesNotContain(otherCompanyApplication);
+        assertThat(memberOwnerJobPage.items())
+            .extracting(RecruiterApplicationItemResponse::id)
+            .containsExactly(ownerJobApplication);
+
+        StatusTransitionResponse memberTransition = pipeline.changeStatus(
+            ownerJobApplication,
+            RECRUITER_ID,
+            AUTHORIZATION,
+            new ChangeApplicationStatusRequest(
+                ApplicationStatus.REVIEWING,
+                "Member reviewed an owner's job",
+                0L
+            )
+        );
+        StatusTransitionResponse ownerTransition = pipeline.changeStatus(
+            memberJobApplication,
+            SECOND_RECRUITER_ID,
+            AUTHORIZATION,
+            new ChangeApplicationStatusRequest(
+                ApplicationStatus.REVIEWING,
+                "Owner reviewed a member's job",
+                0L
+            )
+        );
+
+        assertThat(memberTransition.toStatus())
+            .isEqualTo(ApplicationStatus.REVIEWING);
+        assertThat(ownerTransition.toStatus())
+            .isEqualTo(ApplicationStatus.REVIEWING);
+        assertThatThrownBy(() -> pipeline.changeStatus(
+            ownerJobApplication,
+            OUTSIDE_RECRUITER_ID,
+            AUTHORIZATION,
+            new ChangeApplicationStatusRequest(
+                ApplicationStatus.REJECTED,
+                "Not authorized",
+                1L
+            )
+        ))
+            .isInstanceOf(BusinessException.class)
+            .extracting("code")
+            .isEqualTo("APPLICATION_ACCESS_DENIED");
+        assertThat(historyRepository.count()).isEqualTo(2L);
+        assertThat(outboxRepository.count()).isEqualTo(2L);
+        assertThat(applicationRepository.findById(ownerJobApplication))
+            .get()
+            .extracting(ApplicationEntity::getStatus)
+            .isEqualTo(ApplicationStatus.REVIEWING);
+        assertThat(applicationRepository.findById(otherCompanyApplication))
+            .get()
+            .extracting(ApplicationEntity::getStatus)
+            .isEqualTo(ApplicationStatus.APPLIED);
+        verify(companies, atLeastOnce()).getRecruiterMembership(
+            RECRUITER_ID,
+            AUTHORIZATION
+        );
+        verify(companies, atLeastOnce()).getRecruiterMembership(
+            SECOND_RECRUITER_ID,
+            AUTHORIZATION
+        );
+        verify(companies).getRecruiterMembership(
+            OUTSIDE_RECRUITER_ID,
+            AUTHORIZATION
+        );
     }
 
     @Test
@@ -421,18 +602,32 @@ class ApplicationPipelinePostgresIT {
     }
 
     private UUID saveAppliedApplication() {
+        return saveAppliedApplication(
+            UUID.randomUUID(),
+            COMPANY_ID,
+            RECRUITER_ID,
+            Instant.parse("2026-08-24T00:00:00Z")
+        );
+    }
+
+    private UUID saveAppliedApplication(
+        UUID jobId,
+        UUID companyId,
+        UUID jobOwnerRecruiterId,
+        Instant appliedAt
+    ) {
         UUID applicationId = UUID.randomUUID();
         applicationRepository.saveAndFlush(ApplicationEntity.applied(
             applicationId,
+            jobId,
+            companyId,
             UUID.randomUUID(),
-            COMPANY_ID,
-            UUID.randomUUID(),
-            RECRUITER_ID,
+            jobOwnerRecruiterId,
             UUID.randomUUID(),
             "Backend Engineer",
             "I would like to apply",
             ApplicationSource.SEARCH,
-            Instant.parse("2026-08-24T00:00:00Z")
+            appliedAt
         ));
         return applicationId;
     }

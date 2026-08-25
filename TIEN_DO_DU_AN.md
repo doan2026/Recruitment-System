@@ -1,8 +1,8 @@
 # BÁO CÁO TIẾN ĐỘ DỰ ÁN HỆ THỐNG TUYỂN DỤNG
 
 > Ngày cập nhật: 25/08/2026
-> Nhánh đối chiếu chính: `develop` sau khi merge task PostgreSQL/concurrency
-> Nhánh đang làm việc: `feature/application-service/application-pipeline-kafka-integration`
+> Nhánh đối chiếu chính: `develop` sau PR #18 tại merge commit `2a6a644`
+> Nhánh đang làm việc: `feature/application-service/application-pipeline-company-permissions`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -98,7 +98,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** nộp đơn; Bookmark; Candidate theo dõi timeline; HR lọc và quản lý hồ sơ; state machine; đánh giá nội bộ; gửi/phản hồi Offer; thống kê recruiter.
 - **Chức năng chính:** Application, ApplicationHistory, Evaluation, Offer, Bookmark; optimistic locking; phân quyền theo Candidate/công ty; phát `application-events`.
 - **Phụ thuộc:** Auth, Profile, Job, Company, AI, File/Media và Notification qua Kafka.
-- **Trạng thái:** submission, Bookmark và tracking đã merge; pipeline đã commit/push ở nhánh hiện tại nhưng chưa merge; evaluation, offer và stats chưa làm.
+- **Trạng thái:** submission, Bookmark, tracking và pipeline nền đã merge; hardening quyền MEMBER/OWNER đang ở nhánh hiện tại; evaluation, offer và stats chưa làm.
 
 ## T08 — AI Service
 
@@ -265,7 +265,9 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Candidate rút đơn active sang `WITHDRAWN`.
 - Dùng `expectedVersion` và atomic update để phát hiện hai thao tác đồng thời.
 - Mỗi lần chuyển trạng thái ghi history và outbox `STATUS_CHANGED` trong transaction.
-- Toàn bộ Application Service chạy đạt 26/26 unit test và 6/6 integration test với PostgreSQL/Kafka; build JAR thành công.
+- Contract Company Service được kiểm tra fail-closed với `companyId` và `memberRole`.
+- Cả MEMBER và OWNER được xem, lọc và xử lý hồ sơ của mọi job cùng công ty; recruiter công ty khác bị chặn.
+- Toàn bộ Application Service chạy đạt 40/40 unit test và 7/7 integration test với PostgreSQL/Kafka; build JAR thành công.
 
 ## 2.5 Hạ tầng nền đã có
 
@@ -287,7 +289,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [x] Chạy Flyway/JPA với PostgreSQL 16 thật; kiểm tra JPQL atomic update, history và transactional outbox bằng Testcontainers.
 - [x] Chạy Apache Kafka 3.8 thật: consumer probe nhận đúng `STATUS_CHANGED`; outbox được đánh dấu đã publish và lần chạy publisher kế tiếp không phát lại event.
 - [x] Test hai recruiter đổi trạng thái cùng lúc: đúng một request thành công và request còn lại nhận lỗi concurrent `409`.
-- [ ] Chốt quyền MEMBER/OWNER được xem và xử lý toàn bộ job của công ty.
+- [x] Chốt quyền MEMBER/OWNER: cả hai role được xem và xử lý hồ sơ của toàn bộ job cùng công ty; recruiter công ty khác nhận `403`.
 
 ## P02 — Application Evaluation
 
@@ -460,20 +462,19 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## Thứ tự ưu tiên đề xuất
 
-1. Hoàn tất phần P01 còn lại: chốt quyền MEMBER/OWNER.
-2. Hoàn thiện Auth và Profile vì đang chặn xác thực/nộp đơn end-to-end.
-3. Hoàn thiện File/Media để mở khóa CV, logo, attachment và Offer letter.
-4. Làm Application Evaluation, Offer và Dashboard.
-5. Làm AI embedding/recommendation rồi nối Job/Application.
-6. Làm Interview, Notification và Chat theo hợp đồng event đã chốt.
-7. Hoàn thiện Admin, Frontend, Jitsi và kiểm thử end-to-end.
+1. Hoàn thiện Auth và Profile vì đang chặn xác thực/nộp đơn end-to-end.
+2. Hoàn thiện File/Media để mở khóa CV, logo, attachment và Offer letter.
+3. Làm Application Evaluation, Offer và Dashboard.
+4. Làm AI embedding/recommendation rồi nối Job/Application.
+5. Làm Interview, Notification và Chat theo hợp đồng event đã chốt.
+6. Hoàn thiện Admin, Frontend, Jitsi và kiểm thử end-to-end.
 
 ## Rủi ro và điểm cần chốt ngay
 
 - Auth chưa phát JWT thật nên các service đã verify JWT chưa thể chạy end-to-end.
 - Profile chưa có API CV nên Application Submission sẽ lỗi tích hợp dù unit test đã đạt.
 - AI provider chưa thống nhất giữa tài liệu (Claude) và dependency hiện tại (Gemini).
-- Event envelope trong `docs/architecture.md` dùng `camelCase`, trong implementation Application/Job có trường `snake_case`; cần thống nhất trước khi Notification/Admin/AI consume.
-- Pipeline đã được kiểm chứng với PostgreSQL và Kafka thật; hợp đồng quyền MEMBER/OWNER vẫn chưa được chốt.
+- Event envelope trong `docs/architecture.md` dùng `camelCase`, trong implementation Application/Job có trường `snake_case`; `recruiter_id` hiện là người tạo job thay vì người thực hiện transition. Cần thống nhất trước khi Notification/Admin/AI consume.
+- Pipeline, Kafka và hợp đồng quyền MEMBER/OWNER đã được kiểm chứng; Application Pipeline dùng quyền toàn công ty, còn quyền sửa/xóa Job vẫn do Job Service kiểm soát.
 - Docker daemon và Testcontainers đã hoạt động; Docker Compose toàn hệ thống vẫn chưa được kiểm chứng và hiện thiếu file môi trường runtime của một số service.
 - Nginx chưa có route độc lập cho Bookmark/Offer và exact path không có dấu `/` cuối.
