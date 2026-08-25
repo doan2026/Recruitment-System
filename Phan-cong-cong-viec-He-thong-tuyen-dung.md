@@ -776,6 +776,8 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 - Dùng @Version (optimistic locking) trên Application — hai HR đổi trạng thái cùng lúc thì người sau nhận lỗi và phải tải lại.
 - Mọi lần đổi trạng thái đều ghi ApplicationHistory (ai đổi, từ trạng thái nào sang trạng thái nào, lúc nào, ghi chú) — dùng để đối soát và hiển thị timeline cho ứng viên.
 - Đánh giá nội bộ của HR không bao giờ hiển thị cho ứng viên.
+- Mỗi recruiter chỉ tạo một Evaluation cho mỗi đơn; recruiter khác trong cùng công ty vẫn có thể tạo đánh giá riêng. Điểm tổng và từng tiêu chí dùng thang 0–100, tối đa 2 chữ số thập phân; criteria là JSON object có 1–20 tiêu chí và note là tuỳ chọn, tối đa 2000 ký tự.
+- Evaluator luôn lấy từ JWT, thời điểm tạo do Application Service sinh. Việc đánh giá không tự đổi trạng thái Application, không ghi history và không phát Kafka event.
 - Ứng viên chỉ xem được đơn của chính mình; HR chỉ xem được đơn thuộc job của công ty mình.
 - Trong Application Pipeline, cả MEMBER và OWNER được xem và xử lý đơn của mọi job thuộc công ty, kể cả job do recruiter khác tạo. Giới hạn MEMBER chỉ sửa/xoá job do mình tạo chỉ áp dụng cho Job Service.
 - Publish event là bước bắt buộc sau mỗi lần đổi trạng thái — Notification phụ thuộc hoàn toàn vào đây.

@@ -1,8 +1,8 @@
 # BÁO CÁO TIẾN ĐỘ DỰ ÁN HỆ THỐNG TUYỂN DỤNG
 
 > Ngày cập nhật: 25/08/2026
-> Nhánh đối chiếu chính: `develop` sau PR #18 tại merge commit `2a6a644`
-> Nhánh đang làm việc: `feature/application-service/application-pipeline-company-permissions`
+> Nhánh đối chiếu chính: `develop` tại commit `be3da01`
+> Nhánh đang làm việc: `feature/application-service/application-evaluation`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -24,7 +24,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 | Admin & Statistics Service | Người 1 | ⏳ Scaffold |
 | Company Service | Người 2 | ✅ Nghiệp vụ chính đã merge |
 | Job & Search Service | Người 2 | 🟡 Phần cốt lõi đã merge; AI recommendation và tích hợp thật còn thiếu |
-| Application Service | Người 2 | 🟡 Submission, Bookmark, Tracking đã merge; Pipeline đang ở nhánh feature |
+| Application Service | Người 2 | 🟡 Submission, Bookmark, Tracking, Pipeline và quyền MEMBER/OWNER đã merge; Evaluation hoàn thành trên nhánh hiện tại, chưa merge |
 | AI Service | Người 2 | ⏳ Scaffold |
 | Interview & Video Call Service | Người 3 | ⏳ Scaffold |
 | Chat Service | Người 3 | ⏳ Prototype realtime |
@@ -98,7 +98,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** nộp đơn; Bookmark; Candidate theo dõi timeline; HR lọc và quản lý hồ sơ; state machine; đánh giá nội bộ; gửi/phản hồi Offer; thống kê recruiter.
 - **Chức năng chính:** Application, ApplicationHistory, Evaluation, Offer, Bookmark; optimistic locking; phân quyền theo Candidate/công ty; phát `application-events`.
 - **Phụ thuộc:** Auth, Profile, Job, Company, AI, File/Media và Notification qua Kafka.
-- **Trạng thái:** submission, Bookmark, tracking và pipeline nền đã merge; hardening quyền MEMBER/OWNER đang ở nhánh hiện tại; evaluation, offer và stats chưa làm.
+- **Trạng thái:** submission, Bookmark, tracking, pipeline và quyền MEMBER/OWNER đã merge; Evaluation hoàn thành trên nhánh hiện tại nhưng chưa merge; Offer và stats chưa làm.
 
 ## T08 — AI Service
 
@@ -269,7 +269,17 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Cả MEMBER và OWNER được xem, lọc và xử lý hồ sơ của mọi job cùng công ty; recruiter công ty khác bị chặn.
 - Toàn bộ Application Service chạy đạt 40/40 unit test và 7/7 integration test với PostgreSQL/Kafka; build JAR thành công.
 
-## 2.5 Hạ tầng nền đã có
+## 2.5 Application Evaluation — hoàn thành trên nhánh hiện tại (chưa merge)
+
+- Flyway V3 tạo bảng `evaluations` với `criteria_json JSONB`, khóa ngoại cascade về Application, check constraint và index theo application/time.
+- Endpoint `POST /applications/:id/evaluation` chỉ dành cho recruiter; cả MEMBER và OWNER được đánh giá application cùng công ty, recruiter công ty khác bị chặn `403`.
+- Validate score và từng điểm tiêu chí trong khoảng `0–100`, tối đa hai chữ số thập phân; criteria có `1–20` tên duy nhất; note tối đa 2.000 ký tự.
+- `evaluator_id` lấy từ JWT subject và `created_at` lấy từ clock phía server; client không thể giả mạo người đánh giá hoặc thời gian.
+- Unique constraint `(application_id, evaluator_id)` kết hợp precheck và xử lý race condition, trả `409` khi cùng recruiter đánh giá lặp.
+- Evaluation là dữ liệu nội bộ: API Candidate, chi tiết đơn và timeline không trả dữ liệu đánh giá.
+- Full verify đạt 67/67 unit test và 14/14 integration test; `BUILD SUCCESS` với PostgreSQL/Kafka qua Testcontainers.
+
+## 2.6 Hạ tầng nền đã có
 
 - Monorepo tách 11 service, frontend, Dockerfile và `.env.example`.
 - Docker Compose định nghĩa API Gateway, PostgreSQL/pgvector, MongoDB, Redis, Kafka KRaft, Elasticsearch, 11 backend service và frontend.
@@ -293,12 +303,14 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## P02 — Application Evaluation
 
-- [ ] Tạo nhánh `feature/application-service/application-evaluation` từ `develop` mới nhất.
-- [ ] Thêm bảng/entity/repository `Evaluation`.
-- [ ] Implement `POST /applications/:id/evaluation` cho recruiter cùng công ty.
-- [ ] Validate score, criteria JSON và note; lưu evaluator/time.
-- [ ] Bảo đảm Candidate không bao giờ nhận Evaluation trong API của mình.
-- [ ] Bổ sung unit/integration test và Swagger.
+> Đã hoàn thành và verify trên nhánh `feature/application-service/application-evaluation`; chưa merge vào `develop`.
+
+- [x] Tạo nhánh `feature/application-service/application-evaluation` từ `develop` mới nhất.
+- [x] Thêm bảng/entity/repository `Evaluation`.
+- [x] Implement `POST /applications/:id/evaluation` cho recruiter cùng công ty.
+- [x] Validate score, criteria JSON và note; lưu evaluator/time.
+- [x] Bảo đảm Candidate không bao giờ nhận Evaluation trong API của mình.
+- [x] Bổ sung unit/integration test và Swagger.
 
 ## P03 — Application Offer
 
@@ -464,7 +476,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 1. Hoàn thiện Auth và Profile vì đang chặn xác thực/nộp đơn end-to-end.
 2. Hoàn thiện File/Media để mở khóa CV, logo, attachment và Offer letter.
-3. Làm Application Evaluation, Offer và Dashboard.
+3. Làm Application Offer và Dashboard.
 4. Làm AI embedding/recommendation rồi nối Job/Application.
 5. Làm Interview, Notification và Chat theo hợp đồng event đã chốt.
 6. Hoàn thiện Admin, Frontend, Jitsi và kiểm thử end-to-end.
@@ -476,5 +488,6 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - AI provider chưa thống nhất giữa tài liệu (Claude) và dependency hiện tại (Gemini).
 - Event envelope trong `docs/architecture.md` dùng `camelCase`, trong implementation Application/Job có trường `snake_case`; `recruiter_id` hiện là người tạo job thay vì người thực hiện transition. Cần thống nhất trước khi Notification/Admin/AI consume.
 - Pipeline, Kafka và hợp đồng quyền MEMBER/OWNER đã được kiểm chứng; Application Pipeline dùng quyền toàn công ty, còn quyền sửa/xóa Job vẫn do Job Service kiểm soát.
+- Application Evaluation đã được kiểm chứng với JSONB trên PostgreSQL thật, gồm quyền công ty, validation, chống đánh giá trùng và Candidate privacy; tính năng vẫn chưa merge vào `develop`.
 - Docker daemon và Testcontainers đã hoạt động; Docker Compose toàn hệ thống vẫn chưa được kiểm chứng và hiện thiếu file môi trường runtime của một số service.
 - Nginx chưa có route độc lập cho Bookmark/Offer và exact path không có dấu `/` cuối.
