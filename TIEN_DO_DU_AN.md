@@ -1,8 +1,8 @@
 # BÁO CÁO TIẾN ĐỘ DỰ ÁN HỆ THỐNG TUYỂN DỤNG
 
 > Ngày cập nhật: 25/08/2026
-> Nhánh đối chiếu chính: `develop` tại commit `be3da01`
-> Nhánh đang làm việc: `feature/application-service/application-evaluation`
+> Nhánh đối chiếu chính: `develop` (P02 Evaluation đã merge theo xác nhận của người dùng)
+> Nhánh đang làm việc: `feature/application-service/application-offer`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -24,7 +24,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 | Admin & Statistics Service | Người 1 | ⏳ Scaffold |
 | Company Service | Người 2 | ✅ Nghiệp vụ chính đã merge |
 | Job & Search Service | Người 2 | 🟡 Phần cốt lõi đã merge; AI recommendation và tích hợp thật còn thiếu |
-| Application Service | Người 2 | 🟡 Submission, Bookmark, Tracking, Pipeline và quyền MEMBER/OWNER đã merge; Evaluation hoàn thành trên nhánh hiện tại, chưa merge |
+| Application Service | Người 2 | 🟡 Submission, Bookmark, Tracking, Pipeline, quyền MEMBER/OWNER và Evaluation đã merge; Offer hoàn thành, verify trên nhánh hiện tại nhưng chưa merge |
 | AI Service | Người 2 | ⏳ Scaffold |
 | Interview & Video Call Service | Người 3 | ⏳ Scaffold |
 | Chat Service | Người 3 | ⏳ Prototype realtime |
@@ -98,7 +98,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** nộp đơn; Bookmark; Candidate theo dõi timeline; HR lọc và quản lý hồ sơ; state machine; đánh giá nội bộ; gửi/phản hồi Offer; thống kê recruiter.
 - **Chức năng chính:** Application, ApplicationHistory, Evaluation, Offer, Bookmark; optimistic locking; phân quyền theo Candidate/công ty; phát `application-events`.
 - **Phụ thuộc:** Auth, Profile, Job, Company, AI, File/Media và Notification qua Kafka.
-- **Trạng thái:** submission, Bookmark, tracking, pipeline và quyền MEMBER/OWNER đã merge; Evaluation hoàn thành trên nhánh hiện tại nhưng chưa merge; Offer và stats chưa làm.
+- **Trạng thái:** submission, Bookmark, tracking, pipeline, quyền MEMBER/OWNER và Evaluation đã merge; Offer hoàn thành, verify trên nhánh hiện tại nhưng chưa merge; recruiter stats chưa làm.
 
 ## T08 — AI Service
 
@@ -158,7 +158,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Mục tiêu:** chứng minh các luồng xuyên service chạy thật, ổn định và có thể triển khai.
 - **Công nghệ/công cụ:** unit/integration/E2E test, Docker Compose, CI/CD, Swagger/OpenAPI, logging/metrics/tracing.
 - **Đầu ra:** test contract REST/Kafka; migration sạch; test concurrency/idempotency; security test; smoke test; tài liệu môi trường; backup/restore; monitoring.
-- **Trạng thái:** đã có unit test tập trung ở Company, Job/Search và Application; Application Pipeline đã có integration test với PostgreSQL 16 và Apache Kafka 3.8 thật qua Testcontainers; chưa có E2E toàn hệ thống.
+- **Trạng thái:** đã có unit test tập trung ở Company, Job/Search và Application; Application Service hiện đạt 100 unit test và 23 integration test với PostgreSQL 16/Apache Kafka qua Testcontainers; chưa có E2E toàn hệ thống.
 
 ---
 
@@ -267,9 +267,11 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Mỗi lần chuyển trạng thái ghi history và outbox `STATUS_CHANGED` trong transaction.
 - Contract Company Service được kiểm tra fail-closed với `companyId` và `memberRole`.
 - Cả MEMBER và OWNER được xem, lọc và xử lý hồ sơ của mọi job cùng công ty; recruiter công ty khác bị chặn.
-- Toàn bộ Application Service chạy đạt 40/40 unit test và 7/7 integration test với PostgreSQL/Kafka; build JAR thành công.
+- Tại mốc bàn giao riêng Pipeline, suite khi đó đạt 40/40 unit test và 7/7 integration test với PostgreSQL/Kafka; kết quả Application Service hiện tại được cập nhật ở mục Offer bên dưới.
 
-## 2.5 Application Evaluation — hoàn thành trên nhánh hiện tại (chưa merge)
+## 2.5 Application Evaluation — đã merge vào `develop`
+
+> Việc merge P02 vào `develop` đã được người dùng xác nhận; báo cáo không ghi thêm commit hash khi chưa có dữ liệu đối chiếu mới.
 
 - Flyway V3 tạo bảng `evaluations` với `criteria_json JSONB`, khóa ngoại cascade về Application, check constraint và index theo application/time.
 - Endpoint `POST /applications/:id/evaluation` chỉ dành cho recruiter; cả MEMBER và OWNER được đánh giá application cùng công ty, recruiter công ty khác bị chặn `403`.
@@ -279,7 +281,19 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Evaluation là dữ liệu nội bộ: API Candidate, chi tiết đơn và timeline không trả dữ liệu đánh giá.
 - Full verify đạt 67/67 unit test và 14/14 integration test; `BUILD SUCCESS` với PostgreSQL/Kafka qua Testcontainers.
 
-## 2.6 Hạ tầng nền đã có
+## 2.6 Application Offer — hoàn thành trên nhánh hiện tại (chưa merge)
+
+- Flyway V4 tạo bảng `offers`, unique một Offer/Application, khóa ngoại cascade, check constraint dữ liệu/phản hồi và partial index cho Offer `SENT` chờ hết hạn.
+- `POST /applications/:id/offer` dành cho MEMBER/OWNER cùng công ty, chỉ nhận Application `INTERVIEW`; `PATCH /offers/:id/respond` chỉ dành cho đúng Candidate.
+- Validate salary dương tối đa hai chữ số thập phân, start date không ở quá khứ, position/note, cặp `file_id/file_url`, URL HTTP(S), thời hạn và expected version.
+- Gửi Offer chuyển Application sang `OFFER`; chấp nhận chuyển Offer/Application sang `ACCEPTED/HIRED`; từ chối bắt buộc lý do và chuyển sang `DECLINED/REJECTED`.
+- Atomic update và transaction chung bảo vệ phản hồi lặp, hết hạn, concurrency, history và outbox; lỗi giữa transaction không để lại dữ liệu một phần.
+- `OFFER_SENT` và `STATUS_CHANGED` bổ sung `actor_id`, `offer_id`, `offer_status`, `offer_version`; event không chứa salary, note, lý do phản hồi hoặc file reference.
+- Nginx đã có route độc lập `/offers/` giữ nguyên prefix; route `/applications/` tiếp tục strip prefix khi forward.
+- File reference đã được kiểm tra cấu trúc; xác minh canonical metadata và ownership nội bộ còn phụ thuộc contract File/Media ở P09.
+- Full verify đạt 100/100 unit test và 23/23 integration test; PostgreSQL/Flyway/JPA, authorization, expiry, rollback và concurrent response đều đạt.
+
+## 2.7 Hạ tầng nền đã có
 
 - Monorepo tách 11 service, frontend, Dockerfile và `.env.example`.
 - Docker Compose định nghĩa API Gateway, PostgreSQL/pgvector, MongoDB, Redis, Kafka KRaft, Elasticsearch, 11 backend service và frontend.
@@ -303,7 +317,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## P02 — Application Evaluation
 
-> Đã hoàn thành và verify trên nhánh `feature/application-service/application-evaluation`; chưa merge vào `develop`.
+> Đã hoàn thành, verify và merge vào `develop` theo xác nhận của người dùng.
 
 - [x] Tạo nhánh `feature/application-service/application-evaluation` từ `develop` mới nhất.
 - [x] Thêm bảng/entity/repository `Evaluation`.
@@ -314,14 +328,16 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## P03 — Application Offer
 
-- [ ] Tạo bảng `Offer` và trạng thái `SENT/ACCEPTED/DECLINED`.
-- [ ] Implement `POST /applications/:id/offer`, chỉ cho phép từ `INTERVIEW`.
-- [ ] Lưu salary, start date, position, note và `file_url/file_id` từ File Service.
-- [ ] Chuyển Application sang `OFFER` bằng optimistic locking.
-- [ ] Phát event `OFFER_SENT` qua transactional outbox.
-- [ ] Implement `PATCH /offers/:id/respond` cho đúng Candidate.
-- [ ] ACCEPTED chuyển Application sang `HIRED`; DECLINED chuyển `REJECTED` và lưu lý do.
-- [ ] Chặn phản hồi lặp, offer hết hạn và concurrent response.
+> Đã hoàn thành và verify trên nhánh `feature/application-service/application-offer`; chưa merge vào `develop`.
+
+- [x] Tạo bảng `Offer` và trạng thái `SENT/ACCEPTED/DECLINED`.
+- [x] Implement `POST /applications/:id/offer`, chỉ cho phép từ `INTERVIEW`.
+- [x] Lưu salary, start date, position, note và cặp reference `file_url/file_id`; xác minh ownership/canonical file chờ P09.
+- [x] Chuyển Application sang `OFFER` bằng optimistic locking.
+- [x] Phát event `OFFER_SENT` qua transactional outbox.
+- [x] Implement `PATCH /offers/:id/respond` cho đúng Candidate.
+- [x] ACCEPTED chuyển Application sang `HIRED`; DECLINED chuyển `REJECTED` và lưu lý do.
+- [x] Chặn phản hồi lặp, offer hết hạn và concurrent response.
 
 ## P04 — Application Recruiter Dashboard và AI Match
 
@@ -437,7 +453,8 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## P15 — Hạ tầng và API Gateway
 
-- [ ] Bổ sung route chính thức `/bookmarks` và `/offers`; hiện Bookmark đi qua `/applications/bookmarks`.
+- [x] Bổ sung route chính thức `/offers/`, giữ nguyên prefix khi forward tới Application Service.
+- [ ] Bổ sung route chính thức `/bookmarks`; hiện Bookmark đi qua `/applications/bookmarks`.
 - [ ] Xử lý cả URL có và không có dấu `/` cuối, ví dụ `/applications` và `/applications/`.
 - [ ] Thêm healthcheck cho từng service và `depends_on` theo trạng thái healthy.
 - [ ] Dựng Jitsi self-host đầy đủ: web, Prosody, Jicofo, JVB, domain và TLS.
@@ -445,7 +462,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [ ] Cấu hình CORS, rate limit, request ID, timeout và WebSocket upgrade nhất quán.
 - [ ] Thêm logging tập trung, metrics, tracing và cảnh báo.
 - [ ] Backup/restore volume và migration strategy.
-- [ ] Chạy `docker compose up --build` và smoke test toàn bộ route; lần kiểm tra hiện tại chưa thực hiện được vì Docker daemon chưa chạy.
+- [ ] Chạy `docker compose up --build` và smoke test toàn bộ route; Docker daemon/Testcontainers đã hoạt động nhưng Compose/smoke toàn hệ thống chưa được chạy.
 
 ## P16 — Frontend
 
@@ -476,7 +493,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 1. Hoàn thiện Auth và Profile vì đang chặn xác thực/nộp đơn end-to-end.
 2. Hoàn thiện File/Media để mở khóa CV, logo, attachment và Offer letter.
-3. Làm Application Offer và Dashboard.
+3. Làm Application Recruiter Dashboard và AI Match.
 4. Làm AI embedding/recommendation rồi nối Job/Application.
 5. Làm Interview, Notification và Chat theo hợp đồng event đã chốt.
 6. Hoàn thiện Admin, Frontend, Jitsi và kiểm thử end-to-end.
@@ -486,8 +503,10 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Auth chưa phát JWT thật nên các service đã verify JWT chưa thể chạy end-to-end.
 - Profile chưa có API CV nên Application Submission sẽ lỗi tích hợp dù unit test đã đạt.
 - AI provider chưa thống nhất giữa tài liệu (Claude) và dependency hiện tại (Gemini).
-- Event envelope trong `docs/architecture.md` dùng `camelCase`, trong implementation Application/Job có trường `snake_case`; `recruiter_id` hiện là người tạo job thay vì người thực hiện transition. Cần thống nhất trước khi Notification/Admin/AI consume.
+- Event envelope trong `docs/architecture.md` dùng `camelCase`, còn implementation Application/Job dùng `snake_case`. Event Offer đã bổ sung `actor_id`, `offer_id`, `offer_status`, `offer_version`; `recruiter_id` vẫn là recruiter gắn với Application/job, còn người thao tác nằm ở `actor_id`. Cần chốt contract này trước khi Notification/Admin/AI consume.
 - Pipeline, Kafka và hợp đồng quyền MEMBER/OWNER đã được kiểm chứng; Application Pipeline dùng quyền toàn công ty, còn quyền sửa/xóa Job vẫn do Job Service kiểm soát.
-- Application Evaluation đã được kiểm chứng với JSONB trên PostgreSQL thật, gồm quyền công ty, validation, chống đánh giá trùng và Candidate privacy; tính năng vẫn chưa merge vào `develop`.
+- Application Evaluation đã được kiểm chứng với JSONB trên PostgreSQL thật, gồm quyền công ty, validation, chống đánh giá trùng và Candidate privacy; P02 đã merge vào `develop` theo xác nhận của người dùng.
+- Application Offer đã verify đạt 100 unit test và 23 integration test. Event không lộ salary/note/file, nhưng xác minh canonical file metadata và ownership vẫn chờ API nội bộ của File/Media ở P09.
+- Pipeline chung vẫn cho phép Application ở `OFFER` chuyển thẳng sang `REJECTED` hoặc `WITHDRAWN`; khi đó bản ghi Offer có thể còn `SENT` dù phản hồi tiếp theo đã bị chặn. Cần chốt quy tắc đồng bộ/hủy Offer trong task lifecycle tiếp theo.
 - Docker daemon và Testcontainers đã hoạt động; Docker Compose toàn hệ thống vẫn chưa được kiểm chứng và hiện thiếu file môi trường runtime của một số service.
-- Nginx chưa có route độc lập cho Bookmark/Offer và exact path không có dấu `/` cuối.
+- Nginx đã có route độc lập `/offers/`; route `/bookmarks` và exact path không có dấu `/` cuối vẫn còn pending.

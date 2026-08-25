@@ -113,6 +113,7 @@ class ApplicationEvaluationPostgresIT {
         jdbc.execute(
             """
             TRUNCATE TABLE
+                application.offers,
                 application.evaluations,
                 application.application_event_outbox,
                 application.application_history,
@@ -165,9 +166,19 @@ class ApplicationEvaluationPostgresIT {
             """,
             String.class
         );
+        List<String> tables = jdbc.queryForList(
+            """
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = 'application'
+            ORDER BY table_name
+            """,
+            String.class
+        );
 
-        assertThat(appliedVersions).containsExactly("1", "2", "3");
+        assertThat(appliedVersions).containsExactly("1", "2", "3", "4");
         assertThat(criteriaType).isEqualTo("jsonb");
+        assertThat(tables).contains("evaluations", "offers");
     }
 
     @Test

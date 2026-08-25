@@ -756,11 +756,12 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 8. Không cho phép lùi trạng thái (VD: INTERVIEW → APPLIED). Mọi lần chuyển đều ghi ApplicationHistory và publish application-events.
 #### Luồng 5: Gửi Offer
 1. Từ trạng thái INTERVIEW, HR bấm "Gửi Offer".
-2. Nhập thông tin offer: mức lương, ngày bắt đầu dự kiến, vị trí chính thức, ghi chú, đính kèm file offer letter (qua File Service).
-3. Tạo bản ghi Offer gắn với application_id, chuyển Application sang trạng thái OFFER.
-4. Publish application-events (loại OFFER_SENT) → Notification Service gửi cả thông báo trong app và email.
-5. Ứng viên xem offer và bấm Chấp nhận hoặc Từ chối.
-6. Chấp nhận → Application chuyển HIRED. Từ chối → chuyển REJECTED kèm lý do từ phía ứng viên.
+2. Nhập mức lương dương (tối đa hai chữ số thập phân), ngày bắt đầu không ở quá khứ, vị trí chính thức, ghi chú, thời hạn phản hồi và file offer letter tuỳ chọn.
+3. `file_id` và `file_url` phải cùng có hoặc cùng vắng; URL phải là HTTP(S) tuyệt đối. Xác minh canonical metadata và ownership nội bộ chờ contract File Service ở P09.
+4. Mỗi Application chỉ có một Offer. Tạo Offer với `sent_by` lấy từ JWT, trạng thái `SENT`, đồng thời chuyển Application `INTERVIEW → OFFER` bằng expected version trong một transaction.
+5. Publish `application-events` loại `OFFER_SENT` qua transactional outbox để Notification Service gửi thông báo trong app và email.
+6. Chỉ Candidate sở hữu Application được phản hồi Offer `SENT` chưa hết hạn; request phải mang expected version của cả Offer và Application.
+7. Chấp nhận chuyển Offer/Application sang `ACCEPTED/HIRED`; từ chối bắt buộc lý do và chuyển sang `DECLINED/REJECTED`. Phản hồi lặp, hết hạn hoặc concurrent đều bị chặn.
 #### Luồng 6: Thống kê cho Recruiter (Dashboard nhà tuyển dụng)
 1. Tổng số tin đang tuyển (lấy từ Job Service), tổng số đơn nhận được theo từng tin.
 2. Số đơn theo từng trạng thái và tỷ lệ chuyển đổi APPLIED → REVIEWING → INTERVIEW → OFFER → HIRED.
@@ -778,6 +779,11 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 - Đánh giá nội bộ của HR không bao giờ hiển thị cho ứng viên.
 - Mỗi recruiter chỉ tạo một Evaluation cho mỗi đơn; recruiter khác trong cùng công ty vẫn có thể tạo đánh giá riêng. Điểm tổng và từng tiêu chí dùng thang 0–100, tối đa 2 chữ số thập phân; criteria là JSON object có 1–20 tiêu chí và note là tuỳ chọn, tối đa 2000 ký tự.
 - Evaluator luôn lấy từ JWT, thời điểm tạo do Application Service sinh. Việc đánh giá không tự đổi trạng thái Application, không ghi history và không phát Kafka event.
+- Mỗi Application chỉ có tối đa một Offer; MEMBER/OWNER cùng công ty chỉ được gửi Offer khi Application đang ở `INTERVIEW`, còn `sent_by` luôn lấy từ JWT subject.
+- Offer phải có salary dương tối đa hai chữ số thập phân, start date không ở quá khứ, position không rỗng, note tối đa 2000 ký tự và `expires_at` ở tương lai. `file_id/file_url` là cặp tuỳ chọn và URL phải là HTTP(S) tuyệt đối.
+- Application và Offer đều dùng expected version/atomic update. Chỉ đúng Candidate được phản hồi một Offer `SENT` chưa hết hạn; DECLINED bắt buộc có `response_note`.
+- Tạo/phản hồi Offer, chuyển trạng thái Application, ghi ApplicationHistory và transactional outbox phải cùng commit hoặc cùng rollback.
+- Application Service mới kiểm tra cấu trúc file reference; xác minh canonical file metadata, trạng thái confirm và ownership nội bộ vẫn chờ API File/Media ở P09.
 - Ứng viên chỉ xem được đơn của chính mình; HR chỉ xem được đơn thuộc job của công ty mình.
 - Trong Application Pipeline, cả MEMBER và OWNER được xem và xử lý đơn của mọi job thuộc công ty, kể cả job do recruiter khác tạo. Giới hạn MEMBER chỉ sửa/xoá job do mình tạo chỉ áp dụng cho Job Service.
 - Publish event là bước bắt buộc sau mỗi lần đổi trạng thái — Notification phụ thuộc hoàn toàn vào đây.
@@ -785,7 +791,7 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 - Application(id, job_id, company_id, candidate_id, cv_id, cover_letter, status, source, match_score, applied_at, updated_at, version)
 - ApplicationHistory(id, application_id, from_status, to_status, changed_by, note, changed_at)
 - Evaluation(id, application_id, evaluator_id, score, criteria_json, note, created_at)
-- Offer(id, application_id, salary, start_date, position, note, file_url, status[SENT|ACCEPTED|DECLINED], sent_at, responded_at)
+- Offer(id, application_id, sent_by, salary, start_date, position, note, file_id, file_url, status[SENT|ACCEPTED|DECLINED], sent_at, expires_at, responded_at, response_note, version)
 - Bookmark(id, user_id, job_id, created_at)
 ### 2.3. API chính
 ```text
@@ -815,10 +821,12 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 ### 2.4. Sự kiện Kafka
 - PRODUCE topic application-events mỗi khi trạng thái thay đổi hoặc offer được gửi.
 - Payload gợi ý: { event_id, action: STATUS_CHANGED|OFFER_SENT, application_id, job_id, job_title, candidate_id, recruiter_id, from_status, to_status, occurred_at }.
+- Implementation Offer mở rộng payload bằng `actor_id`, `offer_id`, `offer_status`, `offer_version`. `recruiter_id` vẫn là recruiter gắn với Application/job; người thực hiện thao tác nằm ở `actor_id`.
+- Event Offer không được chứa salary, note, lý do phản hồi, `file_id` hoặc `file_url`.
 - Consumer: Notification Service (Người 3) và Admin & Statistics Service (Người 1).
 - Đây là hợp đồng liên người quan trọng nhất của Người 2 — chốt schema với Người 3 trong tuần đầu.
 ### 2.5. Phụ thuộc giữa các service
-- Phụ thuộc REST: Profile Service (Người 1) lấy CV, Job Service (chính Người 2) kiểm tra tin.
+- Phụ thuộc REST: Profile Service (Người 1) lấy CV, Job Service (chính Người 2) kiểm tra tin; Offer sẽ gọi API nội bộ File/Media để xác minh file khi contract P09 hoàn thành.
 - Được phụ thuộc bởi: Interview Service (Người 3) tham chiếu application_id, Notification Service (Người 3) qua Kafka.
 ### 2.6. Tiêu chí hoàn thành (Definition of Done)
 - Nộp đơn → HR đổi trạng thái → ứng viên thấy timeline cập nhật: chạy thông suốt.
