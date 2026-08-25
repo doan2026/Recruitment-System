@@ -1,8 +1,8 @@
 # BÁO CÁO TIẾN ĐỘ DỰ ÁN HỆ THỐNG TUYỂN DỤNG
 
-> Ngày cập nhật: 25/08/2026
-> Nhánh đối chiếu chính: `develop` (Application AI Match đã merge theo xác nhận của người dùng)
-> Nhánh triển khai lần cập nhật: `feature/ai-service/match-endpoint`
+> Ngày cập nhật: 26/08/2026
+> Nhánh đối chiếu chính: `develop`
+> Nhánh triển khai lần cập nhật: `feature/ai-service/job-embedding-consumer`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -25,7 +25,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 | Company Service | Người 2 | ✅ Nghiệp vụ chính đã merge |
 | Job & Search Service | Người 2 | 🟡 Phần cốt lõi đã merge; AI recommendation và tích hợp thật còn thiếu |
 | Application Service | Người 2 | 🟡 Các luồng từ Submission đến AI Match phía consumer đã merge; filter kỹ năng còn thiếu |
-| AI Service | Người 2 | 🟡 Schema pgvector, migration và provider `/match` đã hoàn thành; consumer/recommend/chat còn thiếu |
+| AI Service | Người 2 | 🟡 Provider `/match` và consumer `job-events` đã hoàn thành; consumer CV/recommend/chat còn thiếu |
 | Interview & Video Call Service | Người 3 | ⏳ Scaffold |
 | Chat Service | Người 3 | ⏳ Prototype realtime |
 | Notification Service | Người 3 | ⏳ Scaffold |
@@ -104,11 +104,11 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 - **Mục tiêu:** tạo embedding CV/Job, chấm điểm tương đồng, gợi ý việc và chatbot hỗ trợ Candidate.
 - **Công nghệ theo tài liệu:** Python, FastAPI, sentence-transformers `all-MiniLM-L6-v2`, pgvector, Redis, Kafka và Anthropic Claude.
-- **Công nghệ hiện tại:** FastAPI, Psycopg 3, Alembic, PostgreSQL/pgvector; sentence-transformers và `google-genai` được tách thành dependency tùy chọn cho task consumer/chat sau.
+- **Công nghệ hiện tại:** FastAPI, Psycopg 3, Alembic, PostgreSQL/pgvector, confluent-kafka và sentence-transformers CPU với model/revision bất biến; `google-genai` được tách riêng cho task chatbot.
 - **Luồng hoạt động:** consume `cv-events`; consume `job-events`; cập nhật/xóa vector; cosine similarity; recommend jobs/CVs; match CV-job; chatbot có lịch sử ngắn hạn.
 - **Chức năng chính:** `/ai/recommend/jobs`, `/ai/recommend/candidates`, `/ai/match`, `/ai/chat` và consumer idempotent.
 - **Phụ thuộc:** schema `cv-events`, `job-events`, Kafka, PostgreSQL pgvector và Redis.
-- **Trạng thái:** đã có vector store/migration, internal auth, readiness và provider `/match`; chưa có consumer sinh embedding, recommendation hoặc gọi mô hình/chat thật.
+- **Trạng thái:** đã có vector store/migration, internal auth, readiness, provider `/match` và worker sinh Job embedding từ `job-events`; consumer CV, recommendation và chatbot còn pending.
 
 ## T09 — Interview & Video Call Service
 
@@ -158,7 +158,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Mục tiêu:** chứng minh các luồng xuyên service chạy thật, ổn định và có thể triển khai.
 - **Công nghệ/công cụ:** unit/integration/E2E test, Docker Compose, CI/CD, Swagger/OpenAPI, logging/metrics/tracing.
 - **Đầu ra:** test contract REST/Kafka; migration sạch; test concurrency/idempotency; security test; smoke test; tài liệu môi trường; backup/restore; monitoring.
-- **Trạng thái:** đã có unit test tập trung ở Company, Job/Search, Application và AI; Application Service hiện đạt 162 unit test và 35 integration test, AI provider đạt 37 unit test và 12 integration test với PostgreSQL 16/pgvector; chưa có E2E toàn hệ thống.
+- **Trạng thái:** đã có unit test tập trung ở Company, Job/Search, Application và AI; Application Service hiện đạt 162 unit test và 35 integration test, AI Service đạt 159 unit test và 29 integration test với PostgreSQL 16/pgvector cùng Kafka 3.8 thật; chưa có E2E toàn hệ thống.
 
 ---
 
@@ -216,8 +216,9 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 - Đồng bộ create/update/status/delete sang Elasticsearch.
 - Có reindex endpoint và hàng đợi xử lý.
-- Phát `job-events` cho AI/Admin, dùng event ID để consumer có thể deduplicate.
+- Phát `job-events` với Kafka key `job_id` và payload flat snake_case cho AI/Admin; dùng `event_id` để consumer deduplicate.
 - Có retry/fallback khi hạ tầng tìm kiếm hoặc Kafka gặp lỗi.
+- Producer hiện chưa phát `aggregate_version`, `requirements`, `salary_min/max`, `job_type` và chưa có transactional outbox; đây là phần nâng cấp còn lại để bảo đảm thứ tự tuyệt đối và đủ metadata.
 
 ### Job Availability — PR #9
 
@@ -425,23 +426,33 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## P11 — AI Service
 
-> Vertical slice pgvector + provider `/match` đã hoàn thành trên nhánh `feature/ai-service/match-endpoint`: 37 unit test và 12 integration test đều đạt.
+> Hai vertical slice pgvector/provider `/match` và consumer Job embedding đã hoàn thành. Bộ AI Service hiện đạt 159 unit test + 29 integration test PostgreSQL/Kafka (188 tổng cộng); production worker cũng đã chạy smoke test model thật.
 
 - [ ] Chốt nhà cung cấp LLM: tài liệu ghi Claude nhưng dependency tùy chọn hiện khai báo Gemini.
 - [x] Tạo schema pgvector và migration cho provider `/match`.
   - [x] Alembic quản lý `ai.cv_embeddings`, `ai.job_embeddings`, `vector(384)` và partial HNSW cosine index.
   - [x] Migration chạy trước Uvicorn; readiness kiểm tra extension và cả hai bảng.
 - [ ] Bổ sung CV nearest-neighbor index và benchmark index/filter khi làm recommendation candidates.
-- [ ] Consumer `cv-events` và `job-events`, download/parse nội dung rồi upsert/delete embedding.
-- [ ] Idempotency theo `event_id` và xử lý event đến sai thứ tự.
+- [ ] Hoàn thiện toàn bộ consumer `cv-events` và `job-events`.
+  - [x] Consumer `job-events` kiểm tra key/payload flat snake_case, chuẩn hóa nội dung, sinh vector và upsert/deactivate Job embedding.
+  - [x] Chỉ `PUBLISHED` active; `/match` bỏ qua Job inactive. Các trạng thái `DRAFT/PENDING_APPROVAL/CLOSED/EXPIRED` tạo tombstone/deactivate.
+  - [x] Worker non-root dùng model CPU 384 chiều với commit SHA bất biến, warm-up trước khi consume và cache riêng trong Docker volume.
+  - [ ] Consumer `cv-events`, download/parse CV và upsert/delete CV embedding; đang chờ Profile/File cung cấp contract canonical.
+- [x] Idempotency/order cho Job theo `event_id`, ledger và aggregate cursor; ưu tiên `aggregate_version`, fallback `occurred_at + partition + offset`.
+  - [x] Lookup event trước inference, transaction atomic cho embedding/cursor/ledger và hash-only DLQ; commit Kafka đồng bộ chỉ sau durable terminal outcome.
+  - [ ] Bổ sung `aggregate_version` đơn điệu và transactional outbox phía Job producer để thứ tự chắc chắn giữa các worker producer chạy song song.
+- [ ] Bổ sung `requirements`, salary và job type vào `job-events` producer để embedding/filter có đủ metadata.
 - [ ] Implement recommend jobs và recommend candidates.
 - [x] Implement provider `POST /ai/match` cho Application Service.
   - [x] Bảo vệ bằng shared `X-Internal-Api-Key`, so sánh constant-time; request UUID snake_case và response envelope echo IDs.
   - [x] Chuẩn hóa cosine `[-1,1]` thành score `[0,1]` bằng `(cosine_similarity + 1) / 2`, không clamp.
   - [x] Thiếu embedding/model mismatch trả reason ổn định; lỗi vector store trả 503 và không lộ vector/nội dung gốc.
+  - [x] Job đã deactivate được coi như không có embedding và trả `JOB_EMBEDDING_NOT_FOUND`.
 - [ ] Implement chatbot có prompt an toàn, Redis history, timeout và rate limit.
-- [x] Vector store hiện chỉ lưu vector, hash, model và metadata lọc tối thiểu; không có cột nội dung CV/job gốc.
-- [x] Test auth/validation/error contract, migration lặp, privacy schema, vector 384 chiều, cosine biên, readiness và runtime non-root.
+- [x] Vector store, ledger và dead-letter chỉ lưu vector/hash/provenance/metadata tối thiểu; không lưu raw Kafka payload/key hoặc nội dung CV/job gốc.
+- [x] Test auth/validation/error contract, migration lặp, privacy schema, vector 384 chiều, cosine biên, readiness, runtime non-root, Job ordering/idempotency/retry/DLQ và Kafka commit.
+  - [x] Integration thật publish Kafka → worker → PostgreSQL/pgvector; kiểm tra duplicate không inference lại, malformed event vào hash-only DLQ và offset được commit.
+  - [x] Production worker image sinh thành công vector chuẩn hóa 384 chiều bằng đúng model revision đã pin.
 - [ ] Test chất lượng recommendation, latency tải thật, fallback và dữ liệu tiếng Việt sau khi consumer/model hoàn thành.
 
 ## P12 — Interview & Video Call Service
@@ -502,9 +513,10 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## P17 — Kiểm thử tích hợp, bảo mật và phát hành
 
-- [ ] Chốt schema JWT và payload Kafka duy nhất giữa các thành viên; xử lý khác biệt `snake_case` và `camelCase` trong tài liệu hiện tại.
+- [ ] Chốt schema JWT và toàn bộ payload Kafka giữa các thành viên; riêng `job-events` đã khóa key `job_id` + payload flat snake_case theo producer hiện tại.
 - [ ] Contract test REST giữa Auth/Profile/Company/Job/Application/Interview.
-- [ ] Contract test Kafka với producer/consumer thật và duplicate event.
+- [ ] Hoàn thiện contract test Kafka cho tất cả producer/consumer thật và duplicate event.
+  - [x] AI Job consumer đã được kiểm tra với payload đúng shape Job producer, broker Kafka thật, duplicate event, DLQ và commit offset.
 - [ ] E2E Candidate: đăng ký → hồ sơ/CV → tìm việc → bookmark/apply → interview → offer → hired.
 - [ ] E2E Recruiter: công ty → xác minh → job → duyệt → nhận hồ sơ → interview → offer.
 - [ ] E2E Admin: duyệt, khóa user, report và dashboard.
@@ -519,8 +531,8 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 1. Hoàn thiện Auth và Profile vì đang chặn xác thực/nộp đơn end-to-end.
 2. Hoàn thiện File/Media để mở khóa CV, logo, attachment và Offer letter.
-3. Hoàn thiện consumer `cv-events`/`job-events` để tự động tạo embedding, sau đó nối recommendation Job/Application trên nền `/match` và pgvector đã có.
-4. Hoàn thiện Profile rồi bổ sung filter kỹ năng của Application và recommendation của Job.
+3. Nâng cấp Job producer với `aggregate_version`/outbox và metadata còn thiếu; đồng thời hoàn thiện Profile/File + contract `cv-events` để triển khai CV consumer.
+4. Implement recommendation jobs/candidates, nối `GET /jobs/recommended`, rồi bổ sung filter kỹ năng của Application.
 5. Làm Interview, Notification và Chat theo hợp đồng event đã chốt.
 6. Hoàn thiện Admin, Frontend, Jitsi và kiểm thử end-to-end.
 
@@ -529,11 +541,12 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Auth chưa phát JWT thật nên các service đã verify JWT chưa thể chạy end-to-end.
 - Profile chưa có API CV nên Application Submission sẽ lỗi tích hợp dù unit test đã đạt.
 - Nhà cung cấp LLM chưa thống nhất giữa tài liệu (Claude) và dependency tùy chọn hiện tại (Gemini); khác biệt này không ảnh hưởng provider `/match` thuần pgvector.
-- Event envelope trong `docs/architecture.md` dùng `camelCase`, còn implementation Application/Job dùng `snake_case`. Event Offer đã bổ sung `actor_id`, `offer_id`, `offer_status`, `offer_version`; `recruiter_id` vẫn là recruiter gắn với Application/job, còn người thao tác nằm ở `actor_id`. Cần chốt contract này trước khi Notification/Admin/AI consume.
+- `job-events` đã được khóa theo implementation thật: key `job_id`, value flat snake_case. Các topic khác vẫn phải chốt riêng; Event Offer đã bổ sung `actor_id`, `offer_id`, `offer_status`, `offer_version`, còn `recruiter_id` là recruiter gắn với Application/job.
 - Pipeline, Kafka và hợp đồng quyền MEMBER/OWNER đã được kiểm chứng; Application Pipeline dùng quyền toàn công ty, còn quyền sửa/xóa Job vẫn do Job Service kiểm soát.
 - Application Evaluation đã được kiểm chứng với JSONB trên PostgreSQL thật, gồm quyền công ty, validation, chống đánh giá trùng và Candidate privacy; P02 đã merge vào `develop` theo xác nhận của người dùng.
 - Application Offer đã verify đạt 100 unit test và 23 integration test. Event không lộ salary/note/file, nhưng xác minh canonical file metadata và ownership vẫn chờ API nội bộ của File/Media ở P09.
-- Application AI Match phía consumer đã verify 162 unit + 35 integration test; AI provider `/match` đã verify 37 unit + 12 integration test trên PostgreSQL 16/pgvector và runtime smoke-test thật. Kết quả chấm điểm end-to-end vẫn chờ consumer tạo CV/Job embedding; filter kỹ năng vẫn chờ Profile/AI.
+- Application AI Match phía caller đã verify 162 unit + 35 integration test. AI Service đạt 159 unit + 29 integration test; Job embedding đã chạy qua Kafka/PostgreSQL thật và model pin thật, nhưng chấm điểm end-to-end vẫn chờ Profile/File + CV consumer.
+- Job producer chưa có `aggregate_version`/transactional outbox trong khi BullMQ xử lý song song; fallback timestamp/partition/offset phía consumer chỉ bảo vệ best-effort, chưa bảo đảm thứ tự tuyệt đối giữa producer workers.
 - Pipeline chung vẫn cho phép Application ở `OFFER` chuyển thẳng sang `REJECTED` hoặc `WITHDRAWN`; khi đó bản ghi Offer có thể còn `SENT` dù phản hồi tiếp theo đã bị chặn. Cần chốt quy tắc đồng bộ/hủy Offer trong task lifecycle tiếp theo.
-- Docker daemon/Testcontainers đã hoạt động; riêng AI runtime đã smoke-test migration, non-root và readiness thành công. Docker Compose toàn hệ thống vẫn chưa được kiểm chứng và hiện thiếu file môi trường runtime của một số service.
+- Docker daemon/Testcontainers đã hoạt động; AI API/worker đã verify migration, non-root, readiness, Kafka 3.8, PostgreSQL 16/pgvector và model thật. Docker Compose toàn hệ thống vẫn chưa được kiểm chứng và hiện thiếu file môi trường runtime của một số service.
 - Nginx đã có route độc lập `/offers/`; route `/bookmarks` và exact path không có dấu `/` cuối vẫn còn pending.

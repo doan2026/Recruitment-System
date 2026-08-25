@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# Install only for the future chatbot provider task.
+google-genai==0.2.2

@@ -1,5 +1,7 @@
 -r requirements.txt
 
-# Install only for the future embedding-consumer and chatbot tasks.
-google-genai==0.2.2
+# CPU-only worker dependencies. Keep the API runtime lightweight.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.10.0+cpu
+confluent-kafka==2.15.0
 sentence-transformers==3.0.1
