@@ -142,6 +142,7 @@ class ApplicationPipelinePostgresIT {
         jdbc.execute(
             """
             TRUNCATE TABLE
+                application.evaluations,
                 application.application_event_outbox,
                 application.application_history,
                 application.bookmarks,
@@ -195,12 +196,13 @@ class ApplicationPipelinePostgresIT {
             String.class
         );
 
-        assertThat(appliedVersions).containsExactly("1", "2");
+        assertThat(appliedVersions).containsExactly("1", "2", "3");
         assertThat(tables).contains(
             "applications",
             "application_history",
             "application_event_outbox",
-            "bookmarks"
+            "bookmarks",
+            "evaluations"
         );
     }
 

@@ -7,6 +7,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.recruitment.application.api.BusinessException;
 import com.recruitment.application.client.CompanyClient;
 import com.recruitment.application.client.CompanyMemberRole;
@@ -77,7 +78,7 @@ class ApplicationTrackingServiceTest {
     }
 
     @Test
-    void ownerCandidateCanViewDetailAndTimeline() {
+    void ownerCandidateCanViewDetailAndTimeline() throws Exception {
         TimelineEntryResponse entry = new TimelineEntryResponse(
             null,
             ApplicationStatus.APPLIED,
@@ -97,6 +98,16 @@ class ApplicationTrackingServiceTest {
 
         assertThat(result.candidateId()).isEqualTo(candidateId);
         assertThat(result.timeline()).containsExactly(entry);
+        String serialized = new ObjectMapper()
+            .findAndRegisterModules()
+            .writeValueAsString(result);
+        assertThat(serialized)
+            .doesNotContain(
+                "\"evaluation\":",
+                "\"evaluations\":",
+                "\"criteria\":",
+                "\"evaluatorId\":"
+            );
         verify(companies, never()).getRecruiterMembership(
             candidateId,
             "Bearer token"

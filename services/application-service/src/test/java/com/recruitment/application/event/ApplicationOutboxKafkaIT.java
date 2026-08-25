@@ -133,6 +133,7 @@ class ApplicationOutboxKafkaIT {
         jdbc.execute(
             """
             TRUNCATE TABLE
+                application.evaluations,
                 application.application_event_outbox,
                 application.application_history,
                 application.bookmarks,

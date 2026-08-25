@@ -4,10 +4,12 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -35,6 +37,20 @@ public class GlobalExceptionHandler {
                 "VALIDATION_ERROR",
                 "Request validation failed",
                 fields
+            )
+        );
+    }
+
+    @ExceptionHandler({
+        HttpMessageNotReadableException.class,
+        MethodArgumentTypeMismatchException.class
+    })
+    ResponseEntity<ApiError> handleInvalidRequest(Exception exception) {
+        return ResponseEntity.badRequest().body(
+            new ApiError(
+                "VALIDATION_ERROR",
+                "Request body or parameter has an invalid format",
+                null
             )
         );
     }
