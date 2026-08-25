@@ -88,7 +88,7 @@ class JobEmbeddingDocument:
 
 
 _MAX_BIGINT = 9_223_372_036_854_775_807
-_MAX_MONEY = Decimal("999999999999.99")
+_MAX_MONEY = Decimal("9999999999999.99")
 _MONEY_QUANTUM = Decimal("0.01")
 
 

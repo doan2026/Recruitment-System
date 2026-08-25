@@ -2,7 +2,7 @@
 
 > Ngày cập nhật: 26/08/2026
 > Nhánh đối chiếu chính: `develop`
-> Nhánh triển khai lần cập nhật: `feature/ai-service/job-embedding-consumer`
+> Nhánh triển khai lần cập nhật: `feature/job-search-service/transactional-job-events-outbox`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -23,7 +23,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 | File/Media Service | Người 1 | ⏳ Scaffold |
 | Admin & Statistics Service | Người 1 | ⏳ Scaffold |
 | Company Service | Người 2 | ✅ Nghiệp vụ chính đã merge |
-| Job & Search Service | Người 2 | 🟡 Phần cốt lõi đã merge; AI recommendation và tích hợp thật còn thiếu |
+| Job & Search Service | Người 2 | 🟡 CRUD/search và transactional `job-events` đã hoàn thành; AI recommendation cùng Redis/Elasticsearch integration còn thiếu |
 | Application Service | Người 2 | 🟡 Các luồng từ Submission đến AI Match phía consumer đã merge; filter kỹ năng còn thiếu |
 | AI Service | Người 2 | 🟡 Provider `/match` và consumer `job-events` đã hoàn thành; consumer CV/recommend/chat còn thiếu |
 | Interview & Video Call Service | Người 3 | ⏳ Scaffold |
@@ -89,7 +89,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** recruiter tạo/sửa tin nháp; gửi duyệt; Admin duyệt/từ chối; đóng/hết hạn tin; tìm kiếm và lọc; đồng bộ Elasticsearch; phát `job-events`; lấy gợi ý từ AI.
 - **Chức năng chính:** Job CRUD, state machine `DRAFT → PENDING_APPROVAL → PUBLISHED/REJECTED → CLOSED/EXPIRED`, tìm kiếm full-text và filter, reindex, PostgreSQL fallback, endpoint kiểm tra job còn nhận hồ sơ.
 - **Phụ thuộc:** Auth, Company, Admin, Elasticsearch, Redis, Kafka và AI.
-- **Trạng thái:** CRUD, publishing, search, indexing/event, availability và endpoint thống kê job active đã merge; recommendation từ AI chưa có.
+- **Trạng thái:** CRUD, publishing, search, indexing, availability, thống kê job active và `job-events` v1 qua transactional outbox đã hoàn thành; recommendation từ AI cùng integration Redis/Elasticsearch còn thiếu.
 
 ## T07 — Application Service
 
@@ -158,7 +158,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Mục tiêu:** chứng minh các luồng xuyên service chạy thật, ổn định và có thể triển khai.
 - **Công nghệ/công cụ:** unit/integration/E2E test, Docker Compose, CI/CD, Swagger/OpenAPI, logging/metrics/tracing.
 - **Đầu ra:** test contract REST/Kafka; migration sạch; test concurrency/idempotency; security test; smoke test; tài liệu môi trường; backup/restore; monitoring.
-- **Trạng thái:** đã có unit test tập trung ở Company, Job/Search, Application và AI; Application Service hiện đạt 162 unit test và 35 integration test, AI Service đạt 159 unit test và 29 integration test với PostgreSQL 16/pgvector cùng Kafka 3.8 thật; chưa có E2E toàn hệ thống.
+- **Trạng thái:** đã có unit test tập trung ở Company, Job/Search, Application và AI; Job/Search đạt 39 unit test và 1 integration test Docker với PostgreSQL 16/Kafka 3.8, Application đạt 162 unit test và 35 integration test, AI đạt 188 test với PostgreSQL 16/pgvector cùng Kafka 3.8 thật; chưa có E2E toàn hệ thống.
 
 ---
 
@@ -216,16 +216,24 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 - Đồng bộ create/update/status/delete sang Elasticsearch.
 - Có reindex endpoint và hàng đợi xử lý.
-- Phát `job-events` với Kafka key `job_id` và payload flat snake_case cho AI/Admin; dùng `event_id` để consumer deduplicate.
-- Có retry/fallback khi hạ tầng tìm kiếm hoặc Kafka gặp lỗi.
-- Producer hiện chưa phát `aggregate_version`, `requirements`, `salary_min/max`, `job_type` và chưa có transactional outbox; đây là phần nâng cấp còn lại để bảo đảm thứ tự tuyệt đối và đủ metadata.
+- PR #8 đưa vào payload flat snake_case ban đầu với Kafka key `job_id` và `event_id`.
+- BullMQ chịu trách nhiệm đồng bộ Elasticsearch; phần phát Kafka đã được thay thế bởi transactional outbox ở task bên dưới.
+
+### Transactional Job Event Outbox — PR #26
+
+- Mọi create/update/publish/approve/reject/close/expire ghi `Job` và immutable outbox trong cùng PostgreSQL transaction; `aggregate_version` tăng đơn điệu bằng compare-and-set.
+- `job-events` v1 dùng Kafka key `job_id` và đúng 16 trường: `event_id`, `action`, `job_id`, `company_id`, `title`, `description`, `skills`, `location`, `status`, `occurred_at`, `schema_version`, `aggregate_version`, `requirements`, `salary_min`, `salary_max`, `job_type`.
+- Publisher claim bằng `FOR UPDATE SKIP LOCKED`, chặn version sau khi version trước chưa publish, retry hữu hạn, gia hạn lease bằng heartbeat và phát at-least-once với `event_id` ổn định; consumer vẫn phải idempotent vì có thể nhận duplicate.
+- BullMQ chỉ đồng bộ Elasticsearch; reindex không phát domain event giả và không phụ thuộc Kafka.
+- Đã verify 39 unit test + 1 Docker integration test của Job Service với PostgreSQL 16/Kafka 3.8 thật; AI Service đạt 188 test và salary đã đồng bộ `NUMERIC(15,2)`.
+- Rollout không tự backfill: database đã có Job cần một baseline/replay được review riêng trước khi bật producer mới. Retention cleanup của outbox chưa tự động hóa và cần chốt chính sách lưu giữ.
 
 ### Job Availability — PR #9
 
 - Endpoint nội bộ `GET /jobs/:id/exists` dùng shared API key.
 - Trả trạng thái tồn tại, còn nhận hồ sơ, lý do, company/recruiter/job metadata và deadline.
 - Application Service đã sử dụng hợp đồng này khi Candidate nộp đơn hoặc Bookmark.
-- Mã nguồn Job/Search hiện có 15 ca unit test.
+- Job/Search hiện đạt 39 unit test và 1 integration test Docker với PostgreSQL 16/Kafka 3.8 thật.
 
 ## 2.3 Application Service — phần đã merge vào `develop`
 
@@ -369,8 +377,10 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 - [ ] Tích hợp `GET /jobs/recommended` với AI Service và CV mặc định.
 - [ ] Fallback sang job mới nhất/lĩnh vực quan tâm khi AI lỗi hoặc Candidate chưa có CV.
-- [ ] Chạy integration test với PostgreSQL, Redis/BullMQ, Elasticsearch và Kafka thật.
-- [ ] Kiểm tra reindex idempotent, retry, dead-letter strategy và event ordering.
+- [x] Chạy integration transactional outbox với PostgreSQL 16 và Kafka 3.8 thật: migration sạch, rollback atomic, CAS cạnh tranh, thứ tự version và publish đủ event.
+- [ ] Bổ sung Redis/BullMQ và Elasticsearch thật vào integration suite.
+- [x] Kiểm tra outbox claim `SKIP LOCKED`, retry/backoff, lease heartbeat hai publisher, stable `event_id` và thứ tự theo `aggregate_version`.
+- [ ] Kiểm tra reindex idempotent, Elasticsearch retry và failed-job/dead-letter strategy.
 - [ ] Bổ sung bulk/detail contract để Bookmark có thể hiển thị đầy đủ cả job đã hết hạn.
 - [ ] Kiểm tra load test cho search, pagination sâu và index mapping tiếng Việt.
 
@@ -431,6 +441,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [ ] Chốt nhà cung cấp LLM: tài liệu ghi Claude nhưng dependency tùy chọn hiện khai báo Gemini.
 - [x] Tạo schema pgvector và migration cho provider `/match`.
   - [x] Alembic quản lý `ai.cv_embeddings`, `ai.job_embeddings`, `vector(384)` và partial HNSW cosine index.
+  - [x] Alembic `20260826_03` nâng `salary_min`/`salary_max` của Job embedding lên `NUMERIC(15,2)` để khớp producer.
   - [x] Migration chạy trước Uvicorn; readiness kiểm tra extension và cả hai bảng.
 - [ ] Bổ sung CV nearest-neighbor index và benchmark index/filter khi làm recommendation candidates.
 - [ ] Hoàn thiện toàn bộ consumer `cv-events` và `job-events`.
@@ -438,10 +449,10 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
   - [x] Chỉ `PUBLISHED` active; `/match` bỏ qua Job inactive. Các trạng thái `DRAFT/PENDING_APPROVAL/CLOSED/EXPIRED` tạo tombstone/deactivate.
   - [x] Worker non-root dùng model CPU 384 chiều với commit SHA bất biến, warm-up trước khi consume và cache riêng trong Docker volume.
   - [ ] Consumer `cv-events`, download/parse CV và upsert/delete CV embedding; đang chờ Profile/File cung cấp contract canonical.
-- [x] Idempotency/order cho Job theo `event_id`, ledger và aggregate cursor; ưu tiên `aggregate_version`, fallback `occurred_at + partition + offset`.
+- [x] Idempotency/order cho Job theo `event_id`, ledger và aggregate cursor; event v1 hiện dùng `aggregate_version`, còn fallback `occurred_at + partition + offset` chỉ dành cho payload legacy.
   - [x] Lookup event trước inference, transaction atomic cho embedding/cursor/ledger và hash-only DLQ; commit Kafka đồng bộ chỉ sau durable terminal outcome.
-  - [ ] Bổ sung `aggregate_version` đơn điệu và transactional outbox phía Job producer để thứ tự chắc chắn giữa các worker producer chạy song song.
-- [ ] Bổ sung `requirements`, salary và job type vào `job-events` producer để embedding/filter có đủ metadata.
+  - [x] Job producer dùng `aggregate_version` đơn điệu, compare-and-set và transactional outbox; publisher có bounded Kafka retry, lease heartbeat và chặn version sau khi version trước chưa publish.
+- [x] `job-events` v1 phát đủ `requirements`, `salary_min`, `salary_max` và `job_type`; salary là decimal string hai chữ số hoặc `null`.
 - [ ] Implement recommend jobs và recommend candidates.
 - [x] Implement provider `POST /ai/match` cho Application Service.
   - [x] Bảo vệ bằng shared `X-Internal-Api-Key`, so sánh constant-time; request UUID snake_case và response envelope echo IDs.
@@ -513,10 +524,11 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## P17 — Kiểm thử tích hợp, bảo mật và phát hành
 
-- [ ] Chốt schema JWT và toàn bộ payload Kafka giữa các thành viên; riêng `job-events` đã khóa key `job_id` + payload flat snake_case theo producer hiện tại.
+- [ ] Chốt schema JWT và toàn bộ payload Kafka giữa các thành viên; riêng `job-events` v1 đã khóa Kafka key `job_id` và đúng 16 trường versioned được liệt kê ở mục Transactional Job Event Outbox.
 - [ ] Contract test REST giữa Auth/Profile/Company/Job/Application/Interview.
 - [ ] Hoàn thiện contract test Kafka cho tất cả producer/consumer thật và duplicate event.
   - [x] AI Job consumer đã được kiểm tra với payload đúng shape Job producer, broker Kafka thật, duplicate event, DLQ và commit offset.
+  - [x] Job producer đã được kiểm tra từ PostgreSQL transaction/outbox tới Kafka thật: rollback khi outbox lỗi, concurrent CAS, version `1/2/3`, salary biên, Kafka key/payload và trạng thái published.
 - [ ] E2E Candidate: đăng ký → hồ sơ/CV → tìm việc → bookmark/apply → interview → offer → hired.
 - [ ] E2E Recruiter: công ty → xác minh → job → duyệt → nhận hồ sơ → interview → offer.
 - [ ] E2E Admin: duyệt, khóa user, report và dashboard.
@@ -531,7 +543,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 1. Hoàn thiện Auth và Profile vì đang chặn xác thực/nộp đơn end-to-end.
 2. Hoàn thiện File/Media để mở khóa CV, logo, attachment và Offer letter.
-3. Nâng cấp Job producer với `aggregate_version`/outbox và metadata còn thiếu; đồng thời hoàn thiện Profile/File + contract `cv-events` để triển khai CV consumer.
+3. Hoàn thiện integration Redis/BullMQ/Elasticsearch và reindex hardening của Job Service; đồng thời hoàn thiện Profile/File + contract `cv-events` để triển khai CV consumer.
 4. Implement recommendation jobs/candidates, nối `GET /jobs/recommended`, rồi bổ sung filter kỹ năng của Application.
 5. Làm Interview, Notification và Chat theo hợp đồng event đã chốt.
 6. Hoàn thiện Admin, Frontend, Jitsi và kiểm thử end-to-end.
@@ -541,12 +553,14 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Auth chưa phát JWT thật nên các service đã verify JWT chưa thể chạy end-to-end.
 - Profile chưa có API CV nên Application Submission sẽ lỗi tích hợp dù unit test đã đạt.
 - Nhà cung cấp LLM chưa thống nhất giữa tài liệu (Claude) và dependency tùy chọn hiện tại (Gemini); khác biệt này không ảnh hưởng provider `/match` thuần pgvector.
-- `job-events` đã được khóa theo implementation thật: key `job_id`, value flat snake_case. Các topic khác vẫn phải chốt riêng; Event Offer đã bổ sung `actor_id`, `offer_id`, `offer_status`, `offer_version`, còn `recruiter_id` là recruiter gắn với Application/job.
+- `job-events` v1 đã được khóa theo implementation thật với key `job_id`, 16 trường versioned và salary decimal string hai chữ số hoặc `null`. Các topic khác vẫn phải chốt riêng; Event Offer đã bổ sung `actor_id`, `offer_id`, `offer_status`, `offer_version`, còn `recruiter_id` là recruiter gắn với Application/job.
 - Pipeline, Kafka và hợp đồng quyền MEMBER/OWNER đã được kiểm chứng; Application Pipeline dùng quyền toàn công ty, còn quyền sửa/xóa Job vẫn do Job Service kiểm soát.
 - Application Evaluation đã được kiểm chứng với JSONB trên PostgreSQL thật, gồm quyền công ty, validation, chống đánh giá trùng và Candidate privacy; P02 đã merge vào `develop` theo xác nhận của người dùng.
 - Application Offer đã verify đạt 100 unit test và 23 integration test. Event không lộ salary/note/file, nhưng xác minh canonical file metadata và ownership vẫn chờ API nội bộ của File/Media ở P09.
 - Application AI Match phía caller đã verify 162 unit + 35 integration test. AI Service đạt 159 unit + 29 integration test; Job embedding đã chạy qua Kafka/PostgreSQL thật và model pin thật, nhưng chấm điểm end-to-end vẫn chờ Profile/File + CV consumer.
-- Job producer chưa có `aggregate_version`/transactional outbox trong khi BullMQ xử lý song song; fallback timestamp/partition/offset phía consumer chỉ bảo vệ best-effort, chưa bảo đảm thứ tự tuyệt đối giữa producer workers.
+- Publisher `job-events` dùng at-least-once: nếu broker đã ACK nhưng process dừng trước khi ghi `published_at`, cùng `event_id` có thể được phát lại; consumer bắt buộc dedupe theo `event_id`/`aggregate_version`.
+- Migration outbox không tự tạo baseline cho Job cũ. Khi rollout lên database đã có dữ liệu, cần dừng/drain producer cũ và thực hiện baseline/replay được review riêng trước khi bật producer mới.
+- Outbox chưa có job retention tự động; payload chứa cả description/requirements và FK `RESTRICT`, vì vậy cần chốt thời hạn lưu, audit và quy trình xóa trước vận hành dài hạn.
 - Pipeline chung vẫn cho phép Application ở `OFFER` chuyển thẳng sang `REJECTED` hoặc `WITHDRAWN`; khi đó bản ghi Offer có thể còn `SENT` dù phản hồi tiếp theo đã bị chặn. Cần chốt quy tắc đồng bộ/hủy Offer trong task lifecycle tiếp theo.
 - Docker daemon/Testcontainers đã hoạt động; AI API/worker đã verify migration, non-root, readiness, Kafka 3.8, PostgreSQL 16/pgvector và model thật. Docker Compose toàn hệ thống vẫn chưa được kiểm chứng và hiện thiếu file môi trường runtime của một số service.
 - Nginx đã có route độc lập `/offers/`; route `/bookmarks` và exact path không có dấu `/` cuối vẫn còn pending.

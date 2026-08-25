@@ -8,6 +8,7 @@ import os
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from decimal import Decimal
 from threading import Event, Thread
 from uuid import UUID, uuid4
 
@@ -143,6 +144,7 @@ def test_real_kafka_ingestion_is_idempotent_and_dead_letters_only_hashes(
     assert published_position[0] == duplicate_position[0] == malformed_position[0] == 0
     assert published_position[1] < duplicate_position[1] < malformed_position[1]
     assert len(provider.texts) == 1
+    assert "requirements: NestJS, PostgreSQL and Kafka" in provider.texts[0]
 
     with psycopg.connect(database_url) as connection:
         embedding = connection.execute(
@@ -176,12 +178,12 @@ def test_real_kafka_ingestion_is_idempotent_and_dead_letters_only_hashes(
         expected_text_hash,
         MODEL_NAME,
         "Ha Noi",
-        None,
-        None,
-        None,
+        Decimal("9999999999998.45"),
+        Decimal("9999999999999.45"),
+        "FULL_TIME",
         True,
         EVENT_ID,
-        None,
+        42,
     )
     assert ledger == [
         (EVENT_ID, kafka_topic, *published_position, "APPLIED"),
@@ -223,6 +225,12 @@ def _published_payload() -> bytes:
             "location": "Ha Noi",
             "status": "PUBLISHED",
             "occurred_at": "2026-08-24T00:00:00.000Z",
+            "schema_version": 1,
+            "aggregate_version": 42,
+            "requirements": "NestJS, PostgreSQL and Kafka",
+            "salary_min": "9999999999998.45",
+            "salary_max": "9999999999999.45",
+            "job_type": "FULL_TIME",
         },
         separators=(",", ":"),
     ).encode()

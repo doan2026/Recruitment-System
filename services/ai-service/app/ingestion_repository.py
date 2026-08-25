@@ -21,7 +21,7 @@ _JOB_ACTIONS = frozenset({"CREATED", "UPDATED", "CLOSED", "EXPIRED", "DELETED"})
 _VECTOR_DIMENSIONS = 384
 
 _MAX_BIGINT = 9_223_372_036_854_775_807
-_MAX_MONEY = Decimal("999999999999.99")
+_MAX_MONEY = Decimal("9999999999999.99")
 _MONEY_QUANTUM = Decimal("0.01")
 
 
@@ -809,7 +809,7 @@ def _validate_salary(name: str, value: Decimal | None) -> Decimal | None:
         raise IngestionContractError(f"{name} must be a non-negative Decimal")
     if value > _MAX_MONEY or value != value.quantize(_MONEY_QUANTUM):
         raise IngestionContractError(
-            f"{name} must fit PostgreSQL NUMERIC(14, 2) without rounding"
+            f"{name} must fit PostgreSQL NUMERIC(15, 2) without rounding"
         )
     return value
 

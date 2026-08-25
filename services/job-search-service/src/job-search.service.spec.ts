@@ -31,6 +31,7 @@ function publishedJob(): Job {
     skills: ['NestJS', 'PostgreSQL'],
     deadline: new Date('2099-12-31T00:00:00.000Z'),
     status: JobStatus.PUBLISHED,
+    aggregateVersion: 1,
     publishedAt: new Date('2026-08-24T08:00:00.000Z'),
     rejectionReason: null,
     reviewedBy: null,

@@ -332,12 +332,16 @@ Chức năng chi tiết
             (full-time/part-time/remote)
         •   Quản lý trạng thái tin: Draft / Published / Closed / Expired
         •   Tìm kiếm full-text kết hợp filter: địa điểm, mức lương, kỹ năng, kinh nghiệm
-        •   Đồng bộ dữ liệu sang Elasticsearch mỗi khi job được tạo/sửa (qua event, không đồng bộ
-            đồng thời trong cùng transaction)
+        •   Ghi Job và JobEventOutbox trong cùng transaction PostgreSQL; publisher phát
+            job-events độc lập sau commit
+        •   Đồng bộ dữ liệu sang Elasticsearch bằng BullMQ sau commit, độc lập với Kafka và
+            không chạy đồng thời trong transaction nghiệp vụ
 
 Data model gợi ý
         •   Job(id, company_id, title, description, requirements, salary_min, salary_max, location,
-            status, skills[])
+            status, skills[], aggregate_version)
+        •   JobEventOutbox(event_id, job_id, aggregate_version, topic, event_key, action, payload,
+            attempts, lease_owner, lease_expires_at, published_at, last_error, created_at)
 
 API / event chính
         •   POST /jobs
@@ -347,8 +351,17 @@ API / event chính
 
 Giao tiếp với service khác
 Publish sự kiện lên topic Kafka 'job-events' khi job được tạo/sửa để AI Service tính lại embedding
-phục vụ matching; việc đồng bộ sang Elasticsearch được Job & Search Service tự xử lý nội bộ (cùng
-service, không cần qua Kafka).
+phục vụ matching. Kafka key là `job_id`; schema v1 là payload flat snake_case gồm đúng 16 trường:
+`event_id, action, job_id, company_id, title, description, skills, location, status, occurred_at,
+schema_version, aggregate_version, requirements, salary_min, salary_max, job_type`. Mutation dùng
+CAS để `aggregate_version` tăng đơn điệu; Job và outbox cùng commit/rollback. Publisher claim bằng
+lease có heartbeat, retry Kafka có backoff/cận trên và giữ nguyên `event_id`, do đó delivery là
+at-least-once. Việc đồng bộ Elasticsearch được xử lý riêng bằng BullMQ; reindex chỉ dựng lại chỉ mục,
+không phát domain event.
+
+Khoảng trống rollout/vận hành: database đã có dữ liệu cần baseline/replay được review (migration
+không tự backfill); retention/cleanup outbox đã publish chưa triển khai; kiểm thử tích hợp đầy đủ
+Redis/BullMQ và Elasticsearch vẫn còn thiếu.
 
 5. Application Service
         •   Công nghệ cố định: Spring Boot 3 (Java 21) · Spring Data JPA · PostgreSQL (container
@@ -556,7 +569,8 @@ Chức năng chi tiết
 
 Data model gợi ý
         •   CvEmbedding(cv_id, vector, updated_at)
-        •   JobEmbedding(job_id, vector, updated_at)
+        •   JobEmbedding(job_id, vector, location, salary_min NUMERIC(15,2),
+            salary_max NUMERIC(15,2), job_type, updated_at)
         •   ChatSession(session_id, user_id, history_json)
 
 API / event chính
@@ -566,7 +580,8 @@ API / event chính
 
 Giao tiếp với service khác
 Subscribe topic Kafka 'job-events' và 'cv-events' để tự động cập nhật embedding; không lưu trữ dữ
-liệu CV/Job gốc, chỉ lưu vector và kết quả xử lý.
+liệu CV/Job gốc, chỉ lưu vector và kết quả xử lý. Consumer job-events chống trùng theo `event_id`,
+không cho `aggregate_version` cũ ghi đè state mới và đọc đầy đủ metadata của contract v1.
 
 
 5. Lý do gộp service

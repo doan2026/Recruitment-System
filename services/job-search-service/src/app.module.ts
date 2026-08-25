@@ -8,6 +8,7 @@ import {
   AuthGuard,
   RolesGuard,
 } from './common';
+import { JobEventPublisherService } from './job-event-publisher.service';
 import { CompanyClientService } from './company-client.service';
 import { JobController } from './job.controller';
 import { JobExpiryService } from './job-expiry.service';
@@ -28,6 +29,7 @@ import { PrismaService } from './prisma.service';
     JobService,
     JobExpiryService,
     JobIndexingService,
+    JobEventPublisherService,
     JobSearchService,
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },

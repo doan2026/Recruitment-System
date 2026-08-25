@@ -99,7 +99,7 @@ def test_migration_adds_private_event_state_without_raw_payload(
         ("job_embeddings", "source_occurred_at"),
         ("job_embeddings", "source_version"),
     }
-    assert salary == (14, 2)
+    assert salary == (15, 2)
 
 
 def test_event_state_migration_downgrades_and_upgrades_cleanly(
@@ -165,8 +165,8 @@ def test_event_state_migration_downgrades_and_upgrades_cleanly(
                 to_regclass('ai.embedding_dead_letters') IS NOT NULL
             """
         ).fetchone()
-    assert upgraded_version == ("20260826_02",)
-    assert upgraded_salary == (14, 2)
+    assert upgraded_version == ("20260826_03",)
+    assert upgraded_salary == (15, 2)
     assert upgraded_tables == (True, True, True)
 
 
@@ -178,8 +178,8 @@ def test_upsert_commits_embedding_cursor_and_ledger_atomically(
     write = _write(
         event,
         location="Ha Noi",
-        salary_min=Decimal("999999999998.45"),
-        salary_max=Decimal("999999999999.45"),
+        salary_min=Decimal("9999999999998.45"),
+        salary_max=Decimal("9999999999999.45"),
         is_active=True,
     )
 
@@ -216,8 +216,8 @@ def test_upsert_commits_embedding_cursor_and_ledger_atomically(
         _hash("text"),
         MODEL_NAME,
         "Ha Noi",
-        Decimal("999999999998.45"),
-        Decimal("999999999999.45"),
+        Decimal("9999999999998.45"),
+        Decimal("9999999999999.45"),
         True,
         event.event_id,
         1,
@@ -570,7 +570,7 @@ def test_invalid_embedding_does_not_write_partial_terminal_state(
     ("version", "salary_min"),
     [
         (9_223_372_036_854_775_808, None),
-        (1, Decimal("1000000000000.00")),
+        (1, Decimal("10000000000000.00")),
         (1, Decimal("1.001")),
     ],
 )

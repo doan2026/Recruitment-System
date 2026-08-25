@@ -23,9 +23,19 @@ Frontend ở `http://localhost:3000`. Mỗi service hiện cung cấp `/health` 
 
 - PostgreSQL dùng một cluster/database `recruitment`, tách schema theo service; không truy cập bảng của service khác. Chỉ Admin đọc qua view đã được phê duyệt.
 - Service chỉ nhận JWT RS256 có public key. Private key chỉ được mount vào Auth Service khi hiện thực phát hành token.
-- Event liên service chỉ dùng các topic được định nghĩa trong `docs/architecture.md`; payload phải có `eventId`, `occurredAt`, `version` để consumer idempotent.
+- Event liên service chỉ dùng các topic được định nghĩa trong `docs/architecture.md`; contract được khóa theo từng topic, không có envelope camelCase dùng chung. Riêng `job-events` v1 là payload snake_case đúng 16 trường, dùng `event_id` ổn định để idempotent và `aggregate_version` tăng đơn điệu để sắp thứ tự.
 - Định nghĩa `INTERNAL_API_KEY` một lần trong `.env` gốc và dùng chung giá trị đó cho Application, Job & Search và AI Service khi gọi API nội bộ.
 - File/media dùng Cloudinary. Điền `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` và `CLOUDINARY_API_SECRET` trong `.env` trước khi dùng upload hoặc presigned upload.
+
+Job & Search ghi thay đổi Job và event vào transactional outbox trong cùng giao
+dịch PostgreSQL. Publisher Kafka chạy độc lập với BullMQ/Elasticsearch, giao
+event theo cơ chế at-least-once với lease heartbeat và giới hạn timeout/retry
+cho từng lần gửi; `POST /jobs/reindex` chỉ cập nhật Elasticsearch. Salary của
+Job và projection AI cùng dùng `NUMERIC(15,2)`.
+
+Migration outbox cố ý không tự backfill event lịch sử. Với database đã có dữ
+liệu, phải review baseline/replay trước khi bật producer mới. Cleanup/retention
+cho các outbox row đã publish hiện chưa được tự động hóa.
 
 ## Cấu trúc
 
