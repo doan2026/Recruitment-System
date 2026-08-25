@@ -1,8 +1,9 @@
 # Application Service
 
 This Spring Boot 3 / Java 21 service owns candidate submission, bookmarks,
-application tracking, and the recruiter application pipeline. Nginx strips the
-`/applications` gateway prefix before forwarding requests.
+application tracking, recruiter evaluations, the application pipeline, and
+job offers. Nginx strips the `/applications` gateway prefix before forwarding
+those requests. The dedicated `/offers` gateway route preserves its prefix.
 
 | Internal | Gateway | Access |
 | --- | --- | --- |
@@ -12,6 +13,8 @@ application tracking, and the recruiter application pipeline. Nginx strips the
 | `GET /` | `GET /applications/` | RECRUITER |
 | `PATCH /{applicationId}/status` | `PATCH /applications/{applicationId}/status` | RECRUITER |
 | `POST /{applicationId}/evaluation` | `POST /applications/{applicationId}/evaluation` | RECRUITER |
+| `POST /{applicationId}/offer` | `POST /applications/{applicationId}/offer` | RECRUITER |
+| `PATCH /offers/{offerId}/respond` | `PATCH /offers/{offerId}/respond` | CANDIDATE |
 | `PATCH /{applicationId}/withdraw` | `PATCH /applications/{applicationId}/withdraw` | CANDIDATE |
 | `POST, GET /bookmarks` | `POST, GET /applications/bookmarks` | CANDIDATE |
 | `DELETE /bookmarks/{jobId}` | `DELETE /applications/bookmarks/{jobId}` | CANDIDATE |
@@ -46,6 +49,31 @@ response DTO.
   "note": "Strong backend fundamentals"
 }
 ```
+
+Each application can have at most one offer, and an offer can only be sent
+while the application is in `INTERVIEW`. Creation requires a positive salary
+with at most two decimal places, a non-past start date, a non-blank position of
+at most 200 characters, an optional note of at most 2,000 characters, a future
+`expiresAt`, and `expectedApplicationVersion`. Optional `fileId` and `fileUrl`
+must be supplied together; `fileUrl` must be an absolute HTTP(S) URL. The
+service currently validates and stores this reference, while canonical file
+metadata and ownership verification remain dependent on the internal File
+Service contract tracked in P09.
+
+Only the Candidate who owns the application can respond. The request carries
+`ACCEPTED` or `DECLINED`, `expectedOfferVersion`, and
+`expectedApplicationVersion`; declining also requires a reason. Only an
+unexpired `SENT` offer is respondable. Acceptance atomically changes the offer
+to `ACCEPTED` and the application to `HIRED`; declining changes them to
+`DECLINED` and `REJECTED`. Repeated, expired, and concurrent responses return
+conflict errors without partially updating the offer, application, history, or
+outbox.
+
+Sending an offer writes the Offer, moves the Application to `OFFER`, appends
+history, and stores `OFFER_SENT` in the transactional outbox. Response events
+use `STATUS_CHANGED`. Offer events add `actor_id`, `offer_id`, `offer_status`,
+and `offer_version`, retain `recruiter_id` from the Application, and never
+include salary, notes, decline reasons, `fileId`, or `fileUrl`.
 
 Submission performs these checks in order:
 
@@ -86,6 +114,8 @@ mvn verify -Pintegration-test
 ```
 
 The integration profile verifies Flyway/JPA against PostgreSQL, transactional
-pipeline updates, MEMBER/OWNER company-wide access and cross-company denial,
-Evaluation JSONB persistence and privacy, outbox delivery to a real Kafka
-consumer, and that an outbox row already marked as published is not sent again.
+pipeline and Offer updates, Offer expiry/concurrency/rollback, MEMBER/OWNER
+company-wide access and cross-company denial, Evaluation JSONB persistence and
+privacy, outbox delivery to a real Kafka consumer, and that an outbox row
+already marked as published is not sent again. The verified Application Service
+suite passes 100 unit tests and 23 PostgreSQL/Kafka integration tests.
