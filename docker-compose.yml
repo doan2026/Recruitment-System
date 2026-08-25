@@ -226,11 +226,19 @@ services:
       - ./services/ai-service/.env
     restart: unless-stopped
     depends_on:
-      - postgres
-      - redis
-      - kafka
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_healthy
     expose:
       - "8000"
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready', timeout=2)" ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
 
   frontend:
     build:

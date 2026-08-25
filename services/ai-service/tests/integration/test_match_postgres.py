@@ -1,0 +1,255 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from uuid import UUID
+
+import psycopg
+import pytest
+from alembic import command
+from alembic.config import Config
+from fastapi.testclient import TestClient
+
+from app.config import Settings
+from app.database import MatchStoreUnavailable, PsycopgMatchRepository
+from app.main import create_app
+
+pytestmark = pytest.mark.integration
+
+SERVICE_ROOT = Path(__file__).resolve().parents[2]
+CV_ID = UUID("10000000-0000-0000-0000-000000000001")
+JOB_ID = UUID("20000000-0000-0000-0000-000000000001")
+MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+INTERNAL_API_KEY = "integration-test-internal-key"
+
+
+def test_migration_creates_versioned_private_vector_store(
+    database_url: str,
+) -> None:
+    with psycopg.connect(database_url) as connection:
+        extension = connection.execute(
+            "SELECT extname FROM pg_extension WHERE extname = 'vector'"
+        ).fetchone()
+        tables = connection.execute(
+            """
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = 'ai'
+            ORDER BY table_name
+            """
+        ).fetchall()
+        columns = connection.execute(
+            """
+            SELECT table_name, column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'ai'
+              AND table_name IN ('cv_embeddings', 'job_embeddings')
+            """
+        ).fetchall()
+        index_definition = connection.execute(
+            """
+            SELECT indexdef
+            FROM pg_indexes
+            WHERE schemaname = 'ai'
+              AND indexname = 'job_embeddings_active_vector_hnsw_idx'
+            """
+        ).fetchone()
+        migration_version = connection.execute(
+            "SELECT version_num FROM ai.alembic_version"
+        ).fetchone()
+
+    assert extension == ("vector",)
+    assert {row[0] for row in tables} >= {
+        "alembic_version",
+        "cv_embeddings",
+        "job_embeddings",
+    }
+    assert migration_version == ("20260825_01",)
+    assert index_definition is not None
+    assert "USING hnsw" in index_definition[0]
+    assert "WHERE is_active" in index_definition[0]
+    forbidden_columns = {"content", "content_json", "description", "raw_text"}
+    assert forbidden_columns.isdisjoint({column for _, column in columns})
+
+
+def test_migration_can_be_run_again_at_head(database_url: str) -> None:
+    previous_url = os.environ.get("DATABASE_URL")
+    os.environ["DATABASE_URL"] = database_url
+    command.upgrade(Config(str(SERVICE_ROOT / "alembic.ini")), "head")
+    if previous_url is None:
+        os.environ.pop("DATABASE_URL", None)
+    else:
+        os.environ["DATABASE_URL"] = previous_url
+
+    with psycopg.connect(database_url) as connection:
+        versions = connection.execute(
+            "SELECT count(*) FROM ai.alembic_version"
+        ).fetchone()
+    assert versions == (1,)
+
+
+@pytest.mark.parametrize(
+    ("cv_values", "job_values", "expected_score"),
+    [
+        ((1.0, 0.0), (1.0, 0.0), 1.0),
+        ((1.0, 0.0), (0.0, 1.0), 0.5),
+        ((1.0, 0.0), (-1.0, 0.0), 0.0),
+    ],
+)
+def test_repository_maps_cosine_similarity_without_clamping(
+    database_url: str,
+    cv_values: tuple[float, float],
+    job_values: tuple[float, float],
+    expected_score: float,
+) -> None:
+    _insert_cv(database_url, vector=_vector(*cv_values))
+    _insert_job(database_url, vector=_vector(*job_values))
+
+    result = _repository(database_url).calculate(CV_ID, JOB_ID)
+
+    assert result.reason is None
+    assert result.score == pytest.approx(expected_score, abs=1e-12)
+
+
+@pytest.mark.parametrize(
+    ("seed_cv", "seed_job", "expected_reason"),
+    [
+        (False, False, "CV_AND_JOB_EMBEDDINGS_NOT_FOUND"),
+        (False, True, "CV_EMBEDDING_NOT_FOUND"),
+        (True, False, "JOB_EMBEDDING_NOT_FOUND"),
+    ],
+)
+def test_repository_returns_stable_missing_embedding_reason(
+    database_url: str,
+    seed_cv: bool,
+    seed_job: bool,
+    expected_reason: str,
+) -> None:
+    if seed_cv:
+        _insert_cv(database_url)
+    if seed_job:
+        _insert_job(database_url)
+
+    result = _repository(database_url).calculate(CV_ID, JOB_ID)
+
+    assert result.score is None
+    assert result.reason == expected_reason
+
+
+def test_repository_rejects_embeddings_from_different_models(
+    database_url: str,
+) -> None:
+    _insert_cv(database_url)
+    _insert_job(database_url, model_name="different-model")
+
+    result = _repository(database_url).calculate(CV_ID, JOB_ID)
+
+    assert result.score is None
+    assert result.reason == "EMBEDDING_MODEL_MISMATCH"
+
+
+def test_zero_vector_never_produces_non_finite_json_score(
+    database_url: str,
+) -> None:
+    _insert_cv(database_url, vector=_vector(0.0, 0.0))
+    _insert_job(database_url)
+
+    with pytest.raises(MatchStoreUnavailable):
+        _repository(database_url).calculate(CV_ID, JOB_ID)
+
+
+def test_database_rejects_wrong_vector_dimension(database_url: str) -> None:
+    with (
+        pytest.raises(psycopg.errors.DataException),
+        psycopg.connect(database_url) as connection,
+    ):
+        connection.execute(
+            """
+            INSERT INTO ai.cv_embeddings (
+                cv_id, user_id, vector, text_hash, model_name
+            ) VALUES (%s, %s, %s::vector, %s, %s)
+            """,
+            (CV_ID, CV_ID, "[1,0,0]", "a" * 64, MODEL_NAME),
+        )
+
+
+def test_match_endpoint_uses_real_pgvector_result(database_url: str) -> None:
+    _insert_cv(database_url, vector=_vector(1.0, 0.0))
+    _insert_job(database_url, vector=_vector(0.0, 1.0))
+    app = create_app(
+        settings=Settings(
+            database_url=database_url,
+            internal_api_key=INTERNAL_API_KEY,
+        )
+    )
+
+    with TestClient(app) as client:
+        readiness = client.get("/ready")
+        response = client.post(
+            "/match",
+            headers={"X-Internal-Api-Key": INTERNAL_API_KEY},
+            json={"cv_id": str(CV_ID), "job_id": str(JOB_ID)},
+        )
+
+    assert readiness.status_code == 200
+    assert readiness.json() == {
+        "service": "ai-service",
+        "status": "READY",
+    }
+    assert response.status_code == 200
+    assert response.json() == {
+        "data": {
+            "cv_id": str(CV_ID),
+            "job_id": str(JOB_ID),
+            "score": 0.5,
+            "reason": None,
+        },
+        "meta": None,
+    }
+
+
+def _repository(database_url: str) -> PsycopgMatchRepository:
+    return PsycopgMatchRepository(
+        database_url,
+        connect_timeout_seconds=2,
+        statement_timeout_ms=2_000,
+    )
+
+
+def _insert_cv(
+    database_url: str,
+    *,
+    vector: str | None = None,
+    model_name: str = MODEL_NAME,
+) -> None:
+    with psycopg.connect(database_url) as connection:
+        connection.execute(
+            """
+            INSERT INTO ai.cv_embeddings (
+                cv_id, user_id, vector, text_hash, model_name
+            ) VALUES (%s, %s, %s::vector, %s, %s)
+            """,
+            (CV_ID, CV_ID, vector or _vector(1.0, 0.0), "a" * 64, model_name),
+        )
+
+
+def _insert_job(
+    database_url: str,
+    *,
+    vector: str | None = None,
+    model_name: str = MODEL_NAME,
+) -> None:
+    with psycopg.connect(database_url) as connection:
+        connection.execute(
+            """
+            INSERT INTO ai.job_embeddings (
+                job_id, vector, text_hash, model_name, is_active
+            ) VALUES (%s, %s::vector, %s, %s, TRUE)
+            """,
+            (JOB_ID, vector or _vector(1.0, 0.0), "b" * 64, model_name),
+        )
+
+
+def _vector(first: float, second: float) -> str:
+    values = [first, second, *([0.0] * 382)]
+    return "[" + ",".join(str(value) for value in values) + "]"

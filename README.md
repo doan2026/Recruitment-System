@@ -24,6 +24,7 @@ Frontend ở `http://localhost:3000`. Mỗi service hiện cung cấp `/health` 
 - PostgreSQL dùng một cluster/database `recruitment`, tách schema theo service; không truy cập bảng của service khác. Chỉ Admin đọc qua view đã được phê duyệt.
 - Service chỉ nhận JWT RS256 có public key. Private key chỉ được mount vào Auth Service khi hiện thực phát hành token.
 - Event liên service chỉ dùng các topic được định nghĩa trong `docs/architecture.md`; payload phải có `eventId`, `occurredAt`, `version` để consumer idempotent.
+- Định nghĩa `INTERNAL_API_KEY` một lần trong `.env` gốc và dùng chung giá trị đó cho Application, Job & Search và AI Service khi gọi API nội bộ.
 - File/media dùng Cloudinary. Điền `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` và `CLOUDINARY_API_SECRET` trong `.env` trước khi dùng upload hoặc presigned upload.
 
 ## Cấu trúc

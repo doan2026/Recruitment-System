@@ -900,14 +900,14 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 - Consumer Kafka phải idempotent theo event_id.
 - Chatbot chỉ trả lời trong phạm vi nghiệp vụ tuyển dụng; câu hỏi ngoài phạm vi thì lịch sự từ chối và hướng về chức năng của hệ thống.
 - Không đưa thông tin cá nhân của ứng viên khác vào prompt của chatbot.
-- Điểm phù hợp trả về là số thực 0–1, khi hiển thị thì quy đổi ra phần trăm và làm tròn.
+- Điểm phù hợp trả về là số thực 0–1, chuẩn hóa từ cosine bằng `(cosine_similarity + 1) / 2` (không clamp); khi hiển thị thì quy đổi ra phần trăm và làm tròn.
 - `/ai/match` là API nội bộ, bắt buộc `X-Internal-Api-Key`; request dùng snake_case `{ cv_id, job_id }` và không nhận nội dung CV/job gốc.
 - Response dùng envelope `{ data, meta }`, phải echo đúng `cv_id/job_id` và chỉ có một trong hai: `score` hợp lệ hoặc `reason` khác rỗng khi embedding chưa sẵn sàng.
 - Thiếu embedding trả HTTP 200 với `score: null`; sai key trả 401, request sai trả 422, database/model chưa sẵn sàng trả 503. Không clamp score ngoài `0..1`.
 - API key của Claude chỉ nằm trong biến môi trường của service này.
 ### 2.2. Mô hình dữ liệu
-- CvEmbedding(cv_id, user_id, vector vector(384), text_hash, updated_at)
-- JobEmbedding(job_id, vector vector(384), location, salary_min, salary_max, job_type, is_active, updated_at)
+- CvEmbedding(cv_id, user_id, vector vector(384), text_hash, model_name, updated_at)
+- JobEmbedding(job_id, vector vector(384), text_hash, model_name, location, salary_min, salary_max, job_type, is_active, updated_at)
 - ChatSession(session_id, user_id, history_json, updated_at) — lưu chính ở Redis, đồng bộ xuống Postgres nếu cần phân tích
 - DeadLetter(id, topic, event_id, payload, error, created_at)
 ### 2.3. API chính

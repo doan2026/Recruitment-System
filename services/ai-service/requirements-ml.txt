@@ -1,0 +1,5 @@
+-r requirements.txt
+
+# Install only for the future embedding-consumer and chatbot tasks.
+google-genai==0.2.2
+sentence-transformers==3.0.1
