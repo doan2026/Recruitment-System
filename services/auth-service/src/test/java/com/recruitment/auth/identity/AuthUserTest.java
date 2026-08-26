@@ -21,6 +21,8 @@ class AuthUserTest {
     assertThat(user.getPasswordHash()).isEqualTo(BCRYPT_HASH);
     assertThat(user.isVerified()).isFalse();
     assertThat(user.getVerifiedAt()).isNull();
+    assertThat(user.getRegistrationId()).isNotNull();
+    assertThat(user.getRegistrationFence()).isZero();
   }
 
   @Test
@@ -32,7 +34,7 @@ class AuthUserTest {
   @Test
   void verificationAndLockTransitionsKeepAuditStateTogether() {
     AuthUser user = AuthUser.registerLocal(
-        "candidate@example.com", BCRYPT_HASH, UserRole.CANDIDATE);
+        "candidate@example.com", BCRYPT_HASH, UserRole.CANDIDATE, 42L);
     Instant verifiedAt = Instant.parse("2026-08-26T10:00:00Z");
     Instant lockedAt = verifiedAt.plusSeconds(60);
 
@@ -41,6 +43,8 @@ class AuthUserTest {
 
     assertThat(user.isVerified()).isTrue();
     assertThat(user.getVerifiedAt()).isEqualTo(verifiedAt);
+    assertThat(user.getRegistrationId()).isNull();
+    assertThat(user.getRegistrationFence()).isEqualTo(42L);
     assertThat(user.isLocked()).isTrue();
     assertThat(user.getLockedAt()).isEqualTo(lockedAt);
     assertThat(user.getLockedReason()).isEqualTo("Policy violation");
@@ -84,6 +88,8 @@ class AuthUserTest {
     assertThat(oauthUser.getRole()).isEqualTo(UserRole.CANDIDATE);
     assertThat(oauthUser.isVerified()).isTrue();
     assertThat(oauthUser.getVerifiedAt()).isEqualTo(verifiedAt);
+    assertThat(oauthUser.getRegistrationId()).isNull();
+    assertThat(oauthUser.getRegistrationFence()).isZero();
   }
 
   @Test

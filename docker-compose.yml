@@ -54,10 +54,17 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     command: [ "redis-server", "--requirepass", "${REDIS_PASSWORD}" ]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
     ports:
       - "6379:6379"
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   kafka:
     image: apache/kafka:3.8.0
@@ -120,6 +127,8 @@ services:
     restart: unless-stopped
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     expose:
       - "8080"

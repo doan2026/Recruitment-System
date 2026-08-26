@@ -5,6 +5,11 @@ spring:
     url: ${DATABASE_URL}
     username: ${POSTGRES_USER}
     password: ${POSTGRES_PASSWORD}
+  data:
+    redis:
+      url: ${REDIS_URL:redis://localhost:6379}
+      repositories:
+        enabled: false
   flyway:
     enabled: true
     default-schema: auth
@@ -19,9 +24,42 @@ spring:
         default_schema: auth
         jdbc:
           time_zone: UTC
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:1025}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${SMTP_AUTH:false}
+          starttls:
+            enable: ${SMTP_STARTTLS:false}
+            required: ${SMTP_STARTTLS_REQUIRED:false}
+          connectiontimeout: 3000
+          timeout: 3000
+          writetimeout: 3000
+
+auth:
+  otp:
+    hmac-secret: ${OTP_HMAC_SECRET}
+    ttl: 5m
+    failure-block-duration: 15m
+    max-failed-attempts: 5
+    resend-window: 1h
+    max-resends: 3
+    claim-ttl: 30s
+    dispatch-lock-ttl: 30s
+  mail:
+    from: ${SMTP_FROM:no-reply@recruitment.local}
 
 management:
   endpoints:
     web:
       exposure:
         include: health,info
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
