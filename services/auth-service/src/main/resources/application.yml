@@ -64,6 +64,13 @@ auth:
     failure-window: 15m
     failure-block-duration: 15m
     max-failed-attempts: 5
+  password-reset:
+    hmac-secret: ${PASSWORD_RESET_HMAC_SECRET}
+    frontend-reset-uri: ${PASSWORD_RESET_FRONTEND_URI:http://localhost:3000/reset-password}
+    ttl: 15m
+    claim-ttl: 30s
+    request-window: 1h
+    max-requests: 3
   google:
     enabled: ${GOOGLE_OAUTH_ENABLED:false}
     client-id: ${GOOGLE_CLIENT_ID:}

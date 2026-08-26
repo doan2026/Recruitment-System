@@ -9,6 +9,8 @@ public interface LoginAttemptLimiter {
 
   AttemptDecision completeSuccessfulCredential(String normalizedEmail);
 
+  void clearAfterPasswordReset(String normalizedEmail);
+
   record AttemptDecision(State state, int failedAttempts, Duration retryAfter) {
     public AttemptDecision {
       if (state == null) {

@@ -1,12 +1,12 @@
 # Auth Service
 
-Spring Boot 3 / Java 21 service that owns user identities. PostgreSQL stores durable account/session data; Redis stores short-lived registration OTP state; SMTP delivers registration codes.
+Spring Boot 3 / Java 21 service that owns user identities. PostgreSQL stores durable account/session data; Redis stores short-lived registration OTP and password-reset state; SMTP delivers registration codes and reset links.
 
 ## Current status
 
-Candidate/Recruiter registration, OTP verification, password login, Google OIDC, JWT RS256/JWKS, refresh-token rotation, logout and `GET /auth/me` are implemented. A successful OTP verification now signs the user in and returns the same local token pair as password and Google login.
+Candidate/Recruiter registration, OTP verification, password login, Google OIDC, JWT RS256/JWKS, refresh-token rotation, logout, password reset and `GET /auth/me` are implemented. A successful OTP verification signs the user in and returns the same local token pair as password and Google login.
 
-Password reset and the internal Admin lock/unlock API remain pending. Security is stateless and deny-by-default; only health, registration, login/token and Google handshake endpoints are public. Every protected request uses a locally verified access JWT, while `/auth/me` additionally checks the current durable account state.
+The internal Admin lock/unlock API remains pending. Security is stateless and deny-by-default; only health, registration, login/token, password-recovery and Google handshake endpoints are public. Every protected request uses a locally verified access JWT, while `/auth/me` additionally checks the current durable account state.
 
 ## Registration API
 
@@ -124,6 +124,39 @@ A verified, unlocked local account receives the token response shown above. Unkn
 
 Redis Lua tracks failures atomically under HMAC-derived, PII-free keys. The fifth consecutive failure starts a 15-minute block and returns `429 LOGIN_TEMPORARILY_BLOCKED` with `Retry-After`. A successful credential clears the failure state. Redis failure is fail-closed as `503 LOGIN_RATE_LIMIT_UNAVAILABLE`.
 
+## Forgot and reset password
+
+`POST /auth/forgot-password` accepts `{ "email": "candidate@example.com" }`. At service level, every syntactically valid email receives the same non-cacheable HTTP `202 Accepted` response unless the initial quota reservation or account lookup is unavailable. The API gateway can reject excessive traffic first with generic HTTP `429`:
+
+```json
+{
+  "data": {
+    "status": "RESET_EMAIL_SENT_IF_ELIGIBLE",
+    "expiresInSeconds": 900
+  },
+  "meta": {}
+}
+```
+
+Only a verified account with a local password receives mail. Unknown, pending and OAuth-only accounts are generic no-ops. A locked local account may reset its password but remains locked. Requests use an HMAC-derived, PII-free rolling quota of three per email per hour; limited requests deliberately return the same response. The gateway separately limits password-recovery `POST` traffic to 10 requests/minute per client IP (burst 5) and 20 requests/second per gateway instance (burst 40), returns a generic allowlisted-CORS `429` with `Retry-After`, and does not charge non-`POST`/preflight traffic. Eligible delivery is queued on a bounded executor so SMTP latency does not directly distinguish an existing email. The newest successfully installed token supersedes the older token; a request while the previous token has an active delivery/claim lease is a generic no-op. The configured frontend link carries the token only in the URL fragment (`#token=...`).
+
+`POST /auth/reset-password` accepts:
+
+```json
+{
+  "token": "pr1_...",
+  "newPassword": "Password2"
+}
+```
+
+A successful reset returns HTTP `204 No Content`. Malformed, missing, expired, superseded and replayed tokens all return `400 RESET_TOKEN_INVALID_OR_EXPIRED`. The new password follows the registration policy and is stored as bcrypt cost 10.
+
+Reset tokens contain 256 random bits. A raw token exists transiently in the bounded delivery task, email/link and reset request; it is never returned by the forgot API, persisted or logged. Redis stores an HMAC digest under HMAC-derived email/user keys for 15 minutes. Lua coordinates exact reservation rollback, latest-token installation, mail-delivery lease, one-time claim, recovery and CAS finalization. Each challenge is bound to the User ID and optimistic version, so a token cannot change the password twice even if post-commit Redis cleanup fails.
+
+Password update and revocation of every active refresh session use one PostgreSQL transaction with User-first locking. Existing `ROTATED`, `LOGOUT` or expired audit rows are preserved. A successful reset also clears temporary password-login failures. Existing stateless access JWTs are not introspected and can remain valid for at most their 15-minute lifetime. Forgot quota-reservation/account-lookup failures and reset claim/transaction failures return `503 PASSWORD_RESET_UNAVAILABLE`; an account-specific install failure instead rolls back its reservation and keeps the generic `202`. Asynchronous SMTP or post-commit cleanup failure keeps the generic response, and failed delivery CAS-discards the undelivered challenge.
+
+Compose publishes only the gateway, so the per-IP limiter sees clients directly in the default topology. A deployment behind a trusted load balancer/CDN must configure Nginx Real IP with the trusted proxy CIDRs. The gateway recovery CORS map must stay synchronized with `CORS_ORIGINS`, and a horizontally replicated gateway must use a distributed ingress/WAF limiter when a deployment-wide cap is required.
+
 ## Google OIDC login
 
 1. Navigate the browser to `GET /auth/google`.
@@ -184,6 +217,8 @@ Required settings are documented in `.env.example`:
 - `REDIS_URL` (production Compose uses authenticated Redis)
 - `OTP_HMAC_SECRET`, at least 32 UTF-8 bytes and generated as a high-entropy secret
 - `LOGIN_HMAC_SECRET`, a different high-entropy secret of at least 32 UTF-8 bytes
+- `PASSWORD_RESET_HMAC_SECRET`, another independent high-entropy secret of at least 32 UTF-8 bytes
+- `PASSWORD_RESET_FRONTEND_URI`, the fixed reset page; production must use HTTPS and the URI cannot contain query, fragment or user info
 - `JWT_PRIVATE_KEY_PATH`, `JWT_PUBLIC_KEY_PATH`, `JWT_ISSUER`, `JWT_AUDIENCE`
 - `JWT_PREVIOUS_PUBLIC_KEY_PATHS`, a comma-separated set of old public keys during key rotation
 - `CORS_ORIGINS`, a comma-separated exact HTTPS origin allowlist; HTTP is accepted only for loopback development
@@ -212,6 +247,7 @@ Unit tests:
 docker run --rm \
   -e LOGIN_HMAC_SECRET=test-login-secret-that-is-at-least-32-bytes \
   -e OTP_HMAC_SECRET=test-hmac-secret-that-is-at-least-32-bytes \
+  -e PASSWORD_RESET_HMAC_SECRET=test-password-reset-secret-that-is-at-least-32-bytes \
   -v /tmp/recruitment-system-m2-cache:/root/.m2 \
   -v "$PWD/services/auth-service:/app" \
   -w /app \
@@ -226,6 +262,7 @@ docker run --rm --network host \
   -e TESTCONTAINERS_HOST_OVERRIDE=localhost \
   -e OTP_HMAC_SECRET=test-hmac-secret-that-is-at-least-32-bytes \
   -e LOGIN_HMAC_SECRET=test-login-secret-that-is-at-least-32-bytes \
+  -e PASSWORD_RESET_HMAC_SECRET=test-password-reset-secret-that-is-at-least-32-bytes \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /tmp/recruitment-system-m2-cache:/root/.m2 \
   -v "$PWD/services/auth-service:/app" \
@@ -234,4 +271,4 @@ docker run --rm --network host \
   mvn clean verify -Pintegration-test
 ```
 
-The integration profile validates Flyway/Hibernate on clean PostgreSQL 16 plus authenticated Redis 7: OTP fencing/rate limits, Google exchange exactly-once, password throttling, JWT/JWKS and `/auth/me`, refresh lineage/reuse/expiry/concurrency, CORS and fail-closed outages. The final clean run passed **156/156 unit tests and 27/27 integration tests (183/183 total)** with PostgreSQL 16.15, Redis 7 and Testcontainers 1.21.4.
+The integration profile validates Flyway/Hibernate on clean PostgreSQL 16 plus authenticated Redis 7: OTP fencing/rate limits, Google exchange exactly-once, password throttling, password-reset privacy/quota/TTL/supersession/transactions/concurrency, JWT/JWKS and `/auth/me`, refresh lineage/reuse/expiry/concurrency, CORS and fail-closed outages. The final clean run passed **195/195 unit tests and 35/35 integration tests (230/230 total)** with PostgreSQL 16.15, Redis 7 and Testcontainers 1.21.4. The gateway configuration also passes `nginx -t`.

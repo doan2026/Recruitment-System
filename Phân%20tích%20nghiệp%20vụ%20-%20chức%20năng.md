@@ -71,7 +71,9 @@ Có nhiều loại:
 ### Quên mật khẩu
 
 - Email
-- OTP
+- Gửi link đặt lại mật khẩu chứa token dùng một lần, hết hạn sau 15 phút
+- Luôn trả phản hồi chung, không tiết lộ email có tồn tại hay không
+- Đặt mật khẩu mới và thu hồi toàn bộ refresh token đang hoạt động
 
 ## 2.2 Hồ sơ ứng viên
 

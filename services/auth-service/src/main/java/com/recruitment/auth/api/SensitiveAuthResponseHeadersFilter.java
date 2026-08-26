@@ -14,6 +14,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public final class SensitiveAuthResponseHeadersFilter extends OncePerRequestFilter {
   private static final Set<String> SENSITIVE_PATHS = Set.of(
       "/auth/otp/verify",
+      "/auth/forgot-password",
+      "/auth/reset-password",
       "/auth/refresh",
       "/auth/logout",
       "/auth/google/exchange",
