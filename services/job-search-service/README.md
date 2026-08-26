@@ -12,6 +12,8 @@ Nginx strips the `/jobs` gateway prefix before forwarding requests.
 | `GET /pending` | `GET /jobs/pending` | ADMIN |
 | `GET /search` | `GET /jobs/search` | Public |
 | `POST /reindex` | `POST /jobs/reindex` | ADMIN |
+| `GET /reindex/failures` | `GET /jobs/reindex/failures` | ADMIN |
+| `POST /reindex/failures/retry` | `POST /jobs/reindex/failures/retry` | ADMIN |
 | `GET /stats/active?company_id=` | `GET /jobs/stats/active?company_id=` | Internal |
 | `GET /:id/exists` | `GET /jobs/:id/exists` | Internal |
 | `GET /:id` | `GET /jobs/:id` | Public, PUBLISHED only |
@@ -47,6 +49,9 @@ request falls back to PostgreSQL. PostgreSQL facets describe the returned page;
 Elasticsearch facets describe the complete filtered result set.
 The Elasticsearch request timeout defaults to two seconds and is configurable
 with `ELASTICSEARCH_REQUEST_TIMEOUT_MS`.
+`ELASTICSEARCH_INDEX` defaults to the new versioned index `job_index_v2`.
+Never point this release at the legacy `job_index`: its strict mapping and
+internal document versions are incompatible with the new projection contract.
 
 Every event-producing mutation increments the Job's positive
 `aggregate_version` and writes an immutable outbox row in the same PostgreSQL
@@ -84,21 +89,45 @@ and renews that lease while Kafka is in flight. Each Kafka attempt has a finite
 request timeout and retry limit; failure releases the row for a later outbox
 attempt with capped exponential backoff.
 
-After the transaction commits, BullMQ separately queues a source-of-truth
-Elasticsearch refresh. That worker indexes only non-expired `PUBLISHED` jobs
-and removes all other statuses; its tasks retry eight times with exponential
-backoff. `POST /jobs/reindex` only rebuilds Elasticsearch from PostgreSQL and
-does not synthesize Kafka domain events.
+Every Job mutation also upserts one durable index-sync intent in the same
+PostgreSQL transaction as the Job and Kafka event outbox. After commit, a
+leased dispatcher transfers that intent to BullMQ. The row stays pending until
+the worker confirms Elasticsearch, so a Redis outage or lost queue state cannot
+silently lose an index update.
 
-The migration intentionally does not backfill historical outbox events. A
-populated environment must complete this release checklist before enabling the
-new producer:
+Queue producer commands fail fast within `JOB_INDEX_REDIS_COMMAND_TIMEOUT_MS`
+while the BullMQ worker keeps reconnecting; PostgreSQL retries dispatch when
+Redis returns, and graceful shutdown does not wait forever on a cold outage.
+
+The worker reads PostgreSQL as the source of truth. It writes complete documents
+for current, non-expired `PUBLISHED` jobs and minimal non-searchable tombstones
+for every other status. Elasticsearch external versioning uses
+`aggregateVersion`, so an older concurrent task cannot overwrite a newer
+document or tombstone. Search explicitly filters `searchable=true`.
+
+BullMQ retries processing with exponential backoff. After its final attempt,
+the same PostgreSQL sync row stores `failed_at`, a sanitized `last_error`, and
+the attempt count as a durable dead letter. Admins can inspect failures through
+`GET /jobs/reindex/failures` and replay them through
+`POST /jobs/reindex/failures/retry`. BullMQ also retains a bounded failed-job
+history for diagnostics. `POST /jobs/reindex` increments a dispatch generation
+and reconciles every Job status idempotently; it never synthesizes Kafka domain
+events.
+
+The migrations intentionally do not invent historical Kafka events or index
+intents. A populated environment must complete this release checklist:
 
 1. Stop and drain every old Job Service instance so no legacy writer remains.
-2. Apply the migration separately from application startup.
+2. Apply the migration separately and configure the service with a new empty
+   `ELASTICSEARCH_INDEX=job_index_v2`; do not reuse the legacy `job_index`.
 3. Run an environment-specific baseline/replay plan that has been reviewed for
    duplicate and ordering behavior.
-4. Verify the AI projection/version baseline, then start the new service.
+4. Start the new service, call `POST /jobs/reindex`, and wait until every
+   durable index-sync row is completed with no failed rows.
+5. Verify the Elasticsearch and AI projection/version baselines before
+   restoring normal traffic.
+6. Retain the legacy index for the agreed rollback window, then remove it using
+   the environment's reviewed retention procedure.
 
 Published outbox-row retention cleanup is not automated yet; operators must plan
 retention and cleanup separately.
@@ -124,8 +153,10 @@ npm run build
 ```
 
 The verified local suite contains 39 unit tests. The isolated Docker gate
-applies migrations to disposable PostgreSQL 16, starts a real Kafka broker and
-runs one transaction/order/delivery integration test:
+applies migrations to disposable PostgreSQL 16 and starts Kafka 3.8, authenticated
+Redis 7, and Elasticsearch 8.14.3 with index auto-creation disabled. It runs
+ten integration tests: one transaction/order/delivery outbox test and nine
+indexing, search, ordering, reindex, retry/dead-letter, and recovery tests:
 
 ```bash
 docker compose -f compose.test.yml up \

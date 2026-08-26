@@ -15,6 +15,8 @@ import { PrismaService } from './prisma.service';
 
 interface JobSearchDocument {
   jobId: string;
+  aggregateVersion: number;
+  searchable: boolean;
   companyId: string;
   companyName?: string | null;
   title: string;
@@ -63,7 +65,8 @@ export class JobSearchService {
           : 2000,
       maxRetries: 0,
     });
-    this.index = config.get<string>('ELASTICSEARCH_INDEX') ?? 'job_index';
+    this.index = config.get<string>('ELASTICSEARCH_INDEX')?.trim() ||
+      'job_index_v2';
   }
 
   async search(query: JobSearchQueryDto): Promise<JobSearchResultDto> {
@@ -84,6 +87,7 @@ export class JobSearchService {
   ): Promise<JobSearchResultDto> {
     const must: estypes.QueryDslQueryContainer[] = [];
     const filter: estypes.QueryDslQueryContainer[] = [
+      { term: { searchable: true } },
       { term: { status: JobStatus.PUBLISHED } },
       { range: { deadline: { gte: 'now/d' } } },
     ];

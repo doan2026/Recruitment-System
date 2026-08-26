@@ -680,7 +680,7 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 - Job(id, company_id, created_by, title, description, requirements, benefits, salary_min, salary_max, is_negotiable, currency, location, job_type, experience_years, quantity, skills[], deadline, status, aggregate_version, published_at, created_at, updated_at)
 - JobEventOutbox(event_id, job_id, aggregate_version, topic, event_key, action, payload, attempts, next_attempt_at, lease_owner, lease_expires_at, published_at, last_error, created_at) — unique(job_id, aggregate_version), payload bất biến.
 - JobView(id, job_id, user_id, viewed_at) — phục vụ thống kê lượt xem
-- Chỉ mục Elasticsearch: job_index(job_id, title, description, skills, location, salary_min, salary_max, job_type, company_name, published_at)
+- Chỉ mục Elasticsearch: job_index_v2(job_id, aggregate_version, searchable, title, description, skills, location, salary_min, salary_max, job_type, company_name, published_at)
 ### 2.3. API chính
 ```text
  Endpoint                              Mô tả                                          Quyền truy cập

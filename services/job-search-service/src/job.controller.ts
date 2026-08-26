@@ -46,7 +46,7 @@ import {
   JobSearchResultDto,
 } from './job-search.dto';
 import { JobSearchService } from './job-search.service';
-import { JobIndexingService } from './job-indexing.service';
+import { JobIndexFailure, JobIndexingService } from './job-indexing.service';
 import { JobService } from './job.service';
 
 const JOB_ID_PIPE = new ParseUUIDPipe({
@@ -169,9 +169,25 @@ export class JobController {
   @Post('reindex')
   @Roles(SystemRole.ADMIN)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Queue every PUBLISHED job for reindexing' })
+  @ApiOperation({ summary: 'Reconcile every job with Elasticsearch' })
   reindex(): Promise<{ queued: number }> {
     return this.indexing.reindexAll().then((queued) => ({ queued }));
+  }
+
+  @Get('reindex/failures')
+  @Roles(SystemRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List durable Elasticsearch indexing failures' })
+  async indexFailures(): Promise<{ items: JobIndexFailure[] }> {
+    return { items: await this.indexing.listFailures() };
+  }
+
+  @Post('reindex/failures/retry')
+  @Roles(SystemRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Retry every failed Elasticsearch index sync' })
+  async retryIndexFailures(): Promise<{ retried: number }> {
+    return { retried: await this.indexing.retryFailures() };
   }
 
   @Internal()

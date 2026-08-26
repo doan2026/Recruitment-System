@@ -83,6 +83,7 @@ integrationDescribe('Job transactional event outbox', () => {
   });
 
   beforeEach(async () => {
+    await prisma.jobIndexSync.deleteMany();
     await prisma.jobEventOutbox.deleteMany();
     await prisma.job.deleteMany();
   });
@@ -105,8 +106,12 @@ integrationDescribe('Job transactional event outbox', () => {
         verifiedStatus: 'VERIFIED',
       }),
     } as unknown as CompanyClientService;
-    const schedule = jest.fn().mockResolvedValue(undefined);
-    const indexing = { schedule } as unknown as JobIndexingService;
+    const appendIndex = jest.fn().mockResolvedValue(undefined);
+    const wakeIndex = jest.fn();
+    const indexing = {
+      append: appendIndex,
+      wake: wakeIndex,
+    } as unknown as JobIndexingService;
     const wake = jest.fn();
     const events = {
       append: publisher.append.bind(publisher),
@@ -279,7 +284,8 @@ integrationDescribe('Job transactional event outbox', () => {
         where: { publishedAt: null },
       }),
     ).toBe(0);
-    expect(schedule).toHaveBeenCalledWith(created.id);
+    expect(appendIndex).toHaveBeenCalled();
+    expect(wakeIndex).toHaveBeenCalled();
     expect(wake).toHaveBeenCalled();
     await consumer.stop();
     await consumerRun;
