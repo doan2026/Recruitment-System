@@ -108,10 +108,14 @@ public class AuthUser {
   }
 
   public static AuthUser registerOAuth(String email, Instant verifiedAt) {
+    return registerOAuth(email, UserRole.CANDIDATE, verifiedAt);
+  }
+
+  public static AuthUser registerOAuth(String email, UserRole role, Instant verifiedAt) {
     return new AuthUser(
         email,
         null,
-        UserRole.CANDIDATE,
+        requireSelfRegistrationRole(role),
         true,
         Objects.requireNonNull(verifiedAt, "verifiedAt is required"),
         null,
