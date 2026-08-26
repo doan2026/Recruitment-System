@@ -417,7 +417,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Swagger có ở `/profile/docs` qua gateway (`/docs` trực tiếp) trong môi trường được bật. Docker PostgreSQL 16.15 sạch đạt **1/1 migration-upgrade check + 8/8 unit test + 23/23 integration test**, gồm safety guard chống test nhầm database, backfill whitespace legacy, migration lặp, completion/rollback, route alias, JWT/JWKS negative kể cả future-`iat`, validation, OpenAPI, IDOR đủ năm collection, Unicode skill, collection cap, 12 vòng race lần ghi đầu, burst sáu writer trên Profile đã tồn tại và duplicate skill concurrent.
 - Phần chưa hoàn thành của P08 vẫn là Media/avatar/CV upload, quản lý/CV Builder/internal CV APIs, recruiter-related read contract và transactional `cv-events` cho AI.
 
-## 2.16 File/Media Service Core — đã hoàn thành và verify
+## 2.16 File/Media Service Core — đã hoàn thành và verify qua PR #36
 
 - Hoàn thiện signed upload intent 10 phút và confirm chỉ bằng `fileId`; service tự đọc metadata canonical từ Cloudinary, không tin MIME, size, URL hoặc metadata do client gửi. Policy v1 fail-closed có đúng sáu type `CV`, `AVATAR`, `COMPANY_LOGO`, `COMPANY_IMAGE`, `COMPANY_VIDEO`, `CHAT_ATTACHMENT`; `OFFER_LETTER` chưa được đưa vào để tránh dùng sai policy.
 - Public API dùng strict JWT RS256/role/owner; internal API dùng sáu key riêng, ràng buộc đúng danh tính Profile/Company/Application/Chat/Interview/AI và so sánh constant-time. Gateway công khai route `/files`, xóa internal headers và trả `404` cho mọi biến thể `/files/internal`.
