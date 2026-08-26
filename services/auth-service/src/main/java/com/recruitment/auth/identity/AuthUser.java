@@ -34,6 +34,12 @@ public class AuthUser {
   @Column(name = "password_hash", length = 255)
   private String passwordHash;
 
+  @Column(name = "registration_id")
+  private UUID registrationId;
+
+  @Column(name = "registration_fence", nullable = false)
+  private long registrationFence;
+
   @Enumerated(EnumType.STRING)
   @Column(nullable = false, length = 20)
   private UserRole role;
@@ -67,18 +73,38 @@ public class AuthUser {
 
   protected AuthUser() {}
 
-  private AuthUser(String email, String passwordHash, UserRole role, boolean verified, Instant verifiedAt) {
+  private AuthUser(
+      String email,
+      String passwordHash,
+      UserRole role,
+      boolean verified,
+      Instant verifiedAt,
+      UUID registrationId,
+      long registrationFence) {
     this.id = UUID.randomUUID();
     setEmail(email);
     this.passwordHash = passwordHash == null ? null : requirePasswordHash(passwordHash);
     this.role = Objects.requireNonNull(role, "role is required");
     this.verified = verified;
     this.verifiedAt = verifiedAt;
+    this.registrationId = registrationId;
+    this.registrationFence = requireRegistrationFence(registrationFence);
   }
 
   public static AuthUser registerLocal(String email, String passwordHash, UserRole role) {
+    return registerLocal(email, passwordHash, role, 0);
+  }
+
+  public static AuthUser registerLocal(
+      String email, String passwordHash, UserRole role, long registrationFence) {
     return new AuthUser(
-        email, requirePasswordHash(passwordHash), requireSelfRegistrationRole(role), false, null);
+        email,
+        requirePasswordHash(passwordHash),
+        requireSelfRegistrationRole(role),
+        false,
+        null,
+        UUID.randomUUID(),
+        registrationFence);
   }
 
   public static AuthUser registerOAuth(String email, Instant verifiedAt) {
@@ -87,7 +113,9 @@ public class AuthUser {
         null,
         UserRole.CANDIDATE,
         true,
-        Objects.requireNonNull(verifiedAt, "verifiedAt is required"));
+        Objects.requireNonNull(verifiedAt, "verifiedAt is required"),
+        null,
+        0);
   }
 
   public void verify(Instant at) {
@@ -95,6 +123,7 @@ public class AuthUser {
       Instant verificationTime = Objects.requireNonNull(at, "verification time is required");
       verified = true;
       verifiedAt = verificationTime;
+      registrationId = null;
     }
   }
 
@@ -127,6 +156,11 @@ public class AuthUser {
     if (verified != (verifiedAt != null)) {
       throw new IllegalStateException("verified and verifiedAt must change together");
     }
+    if (verified == (registrationId != null)) {
+      throw new IllegalStateException(
+          "only an unverified account may retain a registrationId");
+    }
+    registrationFence = requireRegistrationFence(registrationFence);
     if ((locked && (lockedAt == null || lockedReason == null))
         || (!locked && (lockedAt != null || lockedReason != null))) {
       throw new IllegalStateException("locked, lockedAt and lockedReason must change together");
@@ -145,6 +179,13 @@ public class AuthUser {
       throw new IllegalArgumentException("passwordHash must be a bcrypt cost-10 hash");
     }
     return hash;
+  }
+
+  private static long requireRegistrationFence(long value) {
+    if (value < 0) {
+      throw new IllegalArgumentException("registrationFence cannot be negative");
+    }
+    return value;
   }
 
   private static UserRole requireSelfRegistrationRole(UserRole role) {
@@ -169,6 +210,14 @@ public class AuthUser {
 
   public String getPasswordHash() {
     return passwordHash;
+  }
+
+  public UUID getRegistrationId() {
+    return registrationId;
+  }
+
+  public long getRegistrationFence() {
+    return registrationFence;
   }
 
   public UserRole getRole() {

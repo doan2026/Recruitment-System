@@ -52,6 +52,9 @@ class AuthPersistencePostgresIT {
     registry.add("spring.flyway.create-schemas", () -> "true");
     registry.add("spring.jpa.properties.hibernate.default_schema", () -> "auth");
     registry.add("spring.data.redis.repositories.enabled", () -> "false");
+    registry.add(
+        "auth.otp.hmac-secret",
+        () -> "integration-test-otp-secret-at-least-32-bytes");
   }
 
   @Autowired
@@ -88,15 +91,25 @@ class AuthPersistencePostgresIT {
         "users", "refresh_sessions", "oauth_accounts", "flyway_schema_history");
     assertThat(tables).doesNotContain("otp", "otps", "reset_tokens", "one_time_tokens");
     assertThat(jdbc.queryForObject(
-        "SELECT COUNT(*) FROM auth.flyway_schema_history WHERE success AND version = '1'",
+        "SELECT COUNT(*) FROM auth.flyway_schema_history WHERE success AND version IN ('1', '2')",
+        Integer.class)).isEqualTo(2);
+    assertThat(jdbc.queryForObject(
+        """
+        SELECT COUNT(*)
+        FROM information_schema.sequences
+        WHERE sequence_schema = 'auth'
+          AND sequence_name = 'registration_flow_fence_seq'
+        """,
         Integer.class)).isEqualTo(1);
   }
 
   @Test
   void enforcesNormalizedEmailRoleLockAndOptimisticVersion() {
     AuthUser user = users.saveAndFlush(AuthUser.registerLocal(
-        "Candidate@Example.COM", BCRYPT_HASH, UserRole.CANDIDATE));
+        "Candidate@Example.COM", BCRYPT_HASH, UserRole.CANDIDATE, 11));
 
+    assertThat(user.getRegistrationId()).isNotNull();
+    assertThat(user.getRegistrationFence()).isEqualTo(11);
     assertThat(users.findByNormalizedEmail("candidate@example.com"))
         .get()
         .extracting(AuthUser::getId)
@@ -273,14 +286,16 @@ class AuthPersistencePostgresIT {
         """
         INSERT INTO auth.users
           (id, email, normalized_email, password_hash, role,
-           is_locked, locked_at, locked_reason)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           registration_id, registration_fence, is_locked, locked_at, locked_reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         id,
         email,
         normalizedEmail,
         BCRYPT_HASH,
         role,
+        UUID.randomUUID(),
+        1L,
         locked,
         lockedAt == null ? null : Timestamp.from(lockedAt),
         lockedReason);

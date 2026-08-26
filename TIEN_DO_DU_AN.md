@@ -2,7 +2,7 @@
 
 > Ngày cập nhật: 26/08/2026
 > Nhánh đối chiếu chính: `develop`
-> Nhánh triển khai lần cập nhật: `feature/auth-service/identity-persistence-foundation`
+> Nhánh triển khai lần cập nhật: `feature/auth-service/registration-otp-verification`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -18,7 +18,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 | Nhóm task | Người phụ trách | Trạng thái hiện tại |
 | --- | --- | --- |
-| Auth Service | Người 1 | 🟡 Persistence PostgreSQL/Flyway đã hoàn thành; API/JWT/OTP còn thiếu |
+| Auth Service | Người 1 | 🟡 Persistence và đăng ký Candidate/Recruiter bằng OTP email đã hoàn thành; login/JWT còn thiếu |
 | User/Profile Service | Người 1 | ⏳ Scaffold |
 | File/Media Service | Người 1 | ⏳ Scaffold |
 | Admin & Statistics Service | Người 1 | ⏳ Scaffold |
@@ -44,7 +44,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** đăng ký và OTP email; đăng nhập email/mật khẩu; Google OAuth2; refresh-token rotation; quên/đặt lại mật khẩu; cung cấp public key.
 - **Chức năng chính:** quản lý tài khoản, role, trạng thái khóa; access/refresh token; thu hồi phiên; OTP có hạn dùng; public-key endpoint; API nội bộ khóa/mở khóa tài khoản.
 - **Phụ thuộc:** PostgreSQL, Redis, SMTP và Google OAuth. Tất cả service còn lại phụ thuộc hợp đồng JWT của task này.
-- **Trạng thái:** đã có Flyway V1, JPA model/repository cho User, RefreshSession và OAuthAccount, đạt 15 unit + 5 integration test PostgreSQL 16; SecurityConfig vẫn cho phép mọi request và chưa có API/JWT/OTP thật.
+- **Trạng thái:** persistence Flyway/JPA và đăng ký Candidate/Recruiter bằng bcrypt cost 10 + OTP Redis/SMTP đã hoàn thành, đạt 77 unit + 16 integration test. Security đã stateless, chỉ public health/registration/OTP và deny các request khác; login, Google OAuth2, JWT/JWKS, refresh, reset password và Admin account control vẫn pending.
 
 ## T02 — User/Profile Service
 
@@ -341,7 +341,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Nginx có upstream và route cơ bản cho Auth, Profile, Company, Job, Application, Interview, Notification, Media, Admin, AI và Chat WebSocket.
 - Có volume cho PostgreSQL, MongoDB, Redis, Kafka và Elasticsearch.
 
-## 2.9 Auth Persistence Foundation — task hiện tại
+## 2.9 Auth Persistence Foundation — đã merge vào `develop`
 
 - Flyway V1 tự tạo/validate schema `auth` trên PostgreSQL sạch với ba bảng `users`, `refresh_sessions`, `oauth_accounts`; Hibernate chạy `ddl-auto=validate` và mặc định UTC.
 - Email được chuẩn hóa Unicode NFC + lowercase bằng Java, lưu riêng `normalized_email` và unique trực tiếp; self-registration chỉ nhận `CANDIDATE`/`RECRUITER`, Google mặc định `CANDIDATE`, còn `ADMIN` phải qua provisioning nội bộ. Trạng thái verify/lock đi cùng timestamp và User dùng optimistic `version`.
@@ -350,6 +350,18 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - OAuth dùng Google `provider_subject` làm định danh, yêu cầu email claim đã verified, chặn trùng subject và chặn một User liên kết hai tài khoản cùng provider; không lưu Google access/refresh token.
 - OTP/reset token tiếp tục là dữ liệu tạm Redis theo kiến trúc (`otp:*` TTL 5 phút, `reset:*` TTL 15 phút), không tạo bảng PostgreSQL và không lưu secret thô.
 - Đã verify **15/15 unit test + 5/5 integration test** với PostgreSQL 16/Testcontainers: migration sạch, Hibernate mapping, normalized email, role/lock checks, FK/unique OAuth, optimistic locking và refresh lineage đều đạt.
+
+## 2.10 Auth Registration và OTP Verification — task hiện tại
+
+- Bổ sung public API `POST /auth/register`, `POST /auth/otp/resend` và `POST /auth/otp/verify` với response envelope thống nhất; self-registration chỉ nhận `CANDIDATE`/`RECRUITER`, mật khẩu tối thiểu tám ký tự Unicode, có chữ/số, không vượt 72 byte UTF-8 và chỉ lưu bcrypt cost 10.
+- Mỗi pre-registration có `registrationId` bắt buộc cho resend/verify. Đăng ký lại một email đang pending tạo flow mới và thay đồng thời password/role/`registrationId`; flow/OTP cũ bị vô hiệu nên không thể giữ lại credential do người khác tạo. Email đã verified trả `409`; resend flow không tồn tại/cũ trả `202` chung để hạn chế enumeration.
+- Flyway V2 thêm `registration_id`, sequence/column `registration_fence` và CHECK/unique index. Mỗi flow nhận fence tăng đơn điệu; PostgreSQL upsert chỉ nhận fence mới hơn nên stale writer không thể ghi đè credential mới dù Redis dispatch lease đã hết hạn.
+- OTP sáu chữ số có TTL 5 phút; raw OTP không được lưu ở PostgreSQL/Redis và không ghi log. Redis chỉ giữ HMAC-SHA-256 challenge gắn với purpose, User ID, `registrationId`, canonical email và random generation; tên key dùng HMAC email nên không lộ PII.
+- Lua atomically quản lý install, claim/finalize, cleanup, failure block và rolling resend reservation. Sai lần thứ năm xóa challenge và khóa 15 phút; initial email không tính quota, tối đa ba resend trong một giờ. Claim 30 giây bảo đảm hai verify đồng thời chỉ có một winner.
+- Dispatch registration/resend có Redis lease theo email, renew/recheck ownership quanh DB/SMTP; DB fence là lớp bảo vệ bền vững khi lease hết hạn. Verify khóa pessimistic và kiểm tra lại User ID, `registrationId`, fence trước khi kích hoạt tài khoản, sau đó clear `registrationId`.
+- SMTP gửi đồng bộ với connect/read/write timeout 3 giây và cleanup có CAS khi lỗi. Không tuyên bố exactly-once vì SMTP ACK/timeout vẫn có thể tạo email trễ hoặc trùng; production bắt buộc bật cả `SMTP_STARTTLS=true` và `SMTP_STARTTLS_REQUIRED=true` cùng SMTP auth/secret phù hợp.
+- Security chuyển sang stateless, public đúng health/registration/OTP và `denyAll` cho endpoint chưa triển khai. `/health`, `/auth/health` phản ánh Actuator thật và trả `503` khi `DOWN/OUT_OF_SERVICE`; Nginx giữ nguyên prefix `/auth` và route health trực tiếp tới Actuator.
+- Đã verify **77/77 unit test + 16/16 integration test (93/93 tổng)** với PostgreSQL 16.15, Redis 7 có mật khẩu và Testcontainers 1.21.4: validation, privacy, TTL/rate limit, supersession, stale fence, actual persisted User ID và concurrency đều đạt.
 
 ---
 
@@ -430,13 +442,14 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 ## P07 — Auth Service
 
 - [x] Tạo Flyway/JPA persistence cho User, RefreshSession và OAuthAccount; chốt OTP/ResetToken là secret tạm Redis thay vì bảng PostgreSQL; verify 15 unit + 5 integration test PostgreSQL 16.
-- [ ] Đăng ký Candidate/Recruiter, hash mật khẩu và xác minh OTP email.
+- [x] Đăng ký Candidate/Recruiter, bcrypt cost 10 và xác minh OTP email với `registrationId`, Redis HMAC challenge, rolling rate limit, DB fence chống stale writer và SMTP đồng bộ; verify 77 unit + 16 integration test.
 - [ ] Đăng nhập email/password và Google OAuth2.
 - [ ] Phát JWT RS256 với `sub`, `role`, `iat`, `exp`; cung cấp public key/JWKS.
 - [ ] Refresh token rotation, revoke session và phát hiện token reuse.
 - [ ] Quên/đặt lại mật khẩu; rate limit OTP/login.
 - [ ] API Admin khóa/mở tài khoản và vô hiệu hóa phiên hiện tại.
-- [ ] Unit/integration/security test; bỏ cấu hình `anyRequest().permitAll()`.
+- [x] Bỏ cấu hình `anyRequest().permitAll()`; security stateless chỉ public health/registration/OTP và deny endpoint chưa triển khai.
+- [ ] Hoàn thiện unit/integration/security test cho login, JWT/refresh, reset password và Admin account control khi các luồng đó được triển khai.
 
 ## P08 — User/Profile Service
 
@@ -540,6 +553,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [ ] Bổ sung route chính thức `/bookmarks`; hiện Bookmark đi qua `/applications/bookmarks`.
 - [ ] Xử lý cả URL có và không có dấu `/` cuối, ví dụ `/applications` và `/applications/`.
 - [ ] Thêm healthcheck cho từng service và `depends_on` theo trạng thái healthy.
+  - [x] Auth Service có health Actuator thật, trả `503` khi dependency `DOWN/OUT_OF_SERVICE`; Redis có healthcheck/auth và Auth chờ Redis healthy trong Compose.
 - [ ] Dựng Jitsi self-host đầy đủ: web, Prosody, Jicofo, JVB, domain và TLS.
 - [ ] Quản lý secrets an toàn cho JWT private key, Cloudinary, FCM, SMTP và LLM key.
 - [ ] Cấu hình CORS, rate limit, request ID, timeout và WebSocket upgrade nhất quán.
@@ -585,7 +599,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## Rủi ro và điểm cần chốt ngay
 
-- Auth đã có persistence foundation nhưng chưa phát JWT thật, nên các service đã verify JWT vẫn chưa thể chạy end-to-end; task tiếp theo là đăng ký Candidate/Recruiter, bcrypt và OTP Redis/email.
+- Auth đã có persistence và đăng ký Candidate/Recruiter với bcrypt/OTP Redis-email, nhưng vẫn chưa phát JWT thật nên các service đã verify JWT chưa thể chạy end-to-end; task tiếp theo là login email/password, Google OAuth2 và JWT RS256/JWKS.
 - Profile chưa có API CV nên Application Submission sẽ lỗi tích hợp dù unit test đã đạt.
 - Nhà cung cấp LLM chưa thống nhất giữa tài liệu (Claude) và dependency tùy chọn hiện tại (Gemini); khác biệt này không ảnh hưởng provider `/match` thuần pgvector.
 - `job-events` v1 đã được khóa theo implementation thật với key `job_id`, 16 trường versioned và salary decimal string hai chữ số hoặc `null`. Các topic khác vẫn phải chốt riêng; Event Offer đã bổ sung `actor_id`, `offer_id`, `offer_status`, `offer_version`, còn `recruiter_id` là recruiter gắn với Application/job.
