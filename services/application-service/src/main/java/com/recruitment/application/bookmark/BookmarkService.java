@@ -3,10 +3,14 @@ package com.recruitment.application.bookmark;
 import com.recruitment.application.api.BusinessException;
 import com.recruitment.application.client.JobClient;
 import com.recruitment.application.client.JobClient.JobAvailability;
+import com.recruitment.application.client.JobClient.BulkJobDetails;
+import com.recruitment.application.client.JobClient.JobDetail;
 import com.recruitment.application.domain.BookmarkEntity;
 import com.recruitment.application.repository.BookmarkRepository;
 import java.time.Clock;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -68,28 +72,39 @@ public class BookmarkService {
         return BookmarkResponse.from(bookmark, job);
     }
 
-    @Transactional(readOnly = true)
     public List<BookmarkResponse> list(UUID userId) {
-        return bookmarks.findAllByUserIdOrderByCreatedAtDesc(userId)
-            .stream()
-            .map(bookmark -> BookmarkResponse.from(
-                bookmark,
-                getAvailabilityOrNull(bookmark.getJobId())
-            ))
-            .toList();
+        List<BookmarkEntity> savedBookmarks =
+            bookmarks.findAllByUserIdOrderByCreatedAtDesc(userId);
+        if (savedBookmarks.isEmpty()) {
+            return List.of();
+        }
+
+        try {
+            BulkJobDetails details = jobs.getBulkDetails(
+                savedBookmarks.stream()
+                    .map(BookmarkEntity::getJobId)
+                    .toList()
+            );
+            Map<UUID, JobDetail> detailsByJobId = new HashMap<>();
+            details.items().forEach(
+                detail -> detailsByJobId.put(detail.id(), detail)
+            );
+            return savedBookmarks.stream()
+                .map(bookmark -> BookmarkResponse.fromDetail(
+                    bookmark,
+                    detailsByJobId.get(bookmark.getJobId())
+                ))
+                .toList();
+        } catch (BusinessException exception) {
+            return savedBookmarks.stream()
+                .map(bookmark -> BookmarkResponse.fromDetail(bookmark, null))
+                .toList();
+        }
     }
 
     @Transactional
     public void delete(UUID userId, UUID jobId) {
         bookmarks.deleteByUserIdAndJobId(userId, jobId);
-    }
-
-    private JobAvailability getAvailabilityOrNull(UUID jobId) {
-        try {
-            return jobs.getAvailability(jobId);
-        } catch (BusinessException exception) {
-            return null;
-        }
     }
 
     private BusinessException duplicate() {

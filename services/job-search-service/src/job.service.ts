@@ -13,6 +13,10 @@ import {
   JobAvailabilityReason,
 } from './job-availability.dto';
 import { ActiveJobStatsDto } from './job-stats.dto';
+import {
+  BulkJobDetailResultDto,
+  JobDetailDto,
+} from './job-detail.dto';
 import { PrismaService } from './prisma.service';
 
 interface CommittedJobChange {
@@ -21,6 +25,11 @@ interface CommittedJobChange {
 }
 
 const JOB_EXPIRY_BATCH_SIZE = 100;
+const BULK_DETAIL_VISIBLE_STATUSES: JobStatus[] = [
+  JobStatus.PUBLISHED,
+  JobStatus.CLOSED,
+  JobStatus.EXPIRED,
+];
 
 @Injectable()
 export class JobService {
@@ -121,14 +130,7 @@ export class JobService {
       };
     }
 
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
-    const deadlinePassed = job.deadline.getTime() < today.getTime();
-    const reason = job.status !== JobStatus.PUBLISHED
-      ? JobAvailabilityReason.NOT_PUBLISHED
-      : deadlinePassed
-        ? JobAvailabilityReason.DEADLINE_PASSED
-        : null;
+    const reason = this.availabilityReason(job, new Date());
 
     return {
       jobId: job.id,
@@ -142,6 +144,29 @@ export class JobService {
       deadline: job.deadline.toISOString().slice(0, 10),
     };
   }
+
+  async getBulkDetails(
+    jobIds: string[],
+    now = new Date(),
+  ): Promise<BulkJobDetailResultDto> {
+    if (!jobIds.length) return { items: [], unavailableJobIds: [] };
+    const jobs = await this.prisma.job.findMany({
+      where: {
+        id: { in: jobIds },
+        status: { in: BULK_DETAIL_VISIBLE_STATUSES },
+      },
+    });
+    const jobsById = new Map(jobs.map((job) => [job.id, job]));
+    const items: JobDetailDto[] = [];
+    const unavailableJobIds: string[] = [];
+    for (const jobId of jobIds) {
+      const job = jobsById.get(jobId);
+      if (job) items.push(this.toJobDetail(job, now));
+      else unavailableJobIds.push(jobId);
+    }
+    return { items, unavailableJobIds };
+  }
+
   async getActiveJobStats(
     companyId: string,
     now = new Date(),
@@ -654,5 +679,47 @@ export class JobService {
       createdAt: job.createdAt.toISOString(),
       updatedAt: job.updatedAt.toISOString(),
     };
+  }
+
+  private toJobDetail(job: Job, now: Date): JobDetailDto {
+    const availabilityReason = this.availabilityReason(job, now);
+    return {
+      id: job.id,
+      companyId: job.companyId,
+      title: job.title,
+      description: job.description,
+      requirements: job.requirements,
+      benefits: job.benefits,
+      salaryMin: job.salaryMin?.toString() ?? null,
+      salaryMax: job.salaryMax?.toString() ?? null,
+      isNegotiable: job.isNegotiable,
+      currency: job.currency,
+      location: job.location,
+      jobType: job.jobType,
+      experienceYears: job.experienceYears,
+      quantity: job.quantity,
+      skills: job.skills,
+      deadline: job.deadline.toISOString().slice(0, 10),
+      status: job.status,
+      publishedAt: job.publishedAt?.toISOString() ?? null,
+      createdAt: job.createdAt.toISOString(),
+      updatedAt: job.updatedAt.toISOString(),
+      acceptingApplications: availabilityReason === null,
+      availabilityReason,
+    };
+  }
+
+  private availabilityReason(
+    job: Pick<Job, 'status' | 'deadline'>,
+    now: Date,
+  ): JobAvailabilityReason | null {
+    if (job.status !== JobStatus.PUBLISHED) {
+      return JobAvailabilityReason.NOT_PUBLISHED;
+    }
+    const today = new Date(now);
+    today.setUTCHours(0, 0, 0, 0);
+    return job.deadline.getTime() < today.getTime()
+      ? JobAvailabilityReason.DEADLINE_PASSED
+      : null;
   }
 }

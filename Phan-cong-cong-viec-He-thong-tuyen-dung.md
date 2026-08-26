@@ -646,16 +646,16 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 3. Áp bộ lọc: địa điểm, khoảng lương, kỹ năng, số năm kinh nghiệm, hình thức làm việc, công ty.
 4. Sắp xếp: độ liên quan (mặc định), mới nhất, lương cao nhất.
 5. Phân trang; trả về kèm tổng số kết quả và facet đếm theo từng bộ lọc.
-6. Nếu Elasticsearch không phản hồi → fallback truy vấn LIKE trên Postgres (kết quả kém hơn nhưng không chết trang tìm kiếm).
+6. Nếu Elasticsearch không phản hồi hoặc baseline marker chưa hoàn tất → fallback truy vấn LIKE trên PostgreSQL. Health trả `DEGRADED` khi baseline marker thiếu/sai; sau khi baseline đã hoàn tất, lỗi Elasticsearch runtime vẫn fallback nhưng health hiện chỉ phản ánh baseline readiness nên có thể còn `UP`.
 #### Luồng 4: Đồng bộ dữ liệu sang Elasticsearch
 1. Mọi thay đổi job LUÔN ghi vào PostgreSQL trước (nguồn sự thật).
-2. Sau khi commit, đẩy một job vào hàng đợi BullMQ (index/update/delete); hàng đợi chỉ phục vụ Elasticsearch, không chịu trách nhiệm phát domain event.
-3. Worker lấy từ hàng đợi và ghi vào Elasticsearch; lỗi thì retry với backoff.
+2. Trong cùng transaction với Job, ghi desired index state bền vững vào PostgreSQL; dispatcher chỉ đưa intent đã commit sang BullMQ nên Redis lỗi không làm mất cập nhật. Khi shutdown, dispatcher kiểm tra cả trước và sau claim, release intent nếu shutdown thắng race sau claim.
+3. Worker lấy từ hàng đợi và scripted-update Elasticsearch theo cặp (`aggregateVersion`, `indexGeneration`); lỗi thì retry với backoff.
 
 <!-- Page 20 -->
 
 4. Không index đồng bộ trong cùng transaction — tránh trường hợp ES chậm/chết làm hỏng nghiệp vụ ghi job.
-5. Có lệnh reindex toàn bộ để dựng lại chỉ mục từ Postgres khi cần; reindex chỉ ghi Elasticsearch và không phát `job-events`.
+5. Có lệnh reindex toàn bộ để dựng lại chỉ mục từ Postgres khi cần; reindex dùng set-based UPSERT theo page, chỉ ghi Elasticsearch và không phát `job-events`. Service dùng cặp marker bền vững `mappings._meta.baselineVersion=3` và `baselineIndexUuid=<UUID>`, tự enqueue/resume baseline sau restart cho cả index mới và index tương thích có marker thiếu, cũ hoặc sai UUID.
 #### Luồng 5: Gợi ý "Việc làm phù hợp với bạn"
 1. Ứng viên mở trang chủ hoặc trang gợi ý.
 2. Job & Search Service gọi AI Service: POST /ai/recommend/jobs?cv_id={cv mặc định của ứng viên}.
@@ -671,16 +671,19 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 - Chỉ thành viên của công ty đã VERIFIED mới tạo được tin.
 - MEMBER chỉ sửa/xoá tin do mình tạo; OWNER thao tác được trên mọi tin của công ty.
 - Tin EXPIRED và CLOSED không nhận đơn ứng tuyển mới (Application Service kiểm tra trước khi cho nộp).
-- Elasticsearch chỉ chứa tin PUBLISHED.
+- Elasticsearch chỉ trả kết quả tìm kiếm cho tin `PUBLISHED` có `searchable=true`; `CLOSED`, `EXPIRED` và các trạng thái khác được giữ dưới dạng tombstone `searchable=false` để stale task không thể làm tin xuất hiện lại.
 - PostgreSQL là nguồn sự thật duy nhất; Elasticsearch có thể dựng lại bất cứ lúc nào từ Postgres.
+- Khi startup và trước khi bật writer, service phải kiểm tra strict mapping, kiểu và cờ `index`/`doc_values` của toàn bộ field bắt buộc, các thành phần analyzer/multi-field tiếng Việt bắt buộc và projection version 3; alias chỉ được trỏ đúng một concrete index tương thích, alias nhiều target phải bị từ chối.
+- Chỉ dùng Elasticsearch search và trả health `UP` khi `mappings._meta.baselineVersion=3` và `baselineIndexUuid` khớp UUID vật lý trong settings. Khi hoàn tất, service refresh concrete index, ghi marker kèm UUID rồi revalidate tên index, UUID và marker; mismatch tiếp tục baseline, fallback PostgreSQL và trả health `DEGRADED`.
 - Mỗi mutation dùng CAS trên `aggregate_version`; chỉ mutation thắng mới tăng version và tạo đúng một outbox event có cùng version.
 - `event_id` được tạo một lần khi ghi outbox và giữ nguyên qua mọi lần retry, vì delivery Kafka là at-least-once.
 - Số lượng kết quả trả về mỗi trang tối đa 50.
+- Bulk detail nội bộ nhận tối đa 100 `jobIds` UUID duy nhất; chỉ trả projection công khai an toàn của `PUBLISHED`, `CLOSED`, `EXPIRED`, còn ID không tồn tại hoặc trạng thái nội bộ nằm trong `unavailableJobIds`.
 ### 2.2. Mô hình dữ liệu
 - Job(id, company_id, created_by, title, description, requirements, benefits, salary_min, salary_max, is_negotiable, currency, location, job_type, experience_years, quantity, skills[], deadline, status, aggregate_version, published_at, created_at, updated_at)
 - JobEventOutbox(event_id, job_id, aggregate_version, topic, event_key, action, payload, attempts, next_attempt_at, lease_owner, lease_expires_at, published_at, last_error, created_at) — unique(job_id, aggregate_version), payload bất biến.
 - JobView(id, job_id, user_id, viewed_at) — phục vụ thống kê lượt xem
-- Chỉ mục Elasticsearch: job_index_v2(job_id, aggregate_version, searchable, title, description, skills, location, salary_min, salary_max, job_type, company_name, published_at)
+- Chỉ mục Elasticsearch: job_index_v3(_meta[projectionVersion=3, baselineVersion=3, baselineIndexUuid], jobId, aggregateVersion, indexGeneration, searchable, companyId, companyName, title, description, salaryMin, salaryMax, isNegotiable, currency, location, jobType, experienceYears, skills, deadline, status, publishedAt)
 ### 2.3. API chính
 ```text
  Endpoint                              Mô tả                                          Quyền truy cập
@@ -703,6 +706,7 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 ```text
  Endpoint                            Mô tả                                         Quyền truy cập
  GET /jobs/:id/exists                Kiểm tra tin còn nhận đơn không               Nội bộ (Application)
+ POST /jobs/details/bulk             Lấy tối đa 100 chi tiết Job cho Bookmark      Nội bộ (Application)
 ```
 
 
@@ -721,9 +725,9 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 - job-events publish được, giữ đúng key/version/contract và Người 1 nhận được để thống kê.
 
 ### 2.7. Khoảng trống rollout/vận hành còn lại
-- Database đã có dữ liệu phải dùng baseline/replay được review trước khi bật publisher; migration không tự backfill hoặc tự phát lại event lịch sử.
+- Database đã có dữ liệu vẫn cần baseline/replay được review nếu consumer Kafka cần historical `job-events`; migration outbox không tự backfill hoặc tự phát lại domain event lịch sử. Baseline Elasticsearch là luồng độc lập: `job_index_v3` tự enqueue/resume cho cả index mới và index tương thích thiếu/sai `mappings._meta.baselineVersion=3` hoặc `baselineIndexUuid`; trong lúc chưa hoàn tất, search dùng PostgreSQL fallback và health ở `DEGRADED`.
 - Chính sách dọn bản ghi outbox đã publish (retention/cleanup) chưa triển khai.
-- Kiểm thử tích hợp đầy đủ Redis/BullMQ và Elasticsearch cho luồng index/reindex vẫn còn thiếu; hai hệ này độc lập với tính nguyên tử Job + outbox.
+- Hard-delete Job hiện bị các FK `RESTRICT` từ outbox và durable index-sync chặn; phải chốt soft-delete hoặc tombstone intent độc lập trước khi cho phép xóa cứng, không dùng `CASCADE` khi chưa bảo toàn sự kiện/index xóa.
 
 <!-- Page 22 -->
 

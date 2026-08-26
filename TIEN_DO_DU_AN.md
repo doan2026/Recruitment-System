@@ -2,7 +2,7 @@
 
 > Ngày cập nhật: 26/08/2026
 > Nhánh đối chiếu chính: `develop`
-> Nhánh triển khai lần cập nhật: `feature/job-search-service/transactional-job-events-outbox`
+> Nhánh triển khai lần cập nhật: `feature/job-search-service/bookmark-bulk-detail-contract`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -158,7 +158,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Mục tiêu:** chứng minh các luồng xuyên service chạy thật, ổn định và có thể triển khai.
 - **Công nghệ/công cụ:** unit/integration/E2E test, Docker Compose, CI/CD, Swagger/OpenAPI, logging/metrics/tracing.
 - **Đầu ra:** test contract REST/Kafka; migration sạch; test concurrency/idempotency; security test; smoke test; tài liệu môi trường; backup/restore; monitoring.
-- **Trạng thái:** đã có unit test tập trung ở Company, Job/Search, Application và AI; Job/Search đạt 39 unit test và 10 integration test Docker với PostgreSQL 16, Kafka 3.8, Redis 7 và Elasticsearch 8.14.3, Application đạt 162 unit test và 35 integration test, AI đạt 188 test với PostgreSQL 16/pgvector cùng Kafka 3.8 thật; chưa có E2E toàn hệ thống.
+- **Trạng thái:** đã có unit test tập trung ở Company, Job/Search, Application và AI; Job/Search đạt 57 unit test và 13 integration test Docker với PostgreSQL 16, Kafka 3.8, Redis 7 và Elasticsearch 8.14.3, Application đạt 173 unit test và 35 integration test, AI đạt 188 test với PostgreSQL 16/pgvector cùng Kafka 3.8 thật; chưa có E2E toàn hệ thống.
 
 ---
 
@@ -231,19 +231,29 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 ### Durable Elasticsearch Index Sync — PR #27
 
 - Mọi mutation ghi thêm desired index state trong cùng PostgreSQL transaction; dispatcher lease/`SKIP LOCKED` chuyển intent sang BullMQ nên Redis lỗi không làm mất cập nhật.
-- Worker dùng `aggregate_version` với Elasticsearch `external_gte`; task cũ không thể ghi đè version mới. Job không còn searchable được giữ dưới dạng tombstone tối thiểu và bị loại bằng `searchable=true`.
+- Bản PR #27 ban đầu dùng `aggregate_version` với Elasticsearch `external_gte`; Job không còn searchable được giữ dưới dạng tombstone tối thiểu và bị loại bằng `searchable=true`.
 - Reindex quét mọi trạng thái Job, tăng generation và hội tụ idempotent; monotonic UPSERT chặn snapshot reindex cũ hạ version mới và không phát Kafka event giả.
 - BullMQ retry exponential; producer Redis fail-fast, tự tạo lại kết nối và giữ durable intent khi cold outage. Lỗi cuối được lưu bằng `failed_at`, attempt count và mã lỗi an toàn; Admin có endpoint xem/replay dead letter.
-- Dùng index versioned `job_index_v2`, kiểm tra mapping version trước khi ghi và tái tạo strict mapping/analyzer tiếng Việt sau khi index bị xóa; không ghi tiếp vào legacy `job_index`.
-- Docker integration dùng PostgreSQL 16, Kafka 3.8, Redis 7 có auth và Elasticsearch 8.14.3 thật; verify 39/39 unit test và 10/10 integration test (9 indexing/search/reindex/retry/outage + 1 Kafka outbox).
-- Database đã có dữ liệu phải migrate khi dừng old writer, chạy `POST /jobs/reindex`, chờ hết pending/failed rồi mới mở traffic.
+- PR #27 dùng index versioned `job_index_v2`, kiểm tra mapping version trước khi ghi và tái tạo strict mapping/analyzer tiếng Việt sau khi index bị xóa.
+- Tại thời điểm merge PR #27, Docker suite đạt 39/39 unit test và 10/10 integration test (9 indexing/search/reindex/retry/outage + 1 Kafka outbox).
+- Database đã có dữ liệu phải migrate khi dừng old writer, chạy `POST /jobs/reindex`, chờ hết pending/failed rồi mới mở traffic. Các regression và giới hạn của thiết kế ban đầu được sửa trong task hiện tại bên dưới.
 
 ### Job Availability — PR #9
 
 - Endpoint nội bộ `GET /jobs/:id/exists` dùng shared API key.
 - Trả trạng thái tồn tại, còn nhận hồ sơ, lý do, company/recruiter/job metadata và deadline.
 - Application Service đã sử dụng hợp đồng này khi Candidate nộp đơn hoặc Bookmark.
-- Job/Search hiện đạt 39 unit test và 10 integration test Docker với PostgreSQL 16/Kafka 3.8/Redis 7/Elasticsearch 8.14.3 thật.
+- Số liệu suite Job/Search hiện tại được tổng hợp ở task bulk detail và hardening ngay bên dưới.
+
+### Bulk Job Detail cho Bookmark và hardening durable indexing — task hiện tại
+
+- Bổ sung endpoint nội bộ `POST /jobs/details/bulk`, nhận tối đa 100 `jobIds` UUID duy nhất và trả projection chi tiết công khai an toàn trong một truy vấn PostgreSQL; `PUBLISHED`, `CLOSED`, `EXPIRED` vẫn có thể trả chi tiết, còn Job không tồn tại hoặc ở trạng thái nội bộ được gom vào `unavailableJobIds` mà không làm lộ dữ liệu duyệt tin.
+- Application Bookmark lấy chi tiết theo lô, chia chunk tối đa 100 ID, giữ nguyên thứ tự bookmark từ database và loại bỏ N+1 call sang Job Service. Client kiểm tra nghiêm ngặt coverage, thứ tự, ID lạ/trùng/overlap và dữ liệu bắt buộc trong response.
+- Danh sách Bookmark fail-soft ở cấp toàn bộ request: Job Service lỗi, timeout hoặc trả contract sai thì bookmark vẫn được trả theo đúng thứ tự nhưng `job=null`; luồng tạo Bookmark tiếp tục dùng endpoint availability đơn lẻ để chặn Job không còn nhận hồ sơ.
+- Sửa regression của PR #27: Elasticsearch cập nhật nguyên tử theo cặp thứ tự từ điển (`aggregateVersion`, `indexGeneration`) bằng scripted update nên generation cũ không thể ghi đè generation mới khi cùng aggregate version; reindex dùng một set-based UPSERT cho mỗi page 200 Job thay vì transaction gồm nhiều câu lệnh tuần tự.
+- Dispatcher chặn claim trước shutdown và release intent nếu shutdown xảy ra ngay sau claim; cold Redis integration khởi động worker thật để kiểm chứng fail-fast/recovery. `job_index_v3` có field `indexGeneration`, validator kiểm tra đầy đủ field/analyzer bắt buộc và từ chối alias trỏ nhiều concrete index.
+- Baseline Elasticsearch dùng cặp marker bền vững `mappings._meta.baselineVersion=3` và `baselineIndexUuid=<UUID>`, tự resume sau restart cho cả index tương thích đã tồn tại nhưng thiếu/sai marker. Trước khi hoàn tất, search bắt buộc fallback PostgreSQL và health ở `DEGRADED`; sau khi mọi intent hoàn tất, service refresh concrete index, ghi marker kèm UUID rồi revalidate tên index, UUID vật lý và marker. Chỉ khi lần kiểm tra sau ghi này khớp mới bật Elasticsearch search và trả `UP`; index thay thế mang UUID khác không thể dùng marker gắn với UUID cũ.
+- Đã verify Job/Search **57/57 unit test + 13/13 integration test** với PostgreSQL 16, Kafka 3.8, Redis 7 có auth và Elasticsearch 8.14.3 thật; Application **173/173 unit test + 35/35 integration test** với PostgreSQL/Kafka/Testcontainers.
 
 ## 2.3 Application Service — phần đã merge vào `develop`
 
@@ -392,9 +402,11 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [x] Kiểm tra outbox claim `SKIP LOCKED`, retry/backoff, lease heartbeat hai publisher, stable `event_id` và thứ tự theo `aggregate_version`.
 - [x] Kiểm tra reindex idempotent, Elasticsearch retry và failed-job/dead-letter strategy.
   - [x] Durable PostgreSQL index-sync intent chống mất cập nhật khi Redis lỗi; claim bằng lease/`SKIP LOCKED` và tự reconcile queue state.
-  - [x] `aggregate_version`/`external_gte` chống stale write; reindex mọi trạng thái bằng generation, monotonic UPSERT và tombstone không searchable.
-  - [x] Retry hữu hạn, Redis cold-outage fail-fast/recovery, lưu lỗi cuối/attempt count và endpoint Admin xem/replay dead letter; rollout `job_index_v2` cùng strict mapping/analyzer có version.
-- [ ] Bổ sung bulk/detail contract để Bookmark có thể hiển thị đầy đủ cả job đã hết hạn.
+  - [x] Scripted update so sánh nguyên tử (`aggregateVersion`, `indexGeneration`) chống stale write; reindex mọi trạng thái bằng generation, set-based monotonic UPSERT và tombstone không searchable.
+  - [x] Retry hữu hạn, Redis cold-outage fail-fast/recovery bằng worker thật, lưu lỗi cuối/attempt count và endpoint Admin xem/replay dead letter; shutdown được kiểm tra cả trước/sau claim và release intent nếu race xảy ra.
+  - [x] Rollout `job_index_v3` với full field/analyzer validation; alias phải trỏ đúng một concrete index, alias nhiều target bị từ chối.
+  - [x] Cặp marker `mappings._meta.baselineVersion=3` và `baselineIndexUuid` restart-safe cho cả index mới và index tương thích đã tồn tại; search fallback PostgreSQL và health `DEGRADED` cho tới khi baseline hoàn tất.
+- [x] Bổ sung bulk/detail contract để Bookmark hiển thị đầy đủ cả Job đã hết hạn/đóng: tối đa 100 ID mỗi request, Application chunk 100, không N+1, strict response validation và fail-soft `job=null`.
 - [ ] Kiểm tra load test cho search, pagination sâu và index mapping tiếng Việt.
 
 ## P06 — Hoàn thiện Company Service
@@ -570,10 +582,11 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Pipeline, Kafka và hợp đồng quyền MEMBER/OWNER đã được kiểm chứng; Application Pipeline dùng quyền toàn công ty, còn quyền sửa/xóa Job vẫn do Job Service kiểm soát.
 - Application Evaluation đã được kiểm chứng với JSONB trên PostgreSQL thật, gồm quyền công ty, validation, chống đánh giá trùng và Candidate privacy; P02 đã merge vào `develop` theo xác nhận của người dùng.
 - Application Offer đã verify đạt 100 unit test và 23 integration test. Event không lộ salary/note/file, nhưng xác minh canonical file metadata và ownership vẫn chờ API nội bộ của File/Media ở P09.
-- Application AI Match phía caller đã verify 162 unit + 35 integration test. AI Service đạt 159 unit + 29 integration test; Job embedding đã chạy qua Kafka/PostgreSQL thật và model pin thật, nhưng chấm điểm end-to-end vẫn chờ Profile/File + CV consumer.
+- Application hiện đạt 173 unit + 35 integration test sau khi bổ sung Bookmark bulk detail; AI Service đạt 159 unit + 29 integration test. Job embedding đã chạy qua Kafka/PostgreSQL thật và model pin thật, nhưng chấm điểm end-to-end vẫn chờ Profile/File + CV consumer.
 - Publisher `job-events` dùng at-least-once: nếu broker đã ACK nhưng process dừng trước khi ghi `published_at`, cùng `event_id` có thể được phát lại; consumer bắt buộc dedupe theo `event_id`/`aggregate_version`.
-- Migration outbox không tự tạo baseline cho Job cũ. Khi rollout lên database đã có dữ liệu, cần dừng/drain producer cũ và thực hiện baseline/replay được review riêng trước khi bật producer mới.
-- Outbox chưa có job retention tự động; payload chứa cả description/requirements và FK `RESTRICT`, vì vậy cần chốt thời hạn lưu, audit và quy trình xóa trước vận hành dài hạn.
+- Migration outbox Kafka không tự tạo historical `job-events` cho Job cũ; nếu AI/Statistics cần lịch sử thì vẫn phải có baseline/replay được review riêng trước khi bật producer mới. Riêng Elasticsearch `job_index_v3` dùng cặp marker bền vững `mappings._meta.baselineVersion=3` và `baselineIndexUuid`, tự enqueue/resume baseline cho cả index mới và index tương thích đã tồn tại sau restart. Khi marker chưa hoàn tất, search chuyển sang PostgreSQL và health ở `DEGRADED`; cần theo dõi tải fallback, pending/failed intent và chỉ coi rollout hoàn tất khi health trở lại `UP`.
+- Cấu hình Elasticsearch sai field/type/analyzer hoặc alias trỏ nhiều concrete index hiện bị từ chối trước khi ghi; checklist rollout phải kiểm tra mapping/alias. Graceful shutdown đã release intent nếu gặp race ngay sau claim, nhưng deployment vẫn cần dành thời gian drain dispatcher/worker thay vì kill cưỡng bức.
+- Outbox chưa có job retention tự động; payload chứa cả description/requirements. Các FK từ outbox và `job_index_sync` tới Job đang là `RESTRICT`, nên hard-delete Job sẽ bị chặn; cần chốt soft-delete hoặc thiết kế tombstone intent độc lập trước khi triển khai xóa cứng, không được đổi sang `CASCADE` khi chưa bảo đảm sự kiện/index xóa vẫn được phát.
 - Pipeline chung vẫn cho phép Application ở `OFFER` chuyển thẳng sang `REJECTED` hoặc `WITHDRAWN`; khi đó bản ghi Offer có thể còn `SENT` dù phản hồi tiếp theo đã bị chặn. Cần chốt quy tắc đồng bộ/hủy Offer trong task lifecycle tiếp theo.
 - Docker daemon/Testcontainers đã hoạt động; AI API/worker đã verify migration, non-root, readiness, Kafka 3.8, PostgreSQL 16/pgvector và model thật. Docker Compose toàn hệ thống vẫn chưa được kiểm chứng và hiện thiếu file môi trường runtime của một số service.
 - Nginx đã có route độc lập `/offers/`; route `/bookmarks` và exact path không có dấu `/` cuối vẫn còn pending.

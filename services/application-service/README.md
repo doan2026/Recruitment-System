@@ -62,6 +62,29 @@ HTTP 5xx responses use a fail-soft result:
 success payload fail with `JOB_SERVICE_INVALID_RESPONSE` and HTTP 502 instead
 of hiding a service contract or credential error.
 
+Bookmark creation still verifies one Job through the authoritative internal
+`GET /{jobId}/exists` contract. Bookmark listing no longer performs one Job
+Service request per saved row. It keeps the database order, extracts the Job
+IDs, and calls the internal `POST /details/bulk` endpoint with
+`X-Internal-Api-Key` in chunks of at most 100 unique IDs:
+
+```json
+{
+  "jobIds": [
+    "20000000-0000-4000-8000-000000000001",
+    "20000000-0000-4000-8000-000000000002"
+  ]
+}
+```
+
+The Job Service response must partition every requested ID exactly once between
+`data.items` and `data.unavailableJobIds`; missing, extra, duplicate, or
+overlapping IDs are rejected as `JOB_SERVICE_INVALID_RESPONSE`. Available
+items enrich the existing bookmark `job` object additively with the complete
+public Job detail. An unavailable ID keeps the bookmark but returns
+`job=null`. If any bulk chunk fails, listing remains fail-soft and returns all
+saved bookmarks in the original order with `job=null`, rather than failing the
+Candidate's bookmark collection.
 AI match scoring is an explicit recruiter action through
 `POST /applications/{applicationId}/match-score/refresh`. It is deliberately
 not part of Candidate submission, so an unavailable AI Service cannot block the
@@ -204,4 +227,4 @@ boundaries, outbox delivery to a real Kafka consumer, and published-row
 idempotency. AI Match verification covers score replacement, optimistic-lock
 conflicts, downstream failure preservation, the `0..100` database constraint,
 and the absence of history/outbox side effects. The verified Application
-Service suite passes 162 unit tests and 35 PostgreSQL/Kafka integration tests.
+Service suite passes 173 unit tests and 35 PostgreSQL/Kafka integration tests.
