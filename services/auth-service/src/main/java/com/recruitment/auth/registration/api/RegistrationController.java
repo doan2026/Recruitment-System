@@ -2,7 +2,9 @@ package com.recruitment.auth.registration.api;
 
 import com.recruitment.auth.api.ApiResponse;
 import com.recruitment.auth.registration.RegistrationService;
+import com.recruitment.auth.token.api.AuthTokenResponse;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -34,8 +36,12 @@ public class RegistrationController {
   }
 
   @PostMapping("/otp/verify")
-  public ApiResponse<OtpVerificationResponse> verify(
+  public ResponseEntity<ApiResponse<AuthTokenResponse>> verify(
       @Valid @RequestBody VerifyOtpRequest request) {
-    return ApiResponse.of(registration.verify(request));
+    return ResponseEntity.ok()
+        .header(HttpHeaders.CACHE_CONTROL, "no-store, no-cache")
+        .header(HttpHeaders.PRAGMA, "no-cache")
+        .header(HttpHeaders.EXPIRES, "0")
+        .body(ApiResponse.of(registration.verify(request)));
   }
 }

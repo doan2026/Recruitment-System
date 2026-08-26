@@ -147,7 +147,7 @@ class AuthPersistencePostgresIT {
     RefreshSession parent = sessions.saveAndFlush(RefreshSession.issue(
         user.getId(), "a".repeat(64), BASE_TIME, BASE_TIME.plus(7, ChronoUnit.DAYS)));
     RefreshSession child = parent.rotate(
-        "b".repeat(64), BASE_TIME.plusSeconds(30), BASE_TIME.plus(8, ChronoUnit.DAYS));
+        "b".repeat(64), BASE_TIME.plusSeconds(30), parent.getExpiresAt());
     sessions.saveAndFlush(parent);
     sessions.saveAndFlush(child);
 

@@ -85,13 +85,20 @@ public class RefreshSession {
     if (tokenHash.equals(nextTokenHash)) {
       throw new IllegalArgumentException("rotation must issue a different token hash");
     }
+    Instant childExpiresAt =
+        Objects.requireNonNull(nextExpiresAt, "nextExpiresAt is required");
+    if (childExpiresAt.isAfter(expiresAt)) {
+      throw new IllegalArgumentException(
+          "rotation cannot extend the refresh family lifetime");
+    }
+
     RefreshSession child = new RefreshSession(
         userId,
         familyId,
         id,
         nextTokenHash,
         at,
-        nextExpiresAt);
+        childExpiresAt);
     consume(at);
     return child;
   }
@@ -117,6 +124,18 @@ public class RefreshSession {
   public boolean isUsableAt(Instant at) {
     Objects.requireNonNull(at, "time is required");
     return consumedAt == null && revokedAt == null && !at.isBefore(issuedAt) && at.isBefore(expiresAt);
+  }
+
+  public boolean isConsumed() {
+    return consumedAt != null;
+  }
+
+  public boolean isRevoked() {
+    return revokedAt != null;
+  }
+
+  public boolean isExpiredAt(Instant at) {
+    return !Objects.requireNonNull(at, "time is required").isBefore(expiresAt);
   }
 
   @PrePersist

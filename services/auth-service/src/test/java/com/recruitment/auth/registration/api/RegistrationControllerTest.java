@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.recruitment.auth.api.AuthBusinessException;
 import com.recruitment.auth.identity.UserRole;
 import com.recruitment.auth.registration.RegistrationService;
+import com.recruitment.auth.token.api.AuthTokenResponse;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -61,11 +62,9 @@ class RegistrationControllerTest {
   @Test
   void verifyRequiresFlowIdentityAndReturnsCanonicalAccountWithoutOtp() throws Exception {
     UUID userId = UUID.randomUUID();
-    when(registration.verify(any())).thenReturn(new OtpVerificationResponse(
-        userId,
-        "candidate@example.com",
-        UserRole.CANDIDATE,
-        true));
+    when(registration.verify(any())).thenReturn(new AuthTokenResponse(
+        "access-token", "Bearer", 900, "refresh-token", 604800,
+        new AuthTokenResponse.UserInfo(userId, "candidate@example.com", UserRole.CANDIDATE)));
 
     mvc.perform(post("/auth/otp/verify")
             .contentType(MediaType.APPLICATION_JSON)
@@ -77,8 +76,13 @@ class RegistrationControllerTest {
                 }
                 """.formatted(REGISTRATION_ID)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.userId").value(userId.toString()))
-        .andExpect(jsonPath("$.data.verified").value(true))
+        .andExpect(header().string("Cache-Control", "no-store, no-cache"))
+        .andExpect(header().string("Pragma", "no-cache"))
+        .andExpect(header().string("Expires", "0"))
+        .andExpect(jsonPath("$.data.accessToken").value("access-token"))
+        .andExpect(jsonPath("$.data.refreshToken").value("refresh-token"))
+        .andExpect(jsonPath("$.data.user.id").value(userId.toString()))
+        .andExpect(jsonPath("$.data.user.role").value("CANDIDATE"))
         .andExpect(content().string(not(containsString("001234"))));
   }
 

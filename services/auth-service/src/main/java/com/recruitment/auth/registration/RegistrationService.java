@@ -8,7 +8,8 @@ import com.recruitment.auth.registration.RegistrationAccountStore.RegistrationAc
 import com.recruitment.auth.registration.RegistrationOtpDeliveryService.DispatchPlan;
 import com.recruitment.auth.registration.RegistrationOtpDeliveryService.DispatchResult;
 import com.recruitment.auth.registration.api.OtpDispatchResponse;
-import com.recruitment.auth.registration.api.OtpVerificationResponse;
+import com.recruitment.auth.token.TokenSessionService;
+import com.recruitment.auth.token.api.AuthTokenResponse;
 import com.recruitment.auth.registration.api.RegisterRequest;
 import com.recruitment.auth.registration.api.RegistrationResponse;
 import com.recruitment.auth.registration.api.ResendOtpRequest;
@@ -31,6 +32,7 @@ public class RegistrationService {
   private final RegistrationOtpDeliveryService otpDelivery;
   private final RegistrationOtpVerificationService otpVerification;
   private final OtpProperties otpProperties;
+  private final TokenSessionService tokenSessions;
 
   public RegistrationService(
       RegistrationAccountStore accounts,
@@ -38,13 +40,15 @@ public class RegistrationService {
       PasswordEncoder passwordEncoder,
       RegistrationOtpDeliveryService otpDelivery,
       RegistrationOtpVerificationService otpVerification,
-      OtpProperties otpProperties) {
+      OtpProperties otpProperties,
+      TokenSessionService tokenSessions) {
     this.accounts = accounts;
     this.passwordPolicy = passwordPolicy;
     this.passwordEncoder = passwordEncoder;
     this.otpDelivery = otpDelivery;
     this.otpVerification = otpVerification;
     this.otpProperties = otpProperties;
+    this.tokenSessions = tokenSessions;
   }
 
   public RegistrationResponse register(RegisterRequest request) {
@@ -102,7 +106,7 @@ public class RegistrationService {
             .orElseGet(() -> otpProperties.ttl().toSeconds()));
   }
 
-  public OtpVerificationResponse verify(VerifyOtpRequest request) {
+  public AuthTokenResponse verify(VerifyOtpRequest request) {
     String email = normalizeEmail(request.email());
     UUID registrationId = request.registrationId();
     AuthUser pending = find(email)
@@ -110,11 +114,7 @@ public class RegistrationService {
         .filter(user -> Objects.equals(user.getRegistrationId(), registrationId))
         .orElseThrow(this::invalidOtp);
     AuthUser verified = otpVerification.verify(pending, registrationId, request.otp());
-    return new OtpVerificationResponse(
-        verified.getId(),
-        verified.getEmail(),
-        verified.getRole(),
-        verified.isVerified());
+    return tokenSessions.issueForVerifiedUser(verified.getId());
   }
 
   private Optional<DispatchPlan> prepareRegistration(

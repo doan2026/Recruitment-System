@@ -21,6 +21,8 @@ import com.recruitment.auth.registration.api.RegistrationRole;
 import com.recruitment.auth.registration.api.ResendOtpRequest;
 import com.recruitment.auth.registration.api.VerifyOtpRequest;
 import com.recruitment.auth.registration.otp.OtpProperties;
+import com.recruitment.auth.token.TokenSessionService;
+import com.recruitment.auth.token.api.AuthTokenResponse;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -44,6 +46,7 @@ class RegistrationServiceTest {
   private PasswordEncoder passwordEncoder;
   private RegistrationOtpDeliveryService delivery;
   private RegistrationOtpVerificationService verification;
+  private TokenSessionService tokenSessions;
   private RegistrationService service;
 
   @BeforeEach
@@ -53,13 +56,20 @@ class RegistrationServiceTest {
     passwordEncoder = org.mockito.Mockito.mock(PasswordEncoder.class);
     delivery = org.mockito.Mockito.mock(RegistrationOtpDeliveryService.class);
     verification = org.mockito.Mockito.mock(RegistrationOtpVerificationService.class);
+    tokenSessions = org.mockito.Mockito.mock(TokenSessionService.class);
     service = new RegistrationService(
         accounts,
         passwordPolicy,
         passwordEncoder,
         delivery,
         verification,
-        properties());
+        properties(),
+        tokenSessions);
+    when(tokenSessions.issueForVerifiedUser(any())).thenAnswer(invocation ->
+        new AuthTokenResponse(
+            "access-token", "Bearer", 900, "refresh-token", 604800,
+            new AuthTokenResponse.UserInfo(
+                invocation.getArgument(0), EMAIL, UserRole.CANDIDATE)));
     AtomicLong fences = new AtomicLong();
     when(accounts.nextRegistrationFence())
         .thenAnswer(invocation -> fences.incrementAndGet());
@@ -136,7 +146,8 @@ class RegistrationServiceTest {
     var activated = service.verify(
         new VerifyOtpRequest(EMAIL, victim.registrationId(), "654321"));
 
-    assertThat(activated.verified()).isTrue();
+    assertThat(activated.user().id()).isEqualTo(victimPending.getId());
+    verify(tokenSessions).issueForVerifiedUser(victimPending.getId());
     assertThat(stored.get().getPasswordHash()).isEqualTo(VICTIM_HASH);
     assertThat(stored.get().getRole()).isEqualTo(UserRole.CANDIDATE);
     assertThat(stored.get().getRegistrationId()).isNull();
@@ -210,9 +221,9 @@ class RegistrationServiceTest {
     var response = service.verify(
         new VerifyOtpRequest(EMAIL, registrationId, "001234"));
 
-    assertThat(response.email()).isEqualTo(EMAIL);
-    assertThat(response.role()).isEqualTo(UserRole.CANDIDATE);
-    assertThat(response.verified()).isTrue();
+    assertThat(response.user().email()).isEqualTo(EMAIL);
+    assertThat(response.user().role()).isEqualTo(UserRole.CANDIDATE);
+    verify(tokenSessions).issueForVerifiedUser(pending.getId());
   }
 
   @Test
