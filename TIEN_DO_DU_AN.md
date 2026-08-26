@@ -1,8 +1,8 @@
 # BÁO CÁO TIẾN ĐỘ DỰ ÁN HỆ THỐNG TUYỂN DỤNG
 
-> Ngày cập nhật: 26/08/2026
+> Ngày cập nhật: 27/08/2026
 > Nhánh đối chiếu chính: `develop`
-> Nhánh triển khai lần cập nhật: `feature/auth-service/registration-otp-verification`
+> Nhánh triển khai lần cập nhật: `feature/auth-service/login-google-oauth2`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -18,7 +18,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 | Nhóm task | Người phụ trách | Trạng thái hiện tại |
 | --- | --- | --- |
-| Auth Service | Người 1 | 🟡 Persistence và đăng ký Candidate/Recruiter bằng OTP email đã hoàn thành; login/JWT còn thiếu |
+| Auth Service | Người 1 | 🟡 Đăng ký/OTP, password login, Google OIDC, JWT/JWKS, refresh rotation, logout và `/auth/me` đã hoàn thành; reset password và Admin account control còn thiếu |
 | User/Profile Service | Người 1 | ⏳ Scaffold |
 | File/Media Service | Người 1 | ⏳ Scaffold |
 | Admin & Statistics Service | Người 1 | ⏳ Scaffold |
@@ -44,7 +44,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** đăng ký và OTP email; đăng nhập email/mật khẩu; Google OAuth2; refresh-token rotation; quên/đặt lại mật khẩu; cung cấp public key.
 - **Chức năng chính:** quản lý tài khoản, role, trạng thái khóa; access/refresh token; thu hồi phiên; OTP có hạn dùng; public-key endpoint; API nội bộ khóa/mở khóa tài khoản.
 - **Phụ thuộc:** PostgreSQL, Redis, SMTP và Google OAuth. Tất cả service còn lại phụ thuộc hợp đồng JWT của task này.
-- **Trạng thái:** persistence Flyway/JPA và đăng ký Candidate/Recruiter bằng bcrypt cost 10 + OTP Redis/SMTP đã hoàn thành, đạt 77 unit + 16 integration test. Security đã stateless, chỉ public health/registration/OTP và deny các request khác; login, Google OAuth2, JWT/JWKS, refresh, reset password và Admin account control vẫn pending.
+- **Trạng thái:** persistence, đăng ký/OTP, password login, Google OIDC, JWT RS256/JWKS, refresh rotation, logout và `/auth/me` đã hoàn thành trên nhánh hiện tại. Reset password và API nội bộ Admin khóa/mở tài khoản vẫn pending; strict JWT contract của từng consumer tiếp tục theo backlog tích hợp liên service.
 
 ## T02 — User/Profile Service
 
@@ -351,7 +351,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - OTP/reset token tiếp tục là dữ liệu tạm Redis theo kiến trúc (`otp:*` TTL 5 phút, `reset:*` TTL 15 phút), không tạo bảng PostgreSQL và không lưu secret thô.
 - Đã verify **15/15 unit test + 5/5 integration test** với PostgreSQL 16/Testcontainers: migration sạch, Hibernate mapping, normalized email, role/lock checks, FK/unique OAuth, optimistic locking và refresh lineage đều đạt.
 
-## 2.10 Auth Registration và OTP Verification — task hiện tại
+## 2.10 Auth Registration và OTP Verification — đã merge vào `develop` qua PR #30
 
 - Bổ sung public API `POST /auth/register`, `POST /auth/otp/resend` và `POST /auth/otp/verify` với response envelope thống nhất; self-registration chỉ nhận `CANDIDATE`/`RECRUITER`, mật khẩu tối thiểu tám ký tự Unicode, có chữ/số, không vượt 72 byte UTF-8 và chỉ lưu bcrypt cost 10.
 - Mỗi pre-registration có `registrationId` bắt buộc cho resend/verify. Đăng ký lại một email đang pending tạo flow mới và thay đồng thời password/role/`registrationId`; flow/OTP cũ bị vô hiệu nên không thể giữ lại credential do người khác tạo. Email đã verified trả `409`; resend flow không tồn tại/cũ trả `202` chung để hạn chế enumeration.
@@ -362,6 +362,19 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - SMTP gửi đồng bộ với connect/read/write timeout 3 giây và cleanup có CAS khi lỗi. Không tuyên bố exactly-once vì SMTP ACK/timeout vẫn có thể tạo email trễ hoặc trùng; production bắt buộc bật cả `SMTP_STARTTLS=true` và `SMTP_STARTTLS_REQUIRED=true` cùng SMTP auth/secret phù hợp.
 - Security chuyển sang stateless, public đúng health/registration/OTP và `denyAll` cho endpoint chưa triển khai. `/health`, `/auth/health` phản ánh Actuator thật và trả `503` khi `DOWN/OUT_OF_SERVICE`; Nginx giữ nguyên prefix `/auth` và route health trực tiếp tới Actuator.
 - Đã verify **77/77 unit test + 16/16 integration test (93/93 tổng)** với PostgreSQL 16.15, Redis 7 có mật khẩu và Testcontainers 1.21.4: validation, privacy, TTL/rate limit, supersession, stale fence, actual persisted User ID và concurrency đều đạt.
+
+## 2.11 Auth Login, Google OIDC, JWT/JWKS và Refresh — task hiện tại
+
+- `POST /auth/login` chuẩn hóa email, dùng bcrypt cost 10 và dummy bcrypt cho email không tồn tại/OAuth-only để giảm enumeration. Redis Lua theo dõi lỗi bằng HMAC key không chứa PII; lần sai thứ năm chặn 15 phút, có `Retry-After`, đăng nhập đúng xóa failure state và Redis lỗi thì fail-closed `503`.
+- Google OIDC dùng Spring Security, state + nonce + PKCE S256 và authorization request JSON có TTL trong Redis; không dùng `HttpSession`, không lưu token Google. Callback chỉ chuyển one-time exchange code trong URL fragment cùng HttpOnly binder cookie; exchange đúng cặp được consume exactly-once rồi mới phát token nội bộ.
+- Google `sub` là định danh bền vững. Subject đã link đăng nhập đúng User; subject mới + email mới tạo OAuth-only User và cho chọn `CANDIDATE/RECRUITER` đúng một lần. Email đã tồn tại nhưng chưa link trả `ACCOUNT_LINK_REQUIRED`, không auto-link theo email; account-link có re-auth là task riêng.
+- Access JWT dùng RS256, header chuẩn `typ=JWT`, thumbprint `kid`, TTL 15 phút và chỉ có `iss/sub/aud/role/iat/exp/jti`; không nhúng email/profile. Decoder Auth khóa thuật toán/type/kid/issuer/audience/UUID/role; JWKS chỉ công bố public fields của active + previous key. `GET /auth/me` xác thực JWT rồi kiểm tra lại User verified/unlocked trong PostgreSQL.
+- OTP verify, password login và Google exchange đều phát cùng token response. Raw refresh token 256-bit có prefix `rt1_`; PostgreSQL chỉ lưu SHA-256. Refresh khóa pessimistic theo User, rotate một child, giữ absolute family expiry bảy ngày và replay token còn hiệu lực sẽ revoke toàn bộ phiên active của User.
+- Expiry được kiểm tra trước reuse nên replay row cũ sau family lifetime không thể DoS/revoke family mới. Concurrent refresh cùng token có đúng một winner; request thua phát hiện reuse và revoke cả child vừa thắng. Logout revoke token hiện tại; mọi lỗi refresh dùng contract generic.
+- Security tiếp tục stateless/deny-by-default, bổ sung CORS exact-origin có credentials cho frontend và `no-store` cho response nhạy cảm. Binder `SameSite=Lax` yêu cầu frontend/Auth production cùng schemeful site; `CORS_ORIGINS` không cho wildcard và HTTP chỉ cho loopback.
+- Docker Compose dùng file-backed secrets: private key chỉ mount vào Auth, public key mount vào các service verify JWT. Script RSA-3072 PKCS#8/X.509 từ chối ghi đè; previous public key hỗ trợ overlap khi rotate.
+- Hai quyết định bảo mật chủ ý khác tài liệu ban đầu: không trả raw `locked_reason` nội bộ khi login bị khóa và không auto-link Google theo email. Nếu sản phẩm cần lý do hiển thị hoặc link account, phải thêm field/re-auth flow riêng đã sanitize.
+- Full `clean verify` đạt **156/156 unit test + 27/27 integration test (183/183 tổng)** với PostgreSQL 16.15, Redis 7 có mật khẩu và Testcontainers 1.21.4; bao phủ OTP, password throttle/fail-closed, Google Redis exchange, JWT/JWKS/`/auth/me`, rotation/reuse/expiry/concurrency và CORS full filter chain.
 
 ---
 
@@ -443,13 +456,17 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 - [x] Tạo Flyway/JPA persistence cho User, RefreshSession và OAuthAccount; chốt OTP/ResetToken là secret tạm Redis thay vì bảng PostgreSQL; verify 15 unit + 5 integration test PostgreSQL 16.
 - [x] Đăng ký Candidate/Recruiter, bcrypt cost 10 và xác minh OTP email với `registrationId`, Redis HMAC challenge, rolling rate limit, DB fence chống stale writer và SMTP đồng bộ; verify 77 unit + 16 integration test.
-- [ ] Đăng nhập email/password và Google OAuth2.
-- [ ] Phát JWT RS256 với `sub`, `role`, `iat`, `exp`; cung cấp public key/JWKS.
-- [ ] Refresh token rotation, revoke session và phát hiện token reuse.
-- [ ] Quên/đặt lại mật khẩu; rate limit OTP/login.
+- [x] Đăng nhập email/password và Google OIDC stateless cho subject mới hoặc đã liên kết.
+- [ ] Account-link Google có re-auth cho email local đã tồn tại nếu sản phẩm yêu cầu.
+- [x] Phát JWT RS256 chuẩn `typ=JWT` với `iss/sub/aud/role/iat/exp/jti`; cung cấp active/previous public key qua JWKS.
+- [x] Refresh rotation với absolute family TTL bảy ngày, logout, user-wide revoke khi reuse và chống concurrent fork.
+- [ ] Quên/đặt lại mật khẩu.
+- [x] Rate limit OTP/login bằng Redis Lua, HMAC key không PII và fail-closed khi store lỗi.
 - [ ] API Admin khóa/mở tài khoản và vô hiệu hóa phiên hiện tại.
-- [x] Bỏ cấu hình `anyRequest().permitAll()`; security stateless chỉ public health/registration/OTP và deny endpoint chưa triển khai.
-- [ ] Hoàn thiện unit/integration/security test cho login, JWT/refresh, reset password và Admin account control khi các luồng đó được triển khai.
+- [x] Security stateless/deny-by-default, CORS exact-origin có credentials và no-store cho response nhạy cảm; chỉ public các endpoint health/registration/login/token/Google cần thiết.
+- [x] Docker file-backed secret và script RSA-3072: private key chỉ vào Auth, public key vào các JWT consumer.
+- [x] Unit/integration/security test cho password login, Google Redis flow, JWT/JWKS, `/auth/me`, rotation/reuse/concurrency, CORS và PostgreSQL/Redis thật.
+- [ ] Unit/integration/security test cho reset password và Admin account control sau khi hai luồng đó được triển khai.
 
 ## P08 — User/Profile Service
 
@@ -599,7 +616,8 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## Rủi ro và điểm cần chốt ngay
 
-- Auth đã có persistence và đăng ký Candidate/Recruiter với bcrypt/OTP Redis-email, nhưng vẫn chưa phát JWT thật nên các service đã verify JWT chưa thể chạy end-to-end; task tiếp theo là login email/password, Google OAuth2 và JWT RS256/JWKS.
+- Auth đã phát JWT/refresh thật qua OTP, password login và Google OIDC; phần còn thiếu là reset password, Admin account control và account-link Google có re-auth cho email local nếu sản phẩm yêu cầu.
+- JWT `typ=JWT` hiện tương thích decoder mặc định của Application, nhưng Application/Company/Job chưa cùng enforce đầy đủ issuer, audience, UUID `sub/jti`, role/header contract hoặc rollout previous key; P17/cross-service negative contract test vẫn pending và không được coi là hoàn tất trong task Auth này.
 - Profile chưa có API CV nên Application Submission sẽ lỗi tích hợp dù unit test đã đạt.
 - Nhà cung cấp LLM chưa thống nhất giữa tài liệu (Claude) và dependency tùy chọn hiện tại (Gemini); khác biệt này không ảnh hưởng provider `/match` thuần pgvector.
 - `job-events` v1 đã được khóa theo implementation thật với key `job_id`, 16 trường versioned và salary decimal string hai chữ số hoặc `null`. Các topic khác vẫn phải chốt riêng; Event Offer đã bổ sung `actor_id`, `offer_id`, `offer_status`, `offer_version`, còn `recruiter_id` là recruiter gắn với Application/job.
