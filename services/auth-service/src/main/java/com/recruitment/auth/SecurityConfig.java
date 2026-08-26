@@ -61,6 +61,8 @@ class SecurityConfig {
                 "/auth/otp/verify",
                 "/auth/otp/resend",
                 "/auth/login",
+                "/auth/forgot-password",
+                "/auth/reset-password",
                 "/auth/refresh",
                 "/auth/logout",
                 "/auth/google/exchange")

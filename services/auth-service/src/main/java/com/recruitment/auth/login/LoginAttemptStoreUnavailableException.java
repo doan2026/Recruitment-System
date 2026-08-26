@@ -1,11 +1,11 @@
 package com.recruitment.auth.login;
 
-final class LoginAttemptStoreUnavailableException extends RuntimeException {
-  LoginAttemptStoreUnavailableException(Throwable cause) {
+public final class LoginAttemptStoreUnavailableException extends RuntimeException {
+  public LoginAttemptStoreUnavailableException(Throwable cause) {
     super("login attempt store is unavailable", cause);
   }
 
-  LoginAttemptStoreUnavailableException(String message) {
+  public LoginAttemptStoreUnavailableException(String message) {
     super(message);
   }
 }

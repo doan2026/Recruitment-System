@@ -102,6 +102,11 @@ public final class RedisLoginAttemptLimiter implements LoginAttemptLimiter {
       return 'ALLOWED|' .. attempts .. '|0'
       """);
 
+  private static final DefaultRedisScript<String> PASSWORD_RESET_SCRIPT = script("""
+      redis.call('DEL', KEYS[1], KEYS[2])
+      return 'ALLOWED|0|0'
+      """);
+
   private final StringRedisTemplate redis;
   private final LoginProperties properties;
   private final byte[] hmacKey;
@@ -130,6 +135,11 @@ public final class RedisLoginAttemptLimiter implements LoginAttemptLimiter {
   @Override
   public AttemptDecision completeSuccessfulCredential(String normalizedEmail) {
     return execute(SUCCESS_SCRIPT, normalizedEmail, properties.maxFailedAttempts());
+  }
+
+  @Override
+  public void clearAfterPasswordReset(String normalizedEmail) {
+    execute(PASSWORD_RESET_SCRIPT, normalizedEmail);
   }
 
   private AttemptDecision execute(
