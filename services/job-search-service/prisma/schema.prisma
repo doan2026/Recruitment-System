@@ -56,11 +56,35 @@ model Job {
   createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt        DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
   eventOutbox      JobEventOutbox[]
+  indexSync        JobIndexSync?
 
   @@index([companyId, status])
   @@index([createdBy, status])
   @@index([status, deadline])
   @@map("jobs")
+}
+
+/// Durable desired state for the Elasticsearch projection. One row per Job
+/// coalesces obsolete versions while preserving indexing intent if Redis is
+/// unavailable. Failed rows form the operator-visible indexing dead letter.
+model JobIndexSync {
+  jobId              String    @id @map("job_id") @db.Uuid
+  aggregateVersion   Int       @map("aggregate_version")
+  generation         Int       @default(1)
+  dispatchAttempts   Int       @default(0) @map("dispatch_attempts")
+  processingAttempts Int       @default(0) @map("processing_attempts")
+  nextAttemptAt      DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
+  leaseOwner         String?   @map("lease_owner") @db.VarChar(200)
+  leaseExpiresAt     DateTime? @map("lease_expires_at") @db.Timestamptz(3)
+  completedAt        DateTime? @map("completed_at") @db.Timestamptz(3)
+  failedAt           DateTime? @map("failed_at") @db.Timestamptz(3)
+  lastError          String?   @map("last_error") @db.VarChar(100)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  job                Job       @relation(fields: [jobId], references: [id], onDelete: Restrict)
+
+  @@index([leaseExpiresAt], map: "job_index_sync_lease_expires_at_idx")
+  @@map("job_index_sync")
 }
 
 /// The migration enforces immutable event identity/payload and partial dispatch

@@ -418,6 +418,7 @@ export class JobService {
               candidate.id,
               transaction,
             );
+            await this.indexing.append(transaction, job);
             const eventId = await this.events.append(
               transaction,
               job,
@@ -520,6 +521,7 @@ export class JobService {
     const change = await this.prisma.$transaction(
       async (transaction): Promise<CommittedJobChange> => {
         const job = await mutation(transaction);
+        await this.indexing.append(transaction, job);
         const eventId = await this.events.append(
           transaction,
           job,
@@ -533,10 +535,10 @@ export class JobService {
   }
 
   private afterCommit(changes: CommittedJobChange[]): void {
-    for (const { job } of changes) {
-      void this.indexing.schedule(job.id);
+    if (changes.length) {
+      this.indexing.wake();
+      this.events.wake();
     }
-    if (changes.length) this.events.wake();
   }
 
   private requireManagePermission(

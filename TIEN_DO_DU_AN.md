@@ -23,7 +23,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 | File/Media Service | Người 1 | ⏳ Scaffold |
 | Admin & Statistics Service | Người 1 | ⏳ Scaffold |
 | Company Service | Người 2 | ✅ Nghiệp vụ chính đã merge |
-| Job & Search Service | Người 2 | 🟡 CRUD/search và transactional `job-events` đã hoàn thành; AI recommendation cùng Redis/Elasticsearch integration còn thiếu |
+| Job & Search Service | Người 2 | 🟡 CRUD/search, transactional `job-events` và Redis/BullMQ/Elasticsearch integration đã hoàn thành; AI recommendation còn thiếu |
 | Application Service | Người 2 | 🟡 Các luồng từ Submission đến AI Match phía consumer đã merge; filter kỹ năng còn thiếu |
 | AI Service | Người 2 | 🟡 Provider `/match` và consumer `job-events` đã hoàn thành; consumer CV/recommend/chat còn thiếu |
 | Interview & Video Call Service | Người 3 | ⏳ Scaffold |
@@ -89,7 +89,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** recruiter tạo/sửa tin nháp; gửi duyệt; Admin duyệt/từ chối; đóng/hết hạn tin; tìm kiếm và lọc; đồng bộ Elasticsearch; phát `job-events`; lấy gợi ý từ AI.
 - **Chức năng chính:** Job CRUD, state machine `DRAFT → PENDING_APPROVAL → PUBLISHED/REJECTED → CLOSED/EXPIRED`, tìm kiếm full-text và filter, reindex, PostgreSQL fallback, endpoint kiểm tra job còn nhận hồ sơ.
 - **Phụ thuộc:** Auth, Company, Admin, Elasticsearch, Redis, Kafka và AI.
-- **Trạng thái:** CRUD, publishing, search, indexing, availability, thống kê job active và `job-events` v1 qua transactional outbox đã hoàn thành; recommendation từ AI cùng integration Redis/Elasticsearch còn thiếu.
+- **Trạng thái:** CRUD, publishing, search, durable Elasticsearch indexing, availability, thống kê job active và `job-events` v1 qua transactional outbox đã hoàn thành; recommendation từ AI còn thiếu.
 
 ## T07 — Application Service
 
@@ -158,7 +158,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Mục tiêu:** chứng minh các luồng xuyên service chạy thật, ổn định và có thể triển khai.
 - **Công nghệ/công cụ:** unit/integration/E2E test, Docker Compose, CI/CD, Swagger/OpenAPI, logging/metrics/tracing.
 - **Đầu ra:** test contract REST/Kafka; migration sạch; test concurrency/idempotency; security test; smoke test; tài liệu môi trường; backup/restore; monitoring.
-- **Trạng thái:** đã có unit test tập trung ở Company, Job/Search, Application và AI; Job/Search đạt 39 unit test và 1 integration test Docker với PostgreSQL 16/Kafka 3.8, Application đạt 162 unit test và 35 integration test, AI đạt 188 test với PostgreSQL 16/pgvector cùng Kafka 3.8 thật; chưa có E2E toàn hệ thống.
+- **Trạng thái:** đã có unit test tập trung ở Company, Job/Search, Application và AI; Job/Search đạt 39 unit test và 10 integration test Docker với PostgreSQL 16, Kafka 3.8, Redis 7 và Elasticsearch 8.14.3, Application đạt 162 unit test và 35 integration test, AI đạt 188 test với PostgreSQL 16/pgvector cùng Kafka 3.8 thật; chưa có E2E toàn hệ thống.
 
 ---
 
@@ -228,12 +228,22 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Đã verify 39 unit test + 1 Docker integration test của Job Service với PostgreSQL 16/Kafka 3.8 thật; AI Service đạt 188 test và salary đã đồng bộ `NUMERIC(15,2)`.
 - Rollout không tự backfill: database đã có Job cần một baseline/replay được review riêng trước khi bật producer mới. Retention cleanup của outbox chưa tự động hóa và cần chốt chính sách lưu giữ.
 
+### Durable Elasticsearch Index Sync — PR #27
+
+- Mọi mutation ghi thêm desired index state trong cùng PostgreSQL transaction; dispatcher lease/`SKIP LOCKED` chuyển intent sang BullMQ nên Redis lỗi không làm mất cập nhật.
+- Worker dùng `aggregate_version` với Elasticsearch `external_gte`; task cũ không thể ghi đè version mới. Job không còn searchable được giữ dưới dạng tombstone tối thiểu và bị loại bằng `searchable=true`.
+- Reindex quét mọi trạng thái Job, tăng generation và hội tụ idempotent; monotonic UPSERT chặn snapshot reindex cũ hạ version mới và không phát Kafka event giả.
+- BullMQ retry exponential; producer Redis fail-fast, tự tạo lại kết nối và giữ durable intent khi cold outage. Lỗi cuối được lưu bằng `failed_at`, attempt count và mã lỗi an toàn; Admin có endpoint xem/replay dead letter.
+- Dùng index versioned `job_index_v2`, kiểm tra mapping version trước khi ghi và tái tạo strict mapping/analyzer tiếng Việt sau khi index bị xóa; không ghi tiếp vào legacy `job_index`.
+- Docker integration dùng PostgreSQL 16, Kafka 3.8, Redis 7 có auth và Elasticsearch 8.14.3 thật; verify 39/39 unit test và 10/10 integration test (9 indexing/search/reindex/retry/outage + 1 Kafka outbox).
+- Database đã có dữ liệu phải migrate khi dừng old writer, chạy `POST /jobs/reindex`, chờ hết pending/failed rồi mới mở traffic.
+
 ### Job Availability — PR #9
 
 - Endpoint nội bộ `GET /jobs/:id/exists` dùng shared API key.
 - Trả trạng thái tồn tại, còn nhận hồ sơ, lý do, company/recruiter/job metadata và deadline.
 - Application Service đã sử dụng hợp đồng này khi Candidate nộp đơn hoặc Bookmark.
-- Job/Search hiện đạt 39 unit test và 1 integration test Docker với PostgreSQL 16/Kafka 3.8 thật.
+- Job/Search hiện đạt 39 unit test và 10 integration test Docker với PostgreSQL 16/Kafka 3.8/Redis 7/Elasticsearch 8.14.3 thật.
 
 ## 2.3 Application Service — phần đã merge vào `develop`
 
@@ -378,9 +388,12 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [ ] Tích hợp `GET /jobs/recommended` với AI Service và CV mặc định.
 - [ ] Fallback sang job mới nhất/lĩnh vực quan tâm khi AI lỗi hoặc Candidate chưa có CV.
 - [x] Chạy integration transactional outbox với PostgreSQL 16 và Kafka 3.8 thật: migration sạch, rollback atomic, CAS cạnh tranh, thứ tự version và publish đủ event.
-- [ ] Bổ sung Redis/BullMQ và Elasticsearch thật vào integration suite.
+- [x] Bổ sung Redis 7 có auth, BullMQ và Elasticsearch 8.14.3 tắt auto-create vào integration suite Docker thật.
 - [x] Kiểm tra outbox claim `SKIP LOCKED`, retry/backoff, lease heartbeat hai publisher, stable `event_id` và thứ tự theo `aggregate_version`.
-- [ ] Kiểm tra reindex idempotent, Elasticsearch retry và failed-job/dead-letter strategy.
+- [x] Kiểm tra reindex idempotent, Elasticsearch retry và failed-job/dead-letter strategy.
+  - [x] Durable PostgreSQL index-sync intent chống mất cập nhật khi Redis lỗi; claim bằng lease/`SKIP LOCKED` và tự reconcile queue state.
+  - [x] `aggregate_version`/`external_gte` chống stale write; reindex mọi trạng thái bằng generation, monotonic UPSERT và tombstone không searchable.
+  - [x] Retry hữu hạn, Redis cold-outage fail-fast/recovery, lưu lỗi cuối/attempt count và endpoint Admin xem/replay dead letter; rollout `job_index_v2` cùng strict mapping/analyzer có version.
 - [ ] Bổ sung bulk/detail contract để Bookmark có thể hiển thị đầy đủ cả job đã hết hạn.
 - [ ] Kiểm tra load test cho search, pagination sâu và index mapping tiếng Việt.
 
@@ -543,7 +556,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 1. Hoàn thiện Auth và Profile vì đang chặn xác thực/nộp đơn end-to-end.
 2. Hoàn thiện File/Media để mở khóa CV, logo, attachment và Offer letter.
-3. Hoàn thiện integration Redis/BullMQ/Elasticsearch và reindex hardening của Job Service; đồng thời hoàn thiện Profile/File + contract `cv-events` để triển khai CV consumer.
+3. Hoàn thiện Profile/File + contract `cv-events` để triển khai CV consumer; phần Redis/BullMQ/Elasticsearch và reindex hardening của Job Service đã hoàn thành.
 4. Implement recommendation jobs/candidates, nối `GET /jobs/recommended`, rồi bổ sung filter kỹ năng của Application.
 5. Làm Interview, Notification và Chat theo hợp đồng event đã chốt.
 6. Hoàn thiện Admin, Frontend, Jitsi và kiểm thử end-to-end.

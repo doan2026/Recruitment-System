@@ -38,6 +38,37 @@ services:
       timeout: 5s
       retries: 30
 
+  redis-test:
+    image: redis:7-alpine
+    command:
+      - redis-server
+      - --appendonly
+      - "no"
+      - --requirepass
+      - job_test_redis_password
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - redis-cli -a job_test_redis_password ping | grep PONG
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  elasticsearch-test:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.3
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      action.auto_create_index: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl --fail --silent 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=2s'
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
   job-tests:
     build:
       context: .
@@ -47,10 +78,16 @@ services:
       JOB_INTEGRATION_TEST: "1"
       KAFKA_BROKERS: kafka-test:9092
       KAFKA_JOB_TOPIC: job-events
+      REDIS_URL: redis://:job_test_redis_password@redis-test:6379/15
+      ELASTICSEARCH_NODE: http://elasticsearch-test:9200
     depends_on:
       postgres-test:
         condition: service_healthy
       kafka-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+      elasticsearch-test:
         condition: service_healthy
     command:
       - /bin/sh

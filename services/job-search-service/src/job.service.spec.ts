@@ -55,7 +55,8 @@ describe('JobService publishing lifecycle', () => {
   let count: jest.Mock;
   let updateMany: jest.Mock;
   let getRecruiterCompany: jest.Mock;
-  let schedule: jest.Mock;
+  let indexAppend: jest.Mock;
+  let indexWake: jest.Mock;
   let append: jest.Mock;
   let wake: jest.Mock;
   let transaction: jest.Mock;
@@ -65,7 +66,8 @@ describe('JobService publishing lifecycle', () => {
     findMany = jest.fn();
     count = jest.fn();
     updateMany = jest.fn().mockResolvedValue({ count: 1 });
-    schedule = jest.fn().mockResolvedValue(undefined);
+    indexAppend = jest.fn().mockResolvedValue(undefined);
+    indexWake = jest.fn();
     append = jest.fn().mockResolvedValue('event-id');
     wake = jest.fn();
     getRecruiterCompany = jest.fn().mockResolvedValue({
@@ -86,7 +88,10 @@ describe('JobService publishing lifecycle', () => {
     const companies = {
       getRecruiterCompany,
     } as unknown as CompanyClientService;
-    const indexing = { schedule } as unknown as JobIndexingService;
+    const indexing = {
+      append: indexAppend,
+      wake: indexWake,
+    } as unknown as JobIndexingService;
     const events = {
       append,
       wake,
@@ -129,7 +134,14 @@ describe('JobService publishing lifecycle', () => {
       }),
       JobEventAction.UPDATED,
     );
-    expect(schedule).toHaveBeenCalledWith(JOB_ID);
+    expect(indexAppend).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        id: JOB_ID,
+        aggregateVersion: 2,
+      }),
+    );
+    expect(indexWake).toHaveBeenCalledTimes(1);
     expect(wake).toHaveBeenCalledTimes(1);
   });
 
@@ -264,7 +276,10 @@ describe('JobService publishing lifecycle', () => {
       }),
       JobEventAction.UPDATED,
     );
-    expect(schedule).toHaveBeenCalledWith(JOB_ID);
+    expect(indexAppend).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ id: JOB_ID, aggregateVersion: 2 }),
+    );
   });
 
   it('returns a rejected job to DRAFT with a normalized reason', async () => {
@@ -352,8 +367,12 @@ describe('JobService publishing lifecycle', () => {
       }),
       JobEventAction.EXPIRED,
     );
-    expect(schedule).toHaveBeenCalledTimes(3);
-    expect(schedule).toHaveBeenCalledWith(JOB_ID);
+    expect(indexAppend).toHaveBeenCalledTimes(3);
+    expect(indexAppend).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ id: JOB_ID, aggregateVersion: 2 }),
+    );
+    expect(indexWake).toHaveBeenCalledTimes(3);
     expect(transaction).toHaveBeenCalledTimes(3);
     expect(wake).toHaveBeenCalledTimes(3);
   });
