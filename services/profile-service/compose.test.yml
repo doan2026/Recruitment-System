@@ -1,0 +1,28 @@
+name: recruitment-profile-service-test
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: profile_test
+      POSTGRES_USER: profile_test
+      POSTGRES_PASSWORD: profile_test_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U profile_test -d profile_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  profile-tests:
+    build:
+      context: .
+      target: test
+    environment:
+      DATABASE_URL: postgresql://profile_test:profile_test_password@postgres-test:5432/profile_test?schema=profile
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -c
+      - npx prisma migrate deploy && npm run test:integration && npx prisma migrate deploy
