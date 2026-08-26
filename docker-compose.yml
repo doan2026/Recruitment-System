@@ -124,6 +124,11 @@ services:
     build: ./services/auth-service
     env_file:
       - ./services/auth-service/.env
+    secrets:
+      - source: jwt-private-key
+        target: jwt-private.pem
+      - source: jwt-public-key
+        target: jwt-public.pem
     restart: unless-stopped
     depends_on:
       postgres:
@@ -137,6 +142,9 @@ services:
     build: ./services/application-service
     env_file:
       - ./services/application-service/.env
+    secrets:
+      - source: jwt-public-key
+        target: jwt-public.pem
     restart: unless-stopped
     depends_on:
       postgres:
@@ -170,6 +178,9 @@ services:
     build: ./services/profile-service
     env_file:
       - ./services/profile-service/.env
+    secrets:
+      - source: jwt-public-key
+        target: jwt-public.pem
     restart: unless-stopped
     depends_on:
       postgres:
@@ -181,6 +192,9 @@ services:
     build: ./services/company-service
     env_file:
       - ./services/company-service/.env
+    secrets:
+      - source: jwt-public-key
+        target: jwt-public.pem
     restart: unless-stopped
     depends_on:
       postgres:
@@ -192,6 +206,9 @@ services:
     build: ./services/job-search-service
     env_file:
       - ./services/job-search-service/.env
+    secrets:
+      - source: jwt-public-key
+        target: jwt-public.pem
     restart: unless-stopped
     depends_on:
       postgres:
@@ -214,6 +231,9 @@ services:
     build: ./services/media-service
     env_file:
       - ./services/media-service/.env
+    secrets:
+      - source: jwt-public-key
+        target: jwt-public.pem
     restart: unless-stopped
     depends_on:
       postgres:
@@ -225,6 +245,9 @@ services:
     build: ./services/chat-service
     env_file:
       - ./services/chat-service/.env
+    secrets:
+      - source: jwt-public-key
+        target: jwt-public.pem
     restart: unless-stopped
     depends_on:
       - mongo
@@ -286,3 +309,9 @@ volumes:
   redis-data:
   kafka-data-apache:
   elasticsearch-data:
+
+secrets:
+  jwt-private-key:
+    file: ${JWT_PRIVATE_KEY_FILE:-./secrets/jwt-private.pem}
+  jwt-public-key:
+    file: ${JWT_PUBLIC_KEY_FILE:-./secrets/jwt-public.pem}

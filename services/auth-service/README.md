@@ -4,11 +4,9 @@ Spring Boot 3 / Java 21 service that owns user identities. PostgreSQL stores dur
 
 ## Current status
 
-The persistence foundation and Candidate/Recruiter email registration flow are implemented on the current feature branch. Registration uses bcrypt cost 10 and requires OTP verification before the account becomes verified.
+Candidate/Recruiter registration, OTP verification, password login, Google OIDC, JWT RS256/JWKS, refresh-token rotation, logout and `GET /auth/me` are implemented. A successful OTP verification now signs the user in and returns the same local token pair as password and Google login.
 
-Login, Google OAuth2, JWT RS256/JWKS, refresh-token rotation, password reset and Admin account controls remain pending. Security is stateless: only registration/OTP and health endpoints are public, while every other request is denied until its authentication flow is implemented.
-
-Final test totals for this task: **77 unit tests + 16 PostgreSQL/Redis integration tests (93/93 passed)**.
+Password reset and the internal Admin lock/unlock API remain pending. Security is stateless and deny-by-default; only health, registration, login/token and Google handshake endpoints are public. Every protected request uses a locally verified access JWT, while `/auth/me` additionally checks the current durable account state.
 
 ## Registration API
 
@@ -83,16 +81,22 @@ An initial registration email does not consume the resend quota. At most three r
 ```json
 {
   "data": {
-    "userId": "cb164285-23f6-487e-8028-2598011e86ec",
-    "email": "candidate@example.com",
-    "role": "CANDIDATE",
-    "verified": true
+    "accessToken": "eyJ...",
+    "tokenType": "Bearer",
+    "accessTokenExpiresInSeconds": 900,
+    "refreshToken": "rt1_...",
+    "refreshTokenExpiresInSeconds": 604800,
+    "user": {
+      "id": "cb164285-23f6-487e-8028-2598011e86ec",
+      "email": "candidate@example.com",
+      "role": "CANDIDATE"
+    }
   },
   "meta": {}
 }
 ```
 
-OTP verification activates the account only; it does not issue access or refresh tokens. Login and JWT issuance are the next Auth task. An invalid, expired or superseded flow receives the same `OTP_INVALID_OR_EXPIRED` response. The fifth wrong attempt deletes the active challenge and blocks verification/resend for 15 minutes.
+OTP verification activates the account, then creates a local refresh family. These are separate database transactions: if token issuance fails after verification, the account remains verified and password login is the recovery path. An invalid, expired or superseded flow receives the same `OTP_INVALID_OR_EXPIRED` response. The fifth wrong attempt deletes the active challenge and blocks verification/resend for 15 minutes. Token-bearing responses use `Cache-Control: no-store`.
 
 ## OTP safety and concurrency contract
 
@@ -104,6 +108,51 @@ OTP verification activates the account only; it does not issue access or refresh
 - Redis or database availability failures fail closed. Cleanup is compare-and-delete/reservation-aware so an old request cannot delete a newer challenge.
 
 SMTP delivery is synchronous. A success response means the SMTP client returned successfully, but SMTP does not provide an end-to-end exactly-once guarantee: a timeout or retry around the server acknowledgement can still cause delayed or duplicate email. Clients must treat the newest `registrationId` and OTP as authoritative.
+
+## Password login
+
+`POST /auth/login` accepts canonicalized email and a password:
+
+```json
+{
+  "email": "candidate@example.com",
+  "password": "Password1"
+}
+```
+
+A verified, unlocked local account receives the token response shown above. Unknown email, wrong password and an OAuth-only account all return the same `401 INVALID_CREDENTIALS`; the unknown/OAuth-only paths still execute a cost-10 dummy bcrypt check. A pending account returns `403 EMAIL_NOT_VERIFIED` with only its `registrationId`. A locked account returns generic `403 ACCOUNT_LOCKED` and does not expose the internal moderation reason.
+
+Redis Lua tracks failures atomically under HMAC-derived, PII-free keys. The fifth consecutive failure starts a 15-minute block and returns `429 LOGIN_TEMPORARILY_BLOCKED` with `Retry-After`. A successful credential clears the failure state. Redis failure is fail-closed as `503 LOGIN_RATE_LIMIT_UNAVAILABLE`.
+
+## Google OIDC login
+
+1. Navigate the browser to `GET /auth/google`.
+2. The service creates state, nonce and PKCE S256 verifier material, stores the serialized authorization request in Redis, and redirects to Google.
+3. Spring Security validates the callback and OIDC ID token. Provider access/refresh tokens are never persisted or returned.
+4. The success redirect contains only `#code=<one-time-code>` and sets a short-lived HttpOnly binder cookie.
+5. The frontend calls `POST /auth/google/exchange` with `{ "code": "...", "role": "CANDIDATE" }` and `credentials: "include"`. `role` is optional and is used only when creating a new account; allowed values are `CANDIDATE` and `RECRUITER`.
+
+The Redis exchange consumes the code and matching binder exactly once. Google `sub` is the durable provider identity. An already linked subject signs in to its linked user; a new subject with a new verified email creates an OAuth-only user. An existing but unlinked email returns `409 ACCOUNT_LINK_REQUIRED` instead of being auto-linked by email. A future account-link flow must require fresh authentication to the existing account.
+
+The binder cookie is `SameSite=Lax`; therefore production frontend and Auth URLs must be HTTPS and on the same schemeful site (for example `app.example.com` and `auth.example.com`). The frontend origin must also be listed exactly in `CORS_ORIGINS`.
+
+## Access JWT, JWKS and current account
+
+Access tokens are RS256 JWTs with standard `typ=JWT`, a deterministic public-key thumbprint `kid`, and exactly these claims: `iss`, UUID `sub`, `aud`, `role`, `iat`, `exp` and UUID `jti`. Lifetime is 15 minutes. Email/profile data is deliberately excluded.
+
+- `GET /auth/.well-known/jwks.json` publishes active and configured previous RSA public keys only (`kty`, `use`, `alg`, `kid`, `n`, `e`).
+- `GET /auth/me` requires `Authorization: Bearer <access-token>` and returns current `id`, `email`, `role` and verification state after rechecking PostgreSQL. Deleted, unverified or locked accounts are rejected.
+- The decoder accepts only `RS256`, standard `typ=JWT`, a known non-empty `kid`, configured issuer/audience, UUID `sub`/`jti` and one of `CANDIDATE`, `RECRUITER`, `ADMIN`.
+
+## Refresh and logout API
+
+`POST /auth/refresh` and `POST /auth/logout` accept:
+
+```json
+{ "refreshToken": "rt1_..." }
+```
+
+Refresh returns a new access/refresh pair. Logout returns `204`. The raw refresh token is 256 random bits with an `rt1_` prefix; PostgreSQL stores only its SHA-256 hash. All token responses and token-related errors are non-cacheable.
 
 ## Persistence
 
@@ -119,26 +168,34 @@ Foreign keys use `ON DELETE RESTRICT`. Account deletion must explicitly revoke o
 
 ## Refresh rotation contract
 
-The future refresh workflow must execute in one transaction:
+Refresh and logout execute under one per-user transaction: resolve only the user ID from the token hash, pessimistically lock the User aggregate, then lock/refetch the session. This ordering prevents two concurrent requests from forking a refresh family.
 
-1. Hash the presented token with SHA-256, resolve its user, lock that User through `findByIdForUpdate`, then refetch the session through `findByTokenHashForUpdate`. Issue, rotate, logout, password-reset and Admin-lock session mutations must use the same per-user aggregate lock.
-2. Reject expired/revoked sessions. A consumed or revoked token is reuse and requires revoking every active refresh session for the user; `family_id` is lineage metadata, not the revocation boundary.
-3. For a valid token, mark the parent consumed and insert exactly one child with the same user/family and `parent_session_id` set to the parent.
-4. Retain consumed/revoked rows until they can no longer be presented so reuse remains detectable.
+- A valid refresh marks the parent `ROTATED` and inserts exactly one child with the same user, family and absolute expiry.
+- A refresh family expires seven days after initial login; rotation is not sliding. A token rotated on day six therefore has about one day remaining, as reported by `refreshTokenExpiresInSeconds`.
+- Replay of a consumed/revoked token while its family is still live revokes every active session for that user. This includes the child won by a competing concurrent refresh.
+- Expiry is checked before reuse. Replaying an old token after the family lifetime returns the generic invalid response but cannot revoke a newer family.
+- Expired, consumed and revoked rows remain durable audit/reuse evidence. `family_id` is lineage metadata; active-session revocation is user-wide.
 
 ## Configuration
 
-Required registration settings are documented in `.env.example`:
+Required settings are documented in `.env.example`:
 
 - `DATABASE_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
 - `REDIS_URL` (production Compose uses authenticated Redis)
 - `OTP_HMAC_SECRET`, at least 32 UTF-8 bytes and generated as a high-entropy secret
+- `LOGIN_HMAC_SECRET`, a different high-entropy secret of at least 32 UTF-8 bytes
+- `JWT_PRIVATE_KEY_PATH`, `JWT_PUBLIC_KEY_PATH`, `JWT_ISSUER`, `JWT_AUDIENCE`
+- `JWT_PREVIOUS_PUBLIC_KEY_PATHS`, a comma-separated set of old public keys during key rotation
+- `CORS_ORIGINS`, a comma-separated exact HTTPS origin allowlist; HTTP is accepted only for loopback development
+- `GOOGLE_OAUTH_ENABLED`, Google client credentials, fixed callback/frontend redirect URIs and `GOOGLE_SECURE_COOKIES`
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_AUTH`
 - `SMTP_STARTTLS`, `SMTP_STARTTLS_REQUIRED`
 
-For production SMTP, set both `SMTP_STARTTLS=true` and `SMTP_STARTTLS_REQUIRED=true`, use authenticated SMTP, and manage all credentials through a secret store. Development defaults intentionally do not claim transport security.
+For production SMTP, set both `SMTP_STARTTLS=true` and `SMTP_STARTTLS_REQUIRED=true`, use authenticated SMTP, and manage all credentials through a secret store. Development defaults intentionally do not claim transport security. SMTP connect/read/write timeouts are three seconds.
 
-SMTP connect/read/write timeouts are three seconds. OTP lifetime, attempt block, resend window, claim TTL and dispatch lease are configured under `auth.otp` in `application.yml`.
+Run `./scripts/generate-jwt-keys.sh` from the repository root before Docker Compose. It creates an unencrypted PKCS#8 RSA-3072 private key and X.509 public key under the Git-ignored `secrets/` directory and refuses to overwrite existing keys. Compose mounts the private key only into Auth and the public key into JWT-consuming services.
+
+For rotation, mount the old public key separately and list its container path in `JWT_PREVIOUS_PUBLIC_KEY_PATHS`. Keep both public keys deployed for at least the 15-minute access-token lifetime plus deployment/clock-skew margin, then remove the old key. Never retain or distribute the old private key.
 
 ## Health endpoints
 
@@ -153,12 +210,13 @@ Unit tests:
 
 ```bash
 docker run --rm \
+  -e LOGIN_HMAC_SECRET=test-login-secret-that-is-at-least-32-bytes \
   -e OTP_HMAC_SECRET=test-hmac-secret-that-is-at-least-32-bytes \
   -v /tmp/recruitment-system-m2-cache:/root/.m2 \
   -v "$PWD/services/auth-service:/app" \
   -w /app \
   maven:3.9-eclipse-temurin-21 \
-  mvn test
+  mvn clean test
 ```
 
 PostgreSQL 16 and Redis 7 integration tests:
@@ -167,12 +225,13 @@ PostgreSQL 16 and Redis 7 integration tests:
 docker run --rm --network host \
   -e TESTCONTAINERS_HOST_OVERRIDE=localhost \
   -e OTP_HMAC_SECRET=test-hmac-secret-that-is-at-least-32-bytes \
+  -e LOGIN_HMAC_SECRET=test-login-secret-that-is-at-least-32-bytes \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /tmp/recruitment-system-m2-cache:/root/.m2 \
   -v "$PWD/services/auth-service:/app" \
   -w /app \
   maven:3.9-eclipse-temurin-21 \
-  mvn verify -Pintegration-test
+  mvn clean verify -Pintegration-test
 ```
 
-The integration profile validates Flyway/Hibernate on clean PostgreSQL 16 plus real authenticated Redis 7 behavior, including OTP expiry/rate limits, safe flow supersession, database fencing and concurrent verification. The final run passed **77/77 unit tests and 16/16 integration tests (93/93 total)** with PostgreSQL 16.15, authenticated Redis 7 and Testcontainers 1.21.4.
+The integration profile validates Flyway/Hibernate on clean PostgreSQL 16 plus authenticated Redis 7: OTP fencing/rate limits, Google exchange exactly-once, password throttling, JWT/JWKS and `/auth/me`, refresh lineage/reuse/expiry/concurrency, CORS and fail-closed outages. The final clean run passed **156/156 unit tests and 27/27 integration tests (183/183 total)** with PostgreSQL 16.15, Redis 7 and Testcontainers 1.21.4.

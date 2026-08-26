@@ -21,7 +21,7 @@ class RefreshSessionTest {
     Instant rotatedAt = issuedAt.plusSeconds(30);
 
     RefreshSession child = parent.rotate(
-        SECOND_HASH, rotatedAt, rotatedAt.plus(7, ChronoUnit.DAYS));
+        SECOND_HASH, rotatedAt, issuedAt.plus(7, ChronoUnit.DAYS));
 
     assertThat(parent.getConsumedAt()).isEqualTo(rotatedAt);
     assertThat(parent.isUsableAt(rotatedAt.plusSeconds(1))).isFalse();
@@ -36,10 +36,10 @@ class RefreshSessionTest {
     Instant issuedAt = Instant.parse("2026-08-26T10:00:00Z");
     RefreshSession session = RefreshSession.issue(
         UUID.randomUUID(), FIRST_HASH, issuedAt, issuedAt.plusSeconds(600));
-    session.rotate(SECOND_HASH, issuedAt.plusSeconds(10), issuedAt.plusSeconds(700));
+    session.rotate(SECOND_HASH, issuedAt.plusSeconds(10), issuedAt.plusSeconds(600));
 
     assertThatThrownBy(() -> session.rotate(
-        "c".repeat(64), issuedAt.plusSeconds(20), issuedAt.plusSeconds(800)))
+        "c".repeat(64), issuedAt.plusSeconds(20), issuedAt.plusSeconds(600)))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("not usable");
   }
@@ -75,7 +75,7 @@ class RefreshSessionTest {
         UUID.randomUUID(), FIRST_HASH, issuedAt, issuedAt.plusSeconds(600));
 
     assertThatThrownBy(() -> parent.rotate(
-        "raw-token", issuedAt.plusSeconds(10), issuedAt.plusSeconds(700)))
+        "raw-token", issuedAt.plusSeconds(10), issuedAt.plusSeconds(600)))
         .isInstanceOf(IllegalArgumentException.class);
 
     assertThat(parent.getConsumedAt()).isNull();
@@ -89,9 +89,24 @@ class RefreshSessionTest {
         UUID.randomUUID(), FIRST_HASH, issuedAt, issuedAt.plusSeconds(600));
 
     assertThatThrownBy(() -> parent.rotate(
-        FIRST_HASH, issuedAt.plusSeconds(10), issuedAt.plusSeconds(700)))
+        FIRST_HASH, issuedAt.plusSeconds(10), issuedAt.plusSeconds(600)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("different token hash");
     assertThat(parent.getConsumedAt()).isNull();
+  }
+  @Test
+  void rotationCannotExtendAbsoluteFamilyLifetime() {
+    Instant issuedAt = Instant.parse("2026-08-26T10:00:00Z");
+    Instant familyDeadline = issuedAt.plusSeconds(600);
+    RefreshSession parent = RefreshSession.issue(
+        UUID.randomUUID(), FIRST_HASH, issuedAt, familyDeadline);
+
+    assertThatThrownBy(() -> parent.rotate(
+        SECOND_HASH, issuedAt.plusSeconds(10), familyDeadline.plusNanos(1)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("cannot extend");
+
+    assertThat(parent.getConsumedAt()).isNull();
+    assertThat(parent.isUsableAt(issuedAt.plusSeconds(20))).isTrue();
   }
 }

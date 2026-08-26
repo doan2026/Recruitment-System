@@ -41,6 +41,8 @@ spring:
           writetimeout: 3000
 
 auth:
+  cors:
+    allowed-origins: ${CORS_ORIGINS:http://localhost:3000}
   otp:
     hmac-secret: ${OTP_HMAC_SECRET}
     ttl: 5m
@@ -50,6 +52,27 @@ auth:
     max-resends: 3
     claim-ttl: 30s
     dispatch-lock-ttl: 30s
+  token:
+    issuer: ${JWT_ISSUER:https://auth.recruitment.local}
+    audience: ${JWT_AUDIENCE:recruitment-api}
+    private-key-path: ${JWT_PRIVATE_KEY_PATH:}
+    public-key-path: ${JWT_PUBLIC_KEY_PATH:}
+    previous-public-key-paths: ${JWT_PREVIOUS_PUBLIC_KEY_PATHS:}
+    allow-ephemeral-test-key: false
+  login:
+    hmac-secret: ${LOGIN_HMAC_SECRET}
+    failure-window: 15m
+    failure-block-duration: 15m
+    max-failed-attempts: 5
+  google:
+    enabled: ${GOOGLE_OAUTH_ENABLED:false}
+    client-id: ${GOOGLE_CLIENT_ID:}
+    client-secret: ${GOOGLE_CLIENT_SECRET:}
+    redirect-uri: ${GOOGLE_REDIRECT_URI:http://localhost:8080/auth/google/callback}
+    frontend-redirect-uri: ${GOOGLE_FRONTEND_REDIRECT_URI:http://localhost:3000/auth/callback}
+    secure-cookies: ${GOOGLE_SECURE_COOKIES:false}
+    authorization-request-ttl: 10m
+    exchange-ttl: 2m
   mail:
     from: ${SMTP_FROM:no-reply@recruitment.local}
 

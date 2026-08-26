@@ -12,6 +12,9 @@ import org.springframework.data.repository.query.Param;
 public interface RefreshSessionRepository extends JpaRepository<RefreshSession, UUID> {
   Optional<RefreshSession> findByTokenHash(String tokenHash);
 
+  @Query("select session.userId from RefreshSession session where session.tokenHash = :tokenHash")
+  Optional<UUID> findUserIdByTokenHash(@Param("tokenHash") String tokenHash);
+
   List<RefreshSession> findAllByFamilyIdOrderByIssuedAtAsc(UUID familyId);
 
   List<RefreshSession> findAllByUserIdOrderByIssuedAtAsc(UUID userId);
