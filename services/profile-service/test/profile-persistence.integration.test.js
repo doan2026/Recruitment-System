@@ -3,8 +3,12 @@
 const assert = require('node:assert/strict');
 const { after, before, test } = require('node:test');
 const { CvType, PrismaClient } = require('@prisma/client');
+const {
+  assertSafeTestDatabase,
+} = require('./test-database-safety');
 
 const prisma = new PrismaClient();
+let canResetSchema = false;
 
 const USER_ID = '10000000-0000-4000-8000-000000000001';
 const DEFAULT_FILE_ID = '20000000-0000-4000-8000-000000000001';
@@ -76,10 +80,19 @@ async function createCompleteProfile() {
   });
 }
 
-before(truncateProfileSchema);
-after(async () => {
+before(async () => {
+  await assertSafeTestDatabase(prisma);
+  canResetSchema = true;
   await truncateProfileSchema();
-  await prisma.$disconnect();
+});
+after(async () => {
+  try {
+    if (canResetSchema) {
+      await truncateProfileSchema();
+    }
+  } finally {
+    await prisma.$disconnect();
+  }
 });
 
 test('Profile persistence constraints on PostgreSQL 16', async (t) => {
