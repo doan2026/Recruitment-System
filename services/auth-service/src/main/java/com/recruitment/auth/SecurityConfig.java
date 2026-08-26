@@ -68,6 +68,7 @@ class SecurityConfig {
                 "/auth/google/exchange")
             .permitAll()
             .requestMatchers(HttpMethod.GET, "/auth/me").authenticated()
+            .requestMatchers(HttpMethod.PATCH, "/auth/users/*/lock").hasRole("ADMIN")
             .anyRequest().denyAll())
         .oauth2ResourceServer(oauth -> oauth
             .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter))

@@ -24,7 +24,13 @@ public final class SensitiveAuthResponseHeadersFilter extends OncePerRequestFilt
   @Override
   protected boolean shouldNotFilter(HttpServletRequest request) {
     String path = request.getRequestURI().substring(request.getContextPath().length());
-    return !SENSITIVE_PATHS.contains(path);
+    return !SENSITIVE_PATHS.contains(path) && !isAdminAccountControlPath(path);
+  }
+
+  private static boolean isAdminAccountControlPath(String path) {
+    return path.equals("/auth/users")
+        || path.startsWith("/auth/users/")
+        || path.startsWith("/auth/users;");
   }
 
   @Override
