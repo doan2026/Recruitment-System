@@ -1,8 +1,27 @@
 spring:
-  application: { name: auth-service }
+  application:
+    name: auth-service
   datasource:
     url: ${DATABASE_URL}
     username: ${POSTGRES_USER}
     password: ${POSTGRES_PASSWORD}
-  jpa: { open-in-view: false, hibernate: { ddl-auto: validate } }
-management: { endpoints: { web: { exposure: { include: health,info } } } }
+  flyway:
+    enabled: true
+    default-schema: auth
+    schemas: auth
+    create-schemas: true
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: auth
+        jdbc:
+          time_zone: UTC
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
