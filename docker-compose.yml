@@ -188,6 +188,13 @@ services:
     build: ./services/profile-service
     env_file:
       - ./services/profile-service/.env
+    environment:
+      JWT_JWKS_URI: http://auth-service:8080/auth/.well-known/jwks.json
+      JWT_ALLOW_INSECURE_JWKS: "true"
+      JWT_ISSUER: ${JWT_ISSUER:-https://auth.recruitment.local}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-recruitment-api}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      SWAGGER_ENABLED: "true"
     secrets:
       - source: jwt-public-key
         target: jwt-public.pem
@@ -197,6 +204,8 @@ services:
         condition: service_healthy
       profile-migrate:
         condition: service_completed_successfully
+      auth-service:
+        condition: service_started
     expose:
       - "3000"
 

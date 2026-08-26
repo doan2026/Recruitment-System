@@ -1,0 +1,114 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
+const path = require('node:path');
+const { PrismaClient } = require('@prisma/client');
+
+const prisma = new PrismaClient();
+const root = path.resolve(__dirname, '..');
+
+const executeMigration = (directory) => {
+  const result = spawnSync(
+    'npx',
+    [
+      'prisma',
+      'db',
+      'execute',
+      '--file',
+      path.join(root, 'prisma', 'migrations', directory, 'migration.sql'),
+      '--schema',
+      path.join(root, 'prisma', 'schema.prisma'),
+    ],
+    { cwd: root, stdio: 'inherit' },
+  );
+  if (result.status !== 0) {
+    throw new Error('Migration execution failed: ' + directory);
+  }
+};
+
+const main = async () => {
+  let canResetSchema = false;
+  try {
+    if (process.env.ALLOW_PROFILE_SCHEMA_RESET !== 'true') {
+      throw new Error(
+        'Refusing to reset the profile schema without ALLOW_PROFILE_SCHEMA_RESET=true',
+      );
+    }
+
+    const databases = await prisma.$queryRawUnsafe(
+      'SELECT current_database() AS "name"',
+    );
+    const databaseName = databases[0]?.name;
+    if (typeof databaseName !== 'string' || !databaseName.endsWith('_test')) {
+      throw new Error(
+        `Refusing to reset the profile schema in non-test database: ${databaseName ?? 'unknown'}`,
+      );
+    }
+    canResetSchema = true;
+
+    await prisma.$executeRawUnsafe(
+      'DROP SCHEMA IF EXISTS "profile" CASCADE',
+    );
+    executeMigration('20260827000000_profile_persistence');
+
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO "profile"."profiles"
+        ("id", "user_id", "full_name", "headline", "summary",
+         "github_url", "completion_percent", "updated_at")
+      VALUES
+        ('71000000-0000-4000-8000-000000000001',
+         '71000000-0000-4000-8000-000000000002',
+         'Legacy Candidate',
+         E'\\t',
+         E'\\n',
+         'https://github.com/legacy-candidate',
+         7,
+         CURRENT_TIMESTAMP)
+    `);
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO "profile"."educations"
+        ("id", "profile_id", "school", "start_date", "updated_at")
+      VALUES
+        ('71000000-0000-4000-8000-000000000003',
+         '71000000-0000-4000-8000-000000000001',
+         'Legacy University',
+         DATE '2020-09-01',
+         CURRENT_TIMESTAMP)
+    `);
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO "profile"."skills"
+        ("id", "profile_id", "name", "normalized_name", "updated_at")
+      VALUES
+        ('71000000-0000-4000-8000-000000000004',
+         '71000000-0000-4000-8000-000000000001',
+         'TypeScript',
+         'typescript',
+         CURRENT_TIMESTAMP)
+    `);
+
+    executeMigration('20260827010000_profile_completion_rule');
+
+    const rows = await prisma.$queryRawUnsafe(`
+      SELECT "completion_percent", "completion_rule_version"
+      FROM "profile"."profiles"
+      WHERE "user_id" = '71000000-0000-4000-8000-000000000002'::uuid
+    `);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].completion_percent, 50);
+    assert.equal(rows[0].completion_rule_version, 1);
+    process.stdout.write('Profile completion upgrade backfill: OK\n');
+  } finally {
+    if (canResetSchema) {
+      await prisma.$executeRawUnsafe(
+        'DROP SCHEMA IF EXISTS "profile" CASCADE',
+      );
+    }
+    await prisma.$disconnect();
+  }
+};
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
