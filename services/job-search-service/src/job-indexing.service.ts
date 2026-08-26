@@ -28,6 +28,7 @@ interface ClaimedIndexSync {
 interface JobIndexDocument {
   jobId: string;
   aggregateVersion: number;
+  indexGeneration: number;
   searchable: boolean;
   status?: JobStatus;
   companyId?: string;
@@ -44,6 +45,37 @@ interface JobIndexDocument {
   skills?: string[];
   deadline?: string;
   publishedAt?: string | null;
+}
+
+interface ValidatedIndex {
+  concreteIndex: string;
+  indexUuid: string;
+  baselineComplete: boolean;
+}
+
+interface IndexMappingField {
+  type?: string;
+  analyzer?: string;
+  index?: boolean;
+  doc_values?: boolean;
+  fields?: Record<string, IndexMappingField>;
+}
+
+interface IndexMappingContract {
+  dynamic?: string | boolean;
+  _meta?: Record<string, unknown>;
+  properties?: Record<string, IndexMappingField>;
+}
+
+interface IndexAnalysisContract {
+  analyzer?: {
+    vietnamese_text?: {
+      type?: string;
+      tokenizer?: string;
+      filter?: unknown;
+      char_filter?: unknown;
+    };
+  };
 }
 
 export interface JobIndexFailure {
@@ -79,6 +111,7 @@ const DEFAULT_LEASE_MS = 30_000;
 const DEFAULT_BATCH_SIZE = 100;
 const DEFAULT_REDIS_COMMAND_TIMEOUT_MS = 2_000;
 const DISPATCH_RETRY_MAX_MS = 60_000;
+const INDEX_PROJECTION_VERSION = 3;
 
 @Injectable()
 export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
@@ -102,6 +135,11 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
   private timer?: NodeJS.Timeout;
   private flushPromise?: Promise<number>;
   private indexReady?: Promise<void>;
+  private baselineCheckPromise?: Promise<void>;
+  private baselineIndex?: string;
+  private baselineIndexUuid?: string;
+  private baselineScanComplete = false;
+  private searchReady = false;
   private stopping = false;
 
   constructor(
@@ -133,7 +171,12 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
       retryStrategy: redisRetryDelay,
     };
     this.index = config.get<string>('ELASTICSEARCH_INDEX')?.trim() ||
-      'job_index_v2';
+      'job_index_v3';
+    if (!/^[a-z0-9][a-z0-9._-]{0,254}$/.test(this.index)) {
+      throw new Error(
+        'ELASTICSEARCH_INDEX must be one lowercase index or alias',
+      );
+    }
     this.queueName = config.get<string>('JOB_INDEX_QUEUE_NAME')?.trim() ||
       DEFAULT_QUEUE_NAME;
     if (!/^[A-Za-z0-9_-]{1,100}$/.test(this.queueName)) {
@@ -242,11 +285,13 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
     );
     this.timer = setInterval(() => this.wake(), this.pollIntervalMs);
     this.timer.unref();
-    void this.ensureIndex().catch((error: unknown) => {
-      this.logger.warn(
-        `Elasticsearch index initialization deferred (${errorName(error)})`,
-      );
-    });
+    void this.ensureIndex()
+      .then(() => this.refreshBaselineReadiness())
+      .catch((error: unknown) => {
+        this.logger.warn(
+          `Elasticsearch index initialization deferred (${errorName(error)})`,
+        );
+      });
     this.wake();
   }
 
@@ -266,8 +311,19 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
     await this.recordDesiredState(transaction, job.id, job.aggregateVersion);
   }
 
+  isSearchReady(): boolean {
+    return this.searchReady;
+  }
+
   wake(): void {
     if (this.stopping) return;
+    void this.ensureIndex()
+      .then(() => this.refreshBaselineReadiness())
+      .catch((error: unknown) => {
+        this.logger.warn(
+          `Elasticsearch index initialization deferred (${errorName(error)})`,
+        );
+      });
     void this.flushPending().catch((error: unknown) => {
       this.logger.warn(`Index sync flush deferred (${errorName(error)})`);
     });
@@ -289,6 +345,7 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
     let cursor: string | undefined;
     let queued = 0;
     do {
+      if (this.stopping) break;
       const jobs = await this.prisma.job.findMany({
         orderBy: { id: 'asc' },
         select: { id: true, aggregateVersion: true },
@@ -296,13 +353,7 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       });
       if (!jobs.length) break;
-      await this.prisma.$transaction(async (transaction) => {
-        for (const job of jobs) {
-          await this.recordDesiredState(
-            transaction, job.id, job.aggregateVersion,
-          );
-        }
-      });
+      await this.recordDesiredStates(this.prisma, jobs);
       queued += jobs.length;
       cursor = jobs.at(-1)?.id;
     } while (cursor);
@@ -315,6 +366,20 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
     jobId: string,
     aggregateVersion: number,
   ): Promise<void> {
+    await this.recordDesiredStates(transaction, [{
+      id: jobId,
+      aggregateVersion,
+    }]);
+  }
+
+  private async recordDesiredStates(
+    transaction: Pick<Prisma.TransactionClient, '$executeRaw'>,
+    jobs: ReadonlyArray<{ id: string; aggregateVersion: number }>,
+  ): Promise<void> {
+    if (!jobs.length) return;
+    const desiredStates = Prisma.join(jobs.map((job) => Prisma.sql`
+      (${job.id}::uuid, ${job.aggregateVersion})
+    `));
     await transaction.$executeRaw`
       INSERT INTO "job"."job_index_sync" AS current (
         "job_id",
@@ -324,14 +389,16 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
         "processing_attempts",
         "next_attempt_at",
         "updated_at"
-      ) VALUES (
-        ${jobId}::uuid,
-        ${aggregateVersion},
+      ) SELECT
+        desired."job_id",
+        desired."aggregate_version",
         1,
         0,
         0,
         CURRENT_TIMESTAMP,
         CURRENT_TIMESTAMP
+      FROM (VALUES ${desiredStates}) AS desired(
+        "job_id", "aggregate_version"
       )
       ON CONFLICT ("job_id") DO UPDATE
       SET "aggregate_version" = EXCLUDED."aggregate_version",
@@ -388,8 +455,13 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
   private async drain(): Promise<number> {
     let dispatched = 0;
     for (let index = 0; index < this.batchSize; index += 1) {
+      if (this.stopping) break;
       const sync = await this.claimNext();
       if (!sync) break;
+      if (this.stopping) {
+        await this.releaseClaimForShutdown(sync);
+        break;
+      }
       try {
         await withTimeout(
           this.dispatch(sync),
@@ -449,6 +521,27 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
         claimed."dispatch_attempts" AS "dispatchAttempts"
     `;
     return claimed[0] ?? null;
+  }
+
+  private async releaseClaimForShutdown(
+    sync: ClaimedIndexSync,
+  ): Promise<void> {
+    await this.prisma.jobIndexSync.updateMany({
+      where: {
+        jobId: sync.jobId,
+        aggregateVersion: sync.aggregateVersion,
+        generation: sync.generation,
+        leaseOwner: this.dispatcherId,
+        completedAt: null,
+        failedAt: null,
+      },
+      data: {
+        dispatchAttempts: { decrement: 1 },
+        nextAttemptAt: new Date(),
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      },
+    });
   }
 
   private async dispatch(sync: ClaimedIndexSync): Promise<void> {
@@ -588,6 +681,7 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
       document = {
         jobId: job.id,
         aggregateVersion: task.aggregateVersion,
+        indexGeneration: task.generation,
         searchable: true,
         status: job.status,
         companyId: job.companyId,
@@ -609,6 +703,7 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
       document = {
         jobId: task.jobId,
         aggregateVersion: task.aggregateVersion,
+        indexGeneration: task.generation,
         searchable: false,
         ...(job ? { status: job.status } : {}),
       };
@@ -623,16 +718,39 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       await this.ensureIndex();
       try {
-        await this.elastic.index({
+        await this.elastic.update({
           index: this.index,
           id: task.jobId,
-          document,
-          version: task.aggregateVersion,
-          version_type: 'external_gte',
+          retry_on_conflict: 3,
+          script: {
+            lang: 'painless',
+            source: `
+              if (
+                !ctx._source.containsKey('aggregateVersion') ||
+                ctx._source.aggregateVersion < params.aggregateVersion ||
+                (
+                  ctx._source.aggregateVersion == params.aggregateVersion &&
+                  (
+                    !ctx._source.containsKey('indexGeneration') ||
+                    ctx._source.indexGeneration < params.indexGeneration
+                  )
+                )
+              ) {
+                ctx._source = params.document;
+              } else {
+                ctx.op = 'noop';
+              }
+            `,
+            params: {
+              aggregateVersion: task.aggregateVersion,
+              indexGeneration: task.generation,
+              document,
+            },
+          },
+          upsert: document,
         });
         return;
       } catch (error) {
-        if (isVersionConflict(error)) return;
         if (attempt === 0 && isIndexNotFound(error)) {
           this.indexReady = undefined;
           continue;
@@ -664,7 +782,8 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
 
   private async createIndexIfMissing(): Promise<void> {
     if (await this.elastic.indices.exists({ index: this.index })) {
-      await this.validateIndexMapping();
+      const validated = await this.validateIndexMapping();
+      await this.prepareBaseline(validated);
       return;
     }
     try {
@@ -683,10 +802,11 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
         },
         mappings: {
           dynamic: 'strict',
-          _meta: { projectionVersion: 2 },
+          _meta: { projectionVersion: INDEX_PROJECTION_VERSION },
           properties: {
             jobId: { type: 'keyword' },
             aggregateVersion: { type: 'long' },
+            indexGeneration: { type: 'integer' },
             searchable: { type: 'boolean' },
             companyId: { type: 'keyword' },
             companyName: {
@@ -720,28 +840,189 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
       });
     } catch (error) {
       if (!isIndexAlreadyExists(error)) throw error;
-      await this.validateIndexMapping();
+    }
+    const validated = await this.validateIndexMapping();
+    await this.prepareBaseline(validated);
+  }
+
+  private async prepareBaseline(
+    validated: ValidatedIndex,
+  ): Promise<void> {
+    if (validated.baselineComplete) {
+      this.baselineIndex = undefined;
+      this.baselineIndexUuid = undefined;
+      this.baselineScanComplete = false;
+      this.searchReady = true;
+      return;
+    }
+
+    this.searchReady = false;
+    this.baselineIndex = validated.concreteIndex;
+    this.baselineIndexUuid = validated.indexUuid;
+    this.baselineScanComplete = false;
+    const queued = await this.reindexAll();
+    this.baselineScanComplete = true;
+    if (queued) {
+      this.logger.log(
+        'Queued existing jobs for Elasticsearch baseline: ' + String(queued),
+      );
+    }
+    await this.refreshBaselineReadiness();
+  }
+
+  private async refreshBaselineReadiness(): Promise<void> {
+    if (
+      this.stopping ||
+      this.searchReady ||
+      !this.baselineIndex ||
+      !this.baselineIndexUuid ||
+      !this.baselineScanComplete
+    ) {
+      return;
+    }
+    if (this.baselineCheckPromise) return this.baselineCheckPromise;
+
+    const concreteIndex = this.baselineIndex;
+    const indexUuid = this.baselineIndexUuid;
+    const check = this.completeBaselineIfReady(concreteIndex, indexUuid);
+    this.baselineCheckPromise = check;
+    try {
+      await check;
+    } finally {
+      if (this.baselineCheckPromise === check) {
+        this.baselineCheckPromise = undefined;
+      }
     }
   }
 
-  private async validateIndexMapping(): Promise<void> {
+  private async completeBaselineIfReady(
+    concreteIndex: string,
+    indexUuid: string,
+  ): Promise<void> {
+    const rows = await this.prisma.$queryRaw<Array<{ pending: number }>>`
+      SELECT COUNT(*)::integer AS "pending"
+      FROM "job"."jobs" AS source
+      LEFT JOIN "job"."job_index_sync" AS sync
+        ON sync."job_id" = source."id"
+      WHERE sync."job_id" IS NULL
+        OR sync."aggregate_version" <> source."aggregate_version"
+        OR sync."completed_at" IS NULL
+        OR sync."failed_at" IS NOT NULL
+    `;
+    const pending = rows[0]?.pending ?? 1;
+    if (
+      pending !== 0 ||
+      this.baselineIndex !== concreteIndex ||
+      this.baselineIndexUuid !== indexUuid
+    ) return;
+
+    let current: ValidatedIndex;
+    try {
+      await this.elastic.indices.refresh({ index: concreteIndex });
+      current = await this.validateIndexMapping();
+    } catch (error) {
+      if (isIndexNotFound(error)) {
+        this.invalidateBaselineTarget();
+        return;
+      }
+      throw error;
+    }
+    if (
+      current.concreteIndex !== concreteIndex ||
+      current.indexUuid !== indexUuid
+    ) {
+      this.invalidateBaselineTarget();
+      return;
+    }
+
+    await this.elastic.indices.putMapping({
+      index: concreteIndex,
+      _meta: {
+        projectionVersion: INDEX_PROJECTION_VERSION,
+        baselineVersion: INDEX_PROJECTION_VERSION,
+        baselineIndexUuid: indexUuid,
+      },
+    });
+    let completed: ValidatedIndex;
+    try {
+      completed = await this.validateIndexMapping();
+    } catch (error) {
+      if (isIndexNotFound(error)) {
+        this.invalidateBaselineTarget();
+        return;
+      }
+      throw error;
+    }
+    if (
+      !completed.baselineComplete ||
+      completed.concreteIndex !== concreteIndex ||
+      completed.indexUuid !== indexUuid ||
+      this.baselineIndex !== concreteIndex ||
+      this.baselineIndexUuid !== indexUuid
+    ) {
+      this.invalidateBaselineTarget();
+      return;
+    }
+    this.searchReady = true;
+    this.baselineIndex = undefined;
+    this.baselineIndexUuid = undefined;
+    this.baselineScanComplete = false;
+    this.logger.log(
+      'Elasticsearch baseline is complete for ' + concreteIndex,
+    );
+  }
+
+  private async validateIndexMapping(): Promise<ValidatedIndex> {
     const mappings = await this.elastic.indices.getMapping({
       index: this.index,
     });
-    const current = mappings[this.index]?.mappings as {
-      dynamic?: string | boolean;
-      _meta?: Record<string, unknown>;
-      properties?: Record<string, { type?: string }>;
-    } | undefined;
-    const compatible =
-      current?.dynamic === 'strict' &&
-      current._meta?.projectionVersion === 2 &&
-      current.properties?.aggregateVersion?.type === 'long' &&
-      current.properties?.searchable?.type === 'boolean';
-    if (compatible) return;
+    const entries = Object.entries(mappings);
+    if (entries.length !== 1) this.incompatibleIndex();
+
+    const [concreteIndex, configured] = entries[0];
+    const current = configured.mappings as IndexMappingContract | undefined;
+    const settings = await this.elastic.indices.getSettings({
+      index: concreteIndex,
+    });
+    const indexSettings = (
+      settings[concreteIndex]?.settings as unknown as {
+        index?: {
+          uuid?: string;
+          analysis?: IndexAnalysisContract;
+        };
+      } | undefined
+    )?.index;
+    const analysis = indexSettings?.analysis;
+    const indexUuid = indexSettings?.uuid;
+
+    if (
+      !indexUuid ||
+      !isCompatibleIndexMapping(current) ||
+      !isCompatibleVietnameseAnalyzer(analysis)
+    ) {
+      this.incompatibleIndex();
+    }
+    return {
+      concreteIndex,
+      indexUuid,
+      baselineComplete:
+        current?._meta?.baselineVersion === INDEX_PROJECTION_VERSION &&
+        current?._meta?.baselineIndexUuid === indexUuid,
+    };
+  }
+
+  private incompatibleIndex(): never {
     const error = new Error('ELASTICSEARCH_INDEX_INCOMPATIBLE');
     error.name = 'ELASTICSEARCH_INDEX_INCOMPATIBLE';
     throw error;
+  }
+
+  private invalidateBaselineTarget(): void {
+    this.searchReady = false;
+    this.baselineIndex = undefined;
+    this.baselineIndexUuid = undefined;
+    this.baselineScanComplete = false;
+    this.indexReady = undefined;
   }
 
   private redisConnection(redisUrl: string): RedisConnection {
@@ -779,6 +1060,79 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
       ...(parsed.protocol === 'rediss:' ? { tls: {} } : {}),
     };
   }
+}
+
+function isCompatibleIndexMapping(
+  mapping: IndexMappingContract | undefined,
+): boolean {
+  const properties = mapping?.properties;
+  return mapping?.dynamic === 'strict' &&
+    mapping._meta?.projectionVersion === INDEX_PROJECTION_VERSION &&
+    hasMapping(properties, 'jobId', 'keyword') &&
+    hasMapping(properties, 'aggregateVersion', 'long') &&
+    hasMapping(properties, 'indexGeneration', 'integer') &&
+    hasMapping(properties, 'searchable', 'boolean') &&
+    hasMapping(properties, 'companyId', 'keyword') &&
+    hasMapping(
+      properties,
+      'companyName',
+      'text',
+      'vietnamese_text',
+      true,
+    ) &&
+    hasMapping(properties, 'title', 'text', 'vietnamese_text') &&
+    hasMapping(properties, 'description', 'text', 'vietnamese_text') &&
+    hasMapping(properties, 'salaryMin', 'double') &&
+    hasMapping(properties, 'salaryMax', 'double') &&
+    hasMapping(properties, 'isNegotiable', 'boolean') &&
+    hasMapping(properties, 'currency', 'keyword') &&
+    hasMapping(properties, 'location', 'text', 'vietnamese_text', true) &&
+    hasMapping(properties, 'jobType', 'keyword') &&
+    hasMapping(properties, 'experienceYears', 'integer') &&
+    hasMapping(properties, 'skills', 'text', 'vietnamese_text', true) &&
+    hasMapping(properties, 'deadline', 'date') &&
+    hasMapping(properties, 'status', 'keyword') &&
+    hasMapping(properties, 'publishedAt', 'date');
+}
+
+function hasMapping(
+  properties: Record<string, IndexMappingField> | undefined,
+  name: string,
+  type: string,
+  analyzer?: string,
+  keyword = false,
+): boolean {
+  const field = properties?.[name];
+  if (
+    field?.type !== type ||
+    field.index === false ||
+    (type !== 'text' && field.doc_values === false) ||
+    (analyzer !== undefined && field.analyzer !== analyzer)
+  ) {
+    return false;
+  }
+  if (!keyword) return true;
+  const keywordField = field.fields?.keyword;
+  return keywordField?.type === 'keyword' &&
+    keywordField.index !== false &&
+    keywordField.doc_values !== false;
+}
+
+function isCompatibleVietnameseAnalyzer(
+  analysis: IndexAnalysisContract | undefined,
+): boolean {
+  const analyzer = analysis?.analyzer?.vietnamese_text;
+  const charFilter = analyzer?.char_filter;
+  return analyzer?.type === 'custom' &&
+    analyzer.tokenizer === 'standard' &&
+    (
+      charFilter === undefined ||
+      (Array.isArray(charFilter) && charFilter.length === 0)
+    ) &&
+    Array.isArray(analyzer.filter) &&
+    analyzer.filter.length === 2 &&
+    analyzer.filter[0] === 'lowercase' &&
+    analyzer.filter[1] === 'asciifolding';
 }
 
 function positiveInteger(
@@ -864,11 +1218,6 @@ function elasticErrorType(error: unknown): string | undefined {
     meta?: { body?: { error?: string | { type?: string } } };
   }).meta?.body;
   return typeof body?.error === 'string' ? body.error : body?.error?.type;
-}
-
-function isVersionConflict(error: unknown): boolean {
-  return elasticStatusCode(error) === 409 &&
-    elasticErrorType(error) === 'version_conflict_engine_exception';
 }
 
 function isIndexNotFound(error: unknown): boolean {

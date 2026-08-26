@@ -40,6 +40,7 @@ interface JobIndexTask {
 interface StoredJobDocument {
   jobId: string;
   aggregateVersion: number;
+  indexGeneration?: number;
   searchable: boolean;
   status?: JobStatus;
   companyId?: string;
@@ -154,7 +155,7 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
     config = serviceConfig();
     const companies = new CompanyClientService(config);
     indexing = new JobIndexingService(prisma, companies, config);
-    search = new JobSearchService(prisma, config);
+    search = new JobSearchService(prisma, config, indexing);
     externalQueue = new Queue<JobIndexTask>(QUEUE_NAME, {
       connection: redisConnection(REDIS_URL),
     });
@@ -164,6 +165,12 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
       () => elastic.indices.exists({ index: INDEX }),
       (exists) => exists,
       'Elasticsearch index was not initialized',
+      20_000,
+    );
+    await waitFor(
+      async () => indexing.isSearchReady(),
+      (ready) => ready,
+      'Elasticsearch baseline was not marked ready',
       20_000,
     );
   }, 40_000);
@@ -287,6 +294,47 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
     expect(result.items.find((item) => item.id === published.id)).toBeUndefined();
   });
 
+  it('keeps the newer projection generation at the same aggregate version',
+  async () => {
+    const jobId = randomUUID();
+    const writer = indexing as unknown as {
+      writeVersionedDocument(
+        task: JobIndexTask,
+        document: StoredJobDocument,
+      ): Promise<void>;
+    };
+    const newerTask: JobIndexTask = {
+      jobId,
+      aggregateVersion: 7,
+      generation: 2,
+    };
+    const newerDocument: StoredJobDocument = {
+      jobId,
+      aggregateVersion: 7,
+      indexGeneration: 2,
+      searchable: true,
+      status: JobStatus.PUBLISHED,
+      title: 'Projection generation 2',
+    };
+
+    await writer.writeVersionedDocument(newerTask, newerDocument);
+    await writer.writeVersionedDocument(
+      { ...newerTask, generation: 1 },
+      {
+        ...newerDocument,
+        indexGeneration: 1,
+        title: 'Stale projection generation 1',
+      },
+    );
+    await elastic.indices.refresh({ index: INDEX });
+
+    expect((await getStoredDocument(jobId)).source).toMatchObject({
+      aggregateVersion: 7,
+      indexGeneration: 2,
+      title: 'Projection generation 2',
+    });
+  });
+
   it('reindexes every Job idempotently and repairs stale closed documents',
   async () => {
     const searchable = await createUntrackedJob({
@@ -345,8 +393,11 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
     await elastic.indices.refresh({ index: INDEX });
     const after = await getStoredDocument(searchable.id);
 
-    expect(after.version).toBe(before.version);
-    expect(after.source).toEqual(before.source);
+    expect(after.version).toBeGreaterThan(before.version);
+    expect(after.source).toEqual({
+      ...before.source,
+      indexGeneration: replayedSync.generation,
+    });
   });
 
   it('does not let a stale reindex snapshot downgrade desired state',
@@ -381,7 +432,7 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
           }];
         }),
       },
-      $transaction: prisma.$transaction.bind(prisma),
+      $executeRaw: prisma.$executeRaw.bind(prisma),
     } as unknown as PrismaService;
     const snapshotConfig = serviceConfig({
       JOB_INDEX_QUEUE_NAME: QUEUE_NAME + '-snapshot',
@@ -489,10 +540,10 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
     expect((await getStoredDocument(job.id)).source.searchable).toBe(true);
   });
 
-  it('uses job_index_v2 without mutating a legacy strict job_index',
+  it('uses job_index_v3 without mutating an existing job_index_v2',
   async () => {
-    const legacyIndex = 'job_index';
-    const upgradedIndex = 'job_index_v2';
+    const legacyIndex = 'job_index_v2';
+    const upgradedIndex = 'job_index_v3';
     const legacyDocumentId = 'legacy-' + randomUUID();
     await deleteIndexIfExists(legacyIndex);
     await deleteIndexIfExists(upgradedIndex);
@@ -594,6 +645,12 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
 
   it('recovers the same durable intent after a cold Redis outage',
   async () => {
+    await waitFor(
+      async () => indexing.isSearchReady(),
+      (ready) => ready,
+      'Elasticsearch baseline was not ready before the Redis outage',
+      20_000,
+    );
     await indexing.onModuleDestroy();
     const outageConfig = serviceConfig({
       REDIS_URL:
@@ -606,6 +663,7 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
       new CompanyClientService(outageConfig),
       outageConfig,
     );
+    outageService.onModuleInit();
     let outageStopped = false;
     let job!: Job;
 
@@ -648,7 +706,7 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
         await outageService.onModuleDestroy().catch(() => undefined);
       }
       const recoveryConfig = serviceConfig({
-        JOB_INDEX_QUEUE_NAME: QUEUE_NAME + '-redis-recovery',
+        JOB_INDEX_QUEUE_NAME: QUEUE_NAME + '-redis-outage',
       });
       indexing = new JobIndexingService(
         prisma,
@@ -684,6 +742,90 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
       searchable: true,
       title: 'Durable during Redis outage',
     });
+  });
+
+  it('resumes a missing baseline marker after restart and gates search',
+  async () => {
+    await indexing.onModuleDestroy();
+    await (search as unknown as { elastic: Client }).elastic.close();
+    await deleteIndexIfExists(INDEX);
+
+    const crashConfig = serviceConfig({
+      JOB_INDEX_QUEUE_NAME: QUEUE_NAME + '-bootstrap-crash',
+    });
+    const crashingBootstrap = new JobIndexingService(
+      prisma,
+      new CompanyClientService(crashConfig),
+      crashConfig,
+    );
+    Object.assign(crashingBootstrap, {
+      prepareBaseline: jest.fn().mockRejectedValue(
+        new Error('SIMULATED_BOOTSTRAP_CRASH'),
+      ),
+    });
+    try {
+      await expect(
+        (crashingBootstrap as unknown as {
+          createIndexIfMissing(): Promise<void>;
+        }).createIndexIfMissing(),
+      ).rejects.toThrow('SIMULATED_BOOTSTRAP_CRASH');
+      expect(await elastic.indices.exists({ index: INDEX })).toBe(true);
+      const incomplete = await elastic.indices.getMapping({ index: INDEX });
+      const incompleteMeta = incomplete[INDEX]?.mappings._meta as
+        | Record<string, unknown>
+        | undefined;
+      expect(incompleteMeta?.baselineVersion).toBeUndefined();
+      expect(incompleteMeta?.baselineIndexUuid).toBeUndefined();
+      expect(crashingBootstrap.isSearchReady()).toBe(false);
+    } finally {
+      await crashingBootstrap.onModuleDestroy();
+    }
+
+    indexing = new JobIndexingService(
+      prisma,
+      new CompanyClientService(config),
+      config,
+    );
+    search = new JobSearchService(prisma, config, indexing);
+    indexing.onModuleInit();
+
+    expect(indexing.isSearchReady()).toBe(false);
+    const fallback = await search.search({
+      page: 1,
+      limit: 20,
+      sort: JobSearchSort.NEWEST,
+    });
+    expect(fallback.source).toBe(JobSearchSource.POSTGRESQL);
+
+    await waitFor(
+      async () => indexing.isSearchReady(),
+      (ready) => ready,
+      'Restarted service did not finish the existing-index baseline',
+      30_000,
+      50,
+    );
+    const completed = await elastic.indices.getMapping({ index: INDEX });
+    const completedMeta = completed[INDEX]?.mappings._meta as
+      | Record<string, unknown>
+      | undefined;
+    const completedSettings = await elastic.indices.getSettings({
+      index: INDEX,
+    });
+    const completedIndexUuid = (
+      completedSettings[INDEX]?.settings as
+        | { index?: { uuid?: string } }
+        | undefined
+    )?.index?.uuid;
+    expect(completedMeta?.baselineVersion).toBe(3);
+    expect(completedIndexUuid).toEqual(expect.any(String));
+    expect(completedMeta?.baselineIndexUuid).toBe(completedIndexUuid);
+
+    const indexed = await search.search({
+      page: 1,
+      limit: 20,
+      sort: JobSearchSort.NEWEST,
+    });
+    expect(indexed.source).toBe(JobSearchSource.ELASTICSEARCH);
   });
 
   function serviceConfig(
@@ -895,9 +1037,10 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
       properties?: Record<string, unknown>;
     };
     expect(configured.dynamic).toBe('strict');
-    expect(configured._meta?.projectionVersion).toBe(2);
+    expect(configured._meta?.projectionVersion).toBe(3);
     expect(configured.properties).toEqual(expect.objectContaining({
       aggregateVersion: expect.objectContaining({ type: 'long' }),
+      indexGeneration: expect.objectContaining({ type: 'integer' }),
       searchable: expect.objectContaining({ type: 'boolean' }),
       title: expect.objectContaining({ analyzer: 'vietnamese_text' }),
     }));
