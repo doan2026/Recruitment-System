@@ -1,0 +1,30 @@
+name: ${MEDIA_TEST_PROJECT_NAME:-recruitment-media-service-test}
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: media_test
+      POSTGRES_USER: media_test
+      POSTGRES_PASSWORD: media_test_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U media_test -d media_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  media-tests:
+    build:
+      context: .
+      target: test
+    environment:
+      DATABASE_URL: postgresql://media_test:media_test_password@postgres-test:5432/media_test?schema=media
+      ALLOW_MEDIA_SCHEMA_RESET: "true"
+      TZ: Asia/Ho_Chi_Minh
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -c
+      - npx prisma migrate deploy && node --test test/*.unit.test.js && node --test --test-concurrency=1 test/*.integration.test.js && npx prisma migrate deploy

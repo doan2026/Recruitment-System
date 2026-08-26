@@ -1,2 +1,115 @@
-generator client { provider = "prisma-client-js" }
-datasource db { provider = "postgresql" url = env("DATABASE_URL") }
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum FileOwnerType {
+  USER
+  COMPANY
+
+  @@map("file_owner_type")
+}
+
+enum MediaType {
+  CV
+  AVATAR
+  COMPANY_LOGO
+  COMPANY_IMAGE
+  COMPANY_VIDEO
+  CHAT_ATTACHMENT
+
+  @@map("media_type")
+}
+
+enum FileStatus {
+  PENDING
+  VERIFYING
+  ACTIVE
+  EXPIRED
+  REJECTED
+  DELETE_PENDING
+  DELETE_FAILED
+  DELETED
+
+  @@map("file_status")
+}
+
+enum StorageResourceType {
+  IMAGE
+  VIDEO
+  RAW
+
+  @@map("storage_resource_type")
+}
+
+enum StorageDeliveryType {
+  UPLOAD
+  AUTHENTICATED
+
+  @@map("storage_delivery_type")
+}
+
+model FileMeta {
+  id                   String              @id @default(uuid()) @db.Uuid
+  requestedBy          String              @map("requested_by") @db.Uuid
+  producerService      String?             @map("producer_service") @db.VarChar(64)
+  ownerId              String              @map("owner_id") @db.Uuid
+  ownerType            FileOwnerType       @map("owner_type")
+  mediaType            MediaType           @map("media_type")
+  status               FileStatus          @default(PENDING)
+  publicId             String              @map("public_id") @db.VarChar(255)
+  folder               String              @db.VarChar(128)
+  originalFilename     String              @map("original_filename") @db.VarChar(255)
+  expectedFormat       String              @map("expected_format") @db.VarChar(16)
+  storageResourceType  StorageResourceType @map("storage_resource_type")
+  storageDeliveryType  StorageDeliveryType @map("storage_delivery_type")
+  uploadPreset         String              @map("upload_preset") @db.VarChar(128)
+  idempotencyKey       String?             @map("idempotency_key") @db.VarChar(128)
+  signatureTimestamp   Int                 @map("signature_timestamp")
+  intentExpiresAt      DateTime            @map("intent_expires_at") @db.Timestamptz(3)
+  confirmationAttempts Int                 @default(0) @map("confirmation_attempts")
+  confirmationRetryAt  DateTime?           @map("confirmation_retry_at") @db.Timestamptz(3)
+  assetId              String?             @unique(map: "file_meta_asset_id_key") @map("asset_id") @db.VarChar(255)
+  providerVersion      String?             @map("provider_version") @db.VarChar(64)
+  canonicalUrl         String?             @map("canonical_url") @db.VarChar(2048)
+  mimeType             String?             @map("mime_type") @db.VarChar(128)
+  format               String?             @db.VarChar(16)
+  bytes                Int?
+  width                Int?
+  height               Int?
+  durationSeconds      Float?              @map("duration_seconds")
+  etag                 String?             @db.VarChar(128)
+  confirmedAt          DateTime?           @map("confirmed_at") @db.Timestamptz(3)
+  deletedAt            DateTime?           @map("deleted_at") @db.Timestamptz(3)
+  aggregateVersion     Int                 @default(1) @map("aggregate_version")
+  lastErrorCode        String?             @map("last_error_code") @db.VarChar(64)
+  createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  references           FileReference[]
+
+  @@unique([storageResourceType, storageDeliveryType, publicId], map: "file_meta_storage_identity_key")
+  @@unique([requestedBy, idempotencyKey], map: "file_meta_request_idempotency_key")
+  @@index([requestedBy, createdAt], map: "file_meta_requester_created_idx")
+  @@index([ownerType, ownerId, status], map: "file_meta_owner_status_idx")
+  @@index([status, intentExpiresAt], map: "file_meta_status_expiry_idx")
+  @@index([mediaType, status], map: "file_meta_type_status_idx")
+  @@map("file_meta")
+}
+
+model FileReference {
+  id            String   @id @default(uuid()) @db.Uuid
+  fileId        String   @map("file_id") @db.Uuid
+  callerService String   @map("caller_service") @db.VarChar(64)
+  referenceType String   @map("reference_type") @db.VarChar(64)
+  referenceId   String   @map("reference_id") @db.VarChar(128)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  file          FileMeta @relation(fields: [fileId], references: [id], onDelete: Restrict)
+
+  @@unique([fileId, callerService, referenceType, referenceId], map: "file_reference_identity_key")
+  @@index([callerService, referenceType, referenceId], map: "file_reference_consumer_idx")
+  @@map("file_reference")
+}

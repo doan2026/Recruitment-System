@@ -2,7 +2,7 @@
 
 > Ngày cập nhật: 27/08/2026
 > Nhánh đối chiếu chính: `develop`
-> Nhánh triển khai lần cập nhật: `feature/profile-service/candidate-profile-crud`
+> Nhánh triển khai lần cập nhật: `feature/media-service/signed-upload-ownership`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -20,7 +20,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 | --- | --- | --- |
 | Auth Service | Người 1 | ✅ Core Auth đã hoàn thành gồm đăng ký/OTP, password login, Google OIDC, JWT/JWKS, refresh rotation, logout, reset password, `/auth/me` và Admin account control; account-link Google chỉ còn là hạng mục tùy chọn nếu sản phẩm yêu cầu |
 | User/Profile Service | Người 1 | 🟡 Persistence và Candidate CRUD/completion/auth/Swagger đã hoàn thành; Media, CV APIs/events và recruiter-related read còn pending |
-| File/Media Service | Người 1 | ⏳ Scaffold |
+| File/Media Service | Người 1 | 🟡 Core signed upload/confirm, ownership, reference, private delivery, migration và PostgreSQL test đã hoàn thành; scheduler/reconciliation, live Cloudinary, Offer letter và wiring consumer còn pending |
 | Admin & Statistics Service | Người 1 | ⏳ Scaffold |
 | Company Service | Người 2 | ✅ Nghiệp vụ chính đã merge |
 | Job & Search Service | Người 2 | 🟡 CRUD/search, transactional `job-events` và Redis/BullMQ/Elasticsearch integration đã hoàn thành; AI recommendation còn thiếu |
@@ -62,7 +62,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** sinh signed upload; client upload trực tiếp lên Cloudinary; xác nhận metadata; xóa file đúng quyền; dọn file rác định kỳ.
 - **Chức năng chính:** `POST /files/signature`, `POST /files`, `DELETE /files/:id`, xác minh MIME/dung lượng/thư mục, ownership và trạng thái file.
 - **Phụ thuộc:** Auth; được Profile, Company, Chat, Interview và Application/Offer sử dụng.
-- **Trạng thái:** chỉ có health endpoint, package và Prisma schema base.
+- **Trạng thái:** core signed upload/confirm, canonical provider verification, ownership, reference binding, private delivery, soft delete, migration và PostgreSQL test đã hoàn thành; scheduler/reconciliation, live Cloudinary, malware/deep parser, Offer letter và wiring consumer còn pending.
 
 ## T04 — Admin & Statistics Service
 
@@ -417,6 +417,15 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Swagger có ở `/profile/docs` qua gateway (`/docs` trực tiếp) trong môi trường được bật. Docker PostgreSQL 16.15 sạch đạt **1/1 migration-upgrade check + 8/8 unit test + 23/23 integration test**, gồm safety guard chống test nhầm database, backfill whitespace legacy, migration lặp, completion/rollback, route alias, JWT/JWKS negative kể cả future-`iat`, validation, OpenAPI, IDOR đủ năm collection, Unicode skill, collection cap, 12 vòng race lần ghi đầu, burst sáu writer trên Profile đã tồn tại và duplicate skill concurrent.
 - Phần chưa hoàn thành của P08 vẫn là Media/avatar/CV upload, quản lý/CV Builder/internal CV APIs, recruiter-related read contract và transactional `cv-events` cho AI.
 
+## 2.16 File/Media Service Core — đã hoàn thành và verify qua PR #36
+
+- Hoàn thiện signed upload intent 10 phút và confirm chỉ bằng `fileId`; service tự đọc metadata canonical từ Cloudinary, không tin MIME, size, URL hoặc metadata do client gửi. Policy v1 fail-closed có đúng sáu type `CV`, `AVATAR`, `COMPANY_LOGO`, `COMPANY_IMAGE`, `COMPANY_VIDEO`, `CHAT_ATTACHMENT`; `OFFER_LETTER` chưa được đưa vào để tránh dùng sai policy.
+- Public API dùng strict JWT RS256/role/owner; internal API dùng sáu key riêng, ràng buộc đúng danh tính Profile/Company/Application/Chat/Interview/AI và so sánh constant-time. Gateway công khai route `/files`, xóa internal headers và trả `404` cho mọi biến thể `/files/internal`.
+- Prisma/PostgreSQL quản lý intent, canonical metadata, trạng thái, audit và immutable reference. Idempotency, tối đa 20 intent còn hạn/requester/type, atomic 60 intent/requester/giờ, quota công ty, advisory/row lock, lease 5 phút và `aggregateVersion` fencing bảo vệ confirm/delete đồng thời; quota được kiểm tra lại khi finalize để chặn race vượt TTL.
+- Confirm kiểm tra exact public ID/folder/context, resource/delivery type, format, timestamp, byte size, kích thước ảnh, thời lượng video và tối đa 8 KiB magic bytes cho RAW. CV/attachment dùng private authenticated delivery; file đang được tham chiếu không thể xóa; provider outage có cooldown tăng dần và delete failure có trạng thái retry rõ ràng.
+- Docker Node 24 chạy non-root, fail-fast trước khi listen; root Compose có one-shot `media-migrate`, dependency và biến bắt buộc. Đã verify **12/12 unit + 18/18 TAP integration test** trên PostgreSQL 16.15, migration deploy lần hai không còn pending, schema diff không drift, runtime image/fail-fast và Nginx 1.30.4 `nginx -t` đều đạt; production dependency audit báo 0 vulnerability.
+- Phần chưa hoàn thành của P09 là scheduled cleanup/reconciliation, live smoke với sáu Cloudinary preset thật, malware/deep PDF/DOC/DOCX parser, staging/promote public asset, distributed confirm limiter/active-byte quota/retention, Offer letter, wiring các consumer và tách migrator/runtime credential cùng secret rotation/mTLS.
+
 ---
 
 # 3. Danh sách task CHƯA làm (Pending)
@@ -523,12 +532,14 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## P09 — File/Media Service
 
-- [ ] Tạo migration metadata file và trạng thái upload.
-- [ ] Implement signed upload, confirm upload và delete theo ownership.
-- [ ] Kiểm tra MIME, kích thước, loại tài nguyên và thư mục Cloudinary.
+- [x] Tạo Prisma migration cho metadata, upload intent, trạng thái, audit và immutable reference; kiểm tra migration lặp và schema drift.
+- [x] Implement signed upload, confirm chỉ bằng `fileId`, owner-scoped metadata/download và soft delete theo ownership; có idempotency, quota, rate limit, lease recovery và fencing.
+- [x] Kiểm tra canonical format/MIME policy, byte size, image dimensions, video duration, resource/delivery type, public ID/folder/context và RAW magic bytes; deep parser/malware scan vẫn pending.
 - [ ] Scheduled cleanup cho upload chưa được xác nhận/file rác.
-- [ ] API nội bộ xác minh `file_id` cho Profile, Company, Offer, Chat và Interview.
-- [ ] Test chữ ký hết hạn, file giả mạo, delete đang được tham chiếu và Cloudinary failure.
+- [x] API nội bộ xác minh `file_id`, cấp private download và bind/release reference cho Profile, Company, Application, Chat, Interview và AI theo scope riêng.
+- [ ] Bổ sung media type/contract riêng cho Offer letter; không dùng tạm type khác.
+- [x] Test intent hết hạn, file giả mạo, exact size boundary đủ sáu type, provider outage, delete đang được tham chiếu/failure, stale lease/fencing, rate/quota concurrency trên PostgreSQL 16.
+- [ ] Chạy live smoke với tài khoản Cloudinary và sáu signed preset thật; test hiện dùng fake provider deterministic và Cloudinary SDK/fetch mock.
 
 ## P10 — Admin & Statistics Service
 
@@ -609,11 +620,13 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 ## P15 — Hạ tầng và API Gateway
 
 - [x] Bổ sung route chính thức `/offers/`, giữ nguyên prefix khi forward tới Application Service.
+- [x] Bổ sung route `/files`, chặn case-insensitive internal Media path và xóa internal identity headers tại public gateway; cấu hình Nginx đã qua `nginx -t`.
 - [ ] Bổ sung route chính thức `/bookmarks`; hiện Bookmark đi qua `/applications/bookmarks`.
 - [ ] Xử lý cả URL có và không có dấu `/` cuối, ví dụ `/applications` và `/applications/`.
 - [ ] Thêm healthcheck cho từng service và `depends_on` theo trạng thái healthy.
   - [x] Auth Service có health Actuator thật, trả `503` khi dependency `DOWN/OUT_OF_SERVICE`; Redis có healthcheck/auth và Auth chờ Redis healthy trong Compose.
   - [x] Profile image có healthcheck non-root; Compose chạy `profile-migrate` one-shot và chỉ khởi động Profile sau khi migration thành công.
+  - [x] Media image Node 24 chạy non-root và fail-fast; Compose chạy `media-migrate` one-shot trước runtime, nhưng full Compose toàn hệ thống vẫn chưa smoke test.
 - [ ] Dựng Jitsi self-host đầy đủ: web, Prosody, Jicofo, JVB, domain và TLS.
 - [ ] Quản lý secrets an toàn cho JWT private key, Cloudinary, FCM, SMTP và LLM key.
 - [ ] Cấu hình CORS, rate limit, request ID, timeout và WebSocket upgrade nhất quán.
@@ -650,8 +663,8 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## Thứ tự ưu tiên đề xuất
 
-1. Hoàn thiện File/Media signed upload và ownership verification để mở khóa CV, avatar, logo, attachment và Offer letter.
-2. Hoàn thiện quản lý/CV Builder/internal CV APIs của Profile; core Auth và Candidate Profile CRUD đã hoàn thành.
+1. Hoàn thiện Media scheduler/reconciliation, live Cloudinary smoke và nối Profile CV/avatar; core signed upload/ownership/reference đã hoàn thành, còn Offer letter cần policy riêng.
+2. Hoàn thiện quản lý/CV Builder/internal CV APIs của Profile và tích hợp `fileId`; core Auth và Candidate Profile CRUD đã hoàn thành.
 3. Hoàn thiện Profile/File + contract `cv-events` để triển khai CV consumer; phần Redis/BullMQ/Elasticsearch và reindex hardening của Job Service đã hoàn thành.
 4. Implement recommendation jobs/candidates, nối `GET /jobs/recommended`, rồi bổ sung filter kỹ năng của Application.
 5. Làm Interview, Notification và Chat theo hợp đồng event đã chốt.
@@ -667,19 +680,20 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Completion và `aggregate_version` của Candidate Profile đã được transaction hóa. Quy tắc tối đa năm CV, atomic default handover và CV compare-and-set vẫn chờ task quản lý CV; partial index hiện chỉ bảo đảm tối đa một active default.
 - Application chưa cung cấp usage callback authoritative, nên Profile database đang chặn mọi hard delete để tránh xóa nhầm CV đã nộp. `cv-events` cũng chưa chốt giữa `file_url` trong tài liệu cũ và `file_id` + Media fetch an toàn; outbox/publisher chưa được tạo chủ ý.
 - Quy tắc revision là quyết định an toàn bổ sung: Candidate vẫn có thể mở/chỉnh CV Online, nhưng CV đã dùng sẽ sinh `cv_id` mới thay vì sửa bản Application đã tham chiếu. API/UI clone revision và chuyển default transactionally vẫn pending.
-- `file_url`/avatar URL mới chỉ có constraint HTTPS, chưa chứng minh ownership/MIME/trạng thái hoặc canonical private delivery vì Media Service chưa có API. PostgreSQL toàn hệ thống vẫn dùng shared role; cần tách migrator/runtime role và chặn service khác đọc PII schema `profile` trước production.
+- Media Service đã có API xác minh ownership/type/status, canonical metadata và private delivery, nhưng Profile chưa gọi API này nên `file_url`/avatar hiện vẫn chỉ có constraint HTTPS. PostgreSQL toàn hệ thống vẫn dùng shared role; cần tách migrator/runtime role và chặn service khác đọc PII schema `profile` trước production.
 - Candidate Profile đã có cap transactionally cho từng collection; production vẫn cần distributed rate limit theo user/IP và load test các response ở sát giới hạn trước khi chạy nhiều gateway replica.
 - Root Compose hiện dùng một PostgreSQL chung và tách bằng schema, khác yêu cầu kiến trúc cố định `profile-db` container/database riêng. Compose local còn opt-in JWKS HTTP; production phải dùng HTTPS/mTLS hoặc static PEM được mount tin cậy. Nhóm phải chính thức chấp nhận schema-per-service hoặc tách database/credential trước production.
 - Nhà cung cấp LLM chưa thống nhất giữa tài liệu (Claude) và dependency tùy chọn hiện tại (Gemini); khác biệt này không ảnh hưởng provider `/match` thuần pgvector.
 - `job-events` v1 đã được khóa theo implementation thật với key `job_id`, 16 trường versioned và salary decimal string hai chữ số hoặc `null`. Các topic khác vẫn phải chốt riêng; Event Offer đã bổ sung `actor_id`, `offer_id`, `offer_status`, `offer_version`, còn `recruiter_id` là recruiter gắn với Application/job.
 - Pipeline, Kafka và hợp đồng quyền MEMBER/OWNER đã được kiểm chứng; Application Pipeline dùng quyền toàn công ty, còn quyền sửa/xóa Job vẫn do Job Service kiểm soát.
 - Application Evaluation đã được kiểm chứng với JSONB trên PostgreSQL thật, gồm quyền công ty, validation, chống đánh giá trùng và Candidate privacy; P02 đã merge vào `develop` theo xác nhận của người dùng.
-- Application Offer đã verify đạt 100 unit test và 23 integration test. Event không lộ salary/note/file, nhưng xác minh canonical file metadata và ownership vẫn chờ API nội bộ của File/Media ở P09.
+- Application Offer đã verify đạt 100 unit test và 23 integration test. Event không lộ salary/note/file; Media core đã có internal verify nhưng policy v1 chưa có `OFFER_LETTER` và Application chưa được nối, nên Offer vẫn chưa xác minh canonical file metadata/ownership.
 - Application hiện đạt 173 unit + 35 integration test sau khi bổ sung Bookmark bulk detail; AI Service đạt 159 unit + 29 integration test. Job embedding đã chạy qua Kafka/PostgreSQL thật và model pin thật, nhưng chấm điểm end-to-end vẫn chờ Profile/File + CV consumer.
 - Publisher `job-events` dùng at-least-once: nếu broker đã ACK nhưng process dừng trước khi ghi `published_at`, cùng `event_id` có thể được phát lại; consumer bắt buộc dedupe theo `event_id`/`aggregate_version`.
 - Migration outbox Kafka không tự tạo historical `job-events` cho Job cũ; nếu AI/Statistics cần lịch sử thì vẫn phải có baseline/replay được review riêng trước khi bật producer mới. Riêng Elasticsearch `job_index_v3` dùng cặp marker bền vững `mappings._meta.baselineVersion=3` và `baselineIndexUuid`, tự enqueue/resume baseline cho cả index mới và index tương thích đã tồn tại sau restart. Khi marker chưa hoàn tất, search chuyển sang PostgreSQL và health ở `DEGRADED`; cần theo dõi tải fallback, pending/failed intent và chỉ coi rollout hoàn tất khi health trở lại `UP`.
 - Cấu hình Elasticsearch sai field/type/analyzer hoặc alias trỏ nhiều concrete index hiện bị từ chối trước khi ghi; checklist rollout phải kiểm tra mapping/alias. Graceful shutdown đã release intent nếu gặp race ngay sau claim, nhưng deployment vẫn cần dành thời gian drain dispatcher/worker thay vì kill cưỡng bức.
 - Outbox chưa có job retention tự động; payload chứa cả description/requirements. Các FK từ outbox và `job_index_sync` tới Job đang là `RESTRICT`, nên hard-delete Job sẽ bị chặn; cần chốt soft-delete hoặc thiết kế tombstone intent độc lập trước khi triển khai xóa cứng, không được đổi sang `CASCADE` khi chưa bảo đảm sự kiện/index xóa vẫn được phát.
 - Pipeline chung vẫn cho phép Application ở `OFFER` chuyển thẳng sang `REJECTED` hoặc `WITHDRAWN`; khi đó bản ghi Offer có thể còn `SENT` dù phản hồi tiếp theo đã bị chặn. Cần chốt quy tắc đồng bộ/hủy Offer trong task lifecycle tiếp theo.
-- Docker daemon/Testcontainers đã hoạt động; AI API/worker đã verify migration, non-root, readiness, Kafka 3.8, PostgreSQL 16/pgvector và model thật. Docker Compose toàn hệ thống vẫn chưa được kiểm chứng và hiện thiếu file môi trường runtime của một số service.
+- Media confirm hiện có per-file exponential cooldown và atomic 60 upload intent/requester/giờ, nhưng chưa có distributed token bucket toàn cục cho Cloudinary Admin API; scheduler/reconciliation, live preset smoke, malware/deep parser và staging/promote public asset vẫn là điều kiện trước production.
+- Docker daemon/Testcontainers đã hoạt động; AI API/worker đã verify migration, non-root, readiness, Kafka 3.8, PostgreSQL 16/pgvector và model thật; Media đã verify PostgreSQL 16, runtime image và Nginx riêng. Docker Compose toàn hệ thống vẫn chưa được kiểm chứng và hiện thiếu file môi trường runtime của một số service.
 - Nginx đã có route độc lập `/offers/`; route `/bookmarks` và exact path không có dấu `/` cuối vẫn còn pending.

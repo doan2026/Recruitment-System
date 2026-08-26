@@ -2,7 +2,7 @@ name: recruitment-system
 
 services:
   api-gateway:
-    image: nginx:1.27-alpine
+    image: nginx:1.30.4-alpine
     restart: unless-stopped
     ports:
       - "8080:80"
@@ -248,10 +248,43 @@ services:
     expose:
       - "3000"
 
+  media-migrate:
+    build:
+      context: ./services/media-service
+      target: build
+    user: node
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=media
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: [ "npm", "run", "prisma:migrate:deploy" ]
   media-service:
     build: ./services/media-service
-    env_file:
-      - ./services/media-service/.env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=media
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:?CLOUDINARY_CLOUD_NAME is required}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:?CLOUDINARY_API_KEY is required}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:?CLOUDINARY_API_SECRET is required}
+      CLOUDINARY_UPLOAD_PRESET_CV: ${CLOUDINARY_UPLOAD_PRESET_CV:-recruitment_cv_signed}
+      CLOUDINARY_UPLOAD_PRESET_AVATAR: ${CLOUDINARY_UPLOAD_PRESET_AVATAR:-recruitment_avatar_signed}
+      CLOUDINARY_UPLOAD_PRESET_COMPANY_LOGO: ${CLOUDINARY_UPLOAD_PRESET_COMPANY_LOGO:-recruitment_company_logo_signed}
+      CLOUDINARY_UPLOAD_PRESET_COMPANY_IMAGE: ${CLOUDINARY_UPLOAD_PRESET_COMPANY_IMAGE:-recruitment_company_image_signed}
+      CLOUDINARY_UPLOAD_PRESET_COMPANY_VIDEO: ${CLOUDINARY_UPLOAD_PRESET_COMPANY_VIDEO:-recruitment_company_video_signed}
+      CLOUDINARY_UPLOAD_PRESET_CHAT_ATTACHMENT: ${CLOUDINARY_UPLOAD_PRESET_CHAT_ATTACHMENT:-recruitment_chat_attachment_signed}
+      JWT_JWKS_URI: http://auth-service:8080/auth/.well-known/jwks.json
+      JWT_ALLOW_INSECURE_JWKS: "true"
+      JWT_ISSUER: ${JWT_ISSUER:-https://auth.recruitment.local}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-recruitment-api}
+      INTERNAL_API_KEY_PROFILE: ${MEDIA_INTERNAL_API_KEY_PROFILE:?MEDIA_INTERNAL_API_KEY_PROFILE is required}
+      INTERNAL_API_KEY_COMPANY: ${MEDIA_INTERNAL_API_KEY_COMPANY:?MEDIA_INTERNAL_API_KEY_COMPANY is required}
+      INTERNAL_API_KEY_APPLICATION: ${MEDIA_INTERNAL_API_KEY_APPLICATION:?MEDIA_INTERNAL_API_KEY_APPLICATION is required}
+      INTERNAL_API_KEY_CHAT: ${MEDIA_INTERNAL_API_KEY_CHAT:?MEDIA_INTERNAL_API_KEY_CHAT is required}
+      INTERNAL_API_KEY_INTERVIEW: ${MEDIA_INTERNAL_API_KEY_INTERVIEW:?MEDIA_INTERNAL_API_KEY_INTERVIEW is required}
+      INTERNAL_API_KEY_AI: ${MEDIA_INTERNAL_API_KEY_AI:?MEDIA_INTERNAL_API_KEY_AI is required}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      SWAGGER_ENABLED: "true"
     secrets:
       - source: jwt-public-key
         target: jwt-public.pem
@@ -259,6 +292,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      media-migrate:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_started
     expose:
       - "3000"
 
