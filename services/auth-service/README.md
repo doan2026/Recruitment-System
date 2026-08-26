@@ -4,9 +4,9 @@ Spring Boot 3 / Java 21 service that owns user identities. PostgreSQL stores dur
 
 ## Current status
 
-Candidate/Recruiter registration, OTP verification, password login, Google OIDC, JWT RS256/JWKS, refresh-token rotation, logout, password reset and `GET /auth/me` are implemented. A successful OTP verification signs the user in and returns the same local token pair as password and Google login.
+Candidate/Recruiter registration, OTP verification, password login, Google OIDC, JWT RS256/JWKS, refresh-token rotation, logout, password reset, `GET /auth/me` and internal Admin account control are implemented. A successful OTP verification signs the user in and returns the same local token pair as password and Google login.
 
-The internal Admin lock/unlock API remains pending. Security is stateless and deny-by-default; only health, registration, login/token, password-recovery and Google handshake endpoints are public. Every protected request uses a locally verified access JWT, while `/auth/me` additionally checks the current durable account state.
+Security is stateless and deny-by-default; only health, registration, login/token, password-recovery and Google handshake endpoints are public. Every protected request uses a locally verified access JWT. `/auth/me` and Admin account control additionally recheck the current durable account state in PostgreSQL.
 
 ## Registration API
 
@@ -157,6 +157,45 @@ Password update and revocation of every active refresh session use one PostgreSQ
 
 Compose publishes only the gateway, so the per-IP limiter sees clients directly in the default topology. A deployment behind a trusted load balancer/CDN must configure Nginx Real IP with the trusted proxy CIDRs. The gateway recovery CORS map must stay synchronized with `CORS_ORIGINS`, and a horizontally replicated gateway must use a distributed ingress/WAF limiter when a deployment-wide cap is required.
 
+## Internal Admin account control
+
+`PATCH /auth/users/{userId}/lock` is service-to-service only. Admin Service must forward the acting administrator's Bearer access JWT when calling `http://auth-service:8080` inside the Compose network. Public Nginx deliberately returns `404` for this path, and browser CORS deliberately does not allow `PATCH`.
+
+Locking requires a 1–500 character moderation reason. It is NFC-normalized, stripped of surrounding Unicode whitespace, and rejects control/format characters:
+
+```json
+{ "locked": true, "reason": "Confirmed policy violation" }
+```
+
+Unlocking requires the reason to be omitted or blank:
+
+```json
+{ "locked": false }
+```
+
+A successful request returns only safe mutation metadata and never returns the account email or moderation reason:
+
+```json
+{
+  "data": {
+    "userId": "cb164285-23f6-487e-8028-2598011e86ec",
+    "locked": true,
+    "lockedAt": "2026-08-27T08:15:30Z",
+    "version": 4,
+    "revokedSessionCount": 2
+  },
+  "meta": {}
+}
+```
+
+Spring Security first requires JWT role `ADMIN`. The transaction then rechecks that the JWT subject still exists, is verified, unlocked and still has durable role `ADMIN`. Self-control and all Admin targets are rejected until a reviewed break-glass/hierarchy policy exists. Missing targets return `404`; invalid cross-field input returns `400`; database/transaction outages return generic `503 ACCOUNT_CONTROL_UNAVAILABLE`.
+
+Actor and target User rows are pessimistically locked in UUID order, which serializes login/refresh issuance for the target. The clock is read only after those locks are acquired. A single versioned bulk update revokes every unexpired, unrevoked refresh session with `ADMIN_LOCK` without materializing attacker-controlled session fanout; `is_locked` and the revocations commit atomically. Existing `ROTATED`, `LOGOUT`, `REUSE_DETECTED`, `PASSWORD_RESET` and expired audit rows are preserved. Repeated lock keeps the original reason/timestamp but repairs any stray active session; unlock never revives a revoked refresh token.
+
+The endpoint is an idempotent set-state command and currently uses last-commit-wins semantics; it does not accept `If-Match` or an expected version. Admin Service must serialize moderation commands, or add conditional mutation before exposing workflows where delayed unlocks must be rejected.
+
+Previously issued stateless access JWTs used by other services can remain valid for at most their 15-minute lifetime. Auth does not publish `user-events` because that topic remains an unapproved proposal. Admin Service must record the acting Admin and operation in its append-only AuditLog; production must also provide a controlled Admin provisioning/bootstrap process.
+
 ## Google OIDC login
 
 1. Navigate the browser to `GET /auth/google`.
@@ -271,4 +310,4 @@ docker run --rm --network host \
   mvn clean verify -Pintegration-test
 ```
 
-The integration profile validates Flyway/Hibernate on clean PostgreSQL 16 plus authenticated Redis 7: OTP fencing/rate limits, Google exchange exactly-once, password throttling, password-reset privacy/quota/TTL/supersession/transactions/concurrency, JWT/JWKS and `/auth/me`, refresh lineage/reuse/expiry/concurrency, CORS and fail-closed outages. The final clean run passed **195/195 unit tests and 35/35 integration tests (230/230 total)** with PostgreSQL 16.15, Redis 7 and Testcontainers 1.21.4. The gateway configuration also passes `nginx -t`.
+The integration profile validates Flyway/Hibernate on clean PostgreSQL 16 plus authenticated Redis 7: OTP fencing/rate limits, Google exchange exactly-once, password throttling, password-reset privacy/quota/TTL/supersession/transactions/concurrency, JWT/JWKS and `/auth/me`, refresh lineage/reuse/expiry/concurrency, internal Admin account control, CORS and fail-closed outages. The final clean run passed **215/215 unit tests and 40/40 integration tests (255/255 total)** with PostgreSQL 16.15, Redis 7 and Testcontainers 1.21.4. The gateway configuration also passes `nginx -t`.

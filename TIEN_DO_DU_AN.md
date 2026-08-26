@@ -18,7 +18,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 | Nhóm task | Người phụ trách | Trạng thái hiện tại |
 | --- | --- | --- |
-| Auth Service | Người 1 | 🟡 Đăng ký/OTP, password login, Google OIDC, JWT/JWKS, refresh rotation, logout, reset password và `/auth/me` đã hoàn thành; Admin account control còn thiếu |
+| Auth Service | Người 1 | ✅ Core Auth đã hoàn thành gồm đăng ký/OTP, password login, Google OIDC, JWT/JWKS, refresh rotation, logout, reset password, `/auth/me` và Admin account control; account-link Google chỉ còn là hạng mục tùy chọn nếu sản phẩm yêu cầu |
 | User/Profile Service | Người 1 | ⏳ Scaffold |
 | File/Media Service | Người 1 | ⏳ Scaffold |
 | Admin & Statistics Service | Người 1 | ⏳ Scaffold |
@@ -44,7 +44,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** đăng ký và OTP email; đăng nhập email/mật khẩu; Google OAuth2; refresh-token rotation; quên/đặt lại mật khẩu; cung cấp public key.
 - **Chức năng chính:** quản lý tài khoản, role, trạng thái khóa; access/refresh token; thu hồi phiên; OTP có hạn dùng; public-key endpoint; API nội bộ khóa/mở khóa tài khoản.
 - **Phụ thuộc:** PostgreSQL, Redis, SMTP và Google OAuth. Tất cả service còn lại phụ thuộc hợp đồng JWT của task này.
-- **Trạng thái:** persistence, đăng ký/OTP, password login, Google OIDC, JWT RS256/JWKS, refresh rotation, logout, reset password và `/auth/me` đã hoàn thành. API nội bộ Admin khóa/mở tài khoản vẫn pending; strict JWT contract của từng consumer tiếp tục theo backlog tích hợp liên service.
+- **Trạng thái:** core Auth đã hoàn thành gồm persistence, đăng ký/OTP, password login, Google OIDC, JWT RS256/JWKS, refresh rotation, logout, reset password, `/auth/me` và API nội bộ Admin khóa/mở tài khoản. Account-link Google có re-auth chỉ làm nếu sản phẩm yêu cầu; strict JWT contract của từng consumer tiếp tục theo backlog tích hợp liên service.
 
 ## T02 — User/Profile Service
 
@@ -385,6 +385,16 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Nginx giới hạn riêng recovery `POST` theo client IP 10 request/phút (burst 5) và theo gateway instance 20 request/giây (burst 40), bỏ qua `OPTIONS`/method khác, trả JSON `429` có `Retry-After`, no-store và CORS allowlist. Compose chỉ publish gateway; môi trường có LB/CDN hoặc nhiều gateway replica vẫn phải cấu hình trusted Real IP, đồng bộ gateway allowlist với `CORS_ORIGINS` và dùng distributed ingress/WAF limiter.
 - `clean verify -Pintegration-test` đạt **195/195 unit + 35/35 integration test (230/230 tổng)** với PostgreSQL 16.15, Redis 7 có mật khẩu và Testcontainers 1.21.4. Riêng phần mới thêm 39 unit + 8 integration test, bao phủ privacy, TTL, supersession, quota/rollback Lua thật, bcrypt, revoke đa family, locked account, claim recovery, replay, concurrent reset/refresh và xóa login block. Cấu hình gateway đồng thời đạt `nginx -t`.
 
+## 2.13 Auth Admin Account Control — hoàn thành trên nhánh `feature/auth-service/admin-account-control`
+
+- Bổ sung `PATCH /auth/users/{userId}/lock`: khóa nhận `{"locked":true,"reason":"..."}` với reason NFC, bỏ Unicode whitespace ở hai đầu, cấm control/format character và giới hạn 1–500 ký tự; mở khóa nhận `{"locked":false}` và cấm reason khác blank. Response chỉ có User ID, trạng thái, thời điểm khóa, optimistic version và số session vừa revoke; không trả email hoặc moderation reason.
+- Spring Security yêu cầu access JWT role `ADMIN`, sau đó transaction kiểm tra lại actor theo JWT `sub` vẫn tồn tại, verified, unlocked và có durable role `ADMIN`. Self-control trả `409`; toàn bộ target role Admin tạm bị cấm cho đến khi có chính sách hierarchy/break-glass; target không tồn tại chỉ được lộ sau khi actor đã qua durable authorization.
+- Actor và target User được pessimistic-lock theo UUID, nhờ đó serialize login/refresh issuance của target. Clock chỉ được đọc sau khi giữ User locks, sửa race trong đó refresh thắng trước có thể tạo child sau timestamp capture của request khóa.
+- Chuyển `is_locked` và một versioned bulk update revoke mọi refresh session chưa revoke/chưa hết hạn bằng `ADMIN_LOCK` nằm trong cùng transaction, không materialize lượng session do attacker kiểm soát. Lock lặp giữ nguyên reason/timestamp nhưng vẫn sửa invariant session; unlock không hồi sinh refresh token đã revoke; row `ROTATED`, `LOGOUT`, `REUSE_DETECTED`, `PASSWORD_RESET` và expired được bảo toàn làm audit.
+- Nginx trả `404` cho đường dẫn này ở public gateway và CORS cố ý không mở `PATCH`; P10 Admin Service phải gọi trực tiếp `auth-service:8080` trong mạng Compose, forward JWT Admin và ghi append-only AuditLog. Auth không publish `user-events` vì topic này chưa được nhóm chốt.
+- Access JWT stateless đã phát cho service khác vẫn có thể sống tối đa 15 phút. Production còn phải có quy trình provisioning/bootstrap Admin được kiểm soát; task này không giả định shared internal API key là danh tính Admin.
+- Full `clean verify -Pintegration-test` đạt **215/215 unit + 40/40 integration test (255/255 tổng)** với PostgreSQL 16.15, Redis 7 và Testcontainers 1.21.4. Riêng task mới thêm 20 unit/security + 5 PostgreSQL/HTTP integration test, bao phủ privacy/validation, Unicode/control-character safety, durable role, stale Admin JWT, idempotency, session audit, login/`/auth/me`/refresh sau khóa, unlock, concurrent lock-vs-refresh, fanout 20.000 session, rollback cưỡng bức và matrix-path hardening. Cấu hình gateway đạt `nginx -t`.
+
 ---
 
 # 3. Danh sách task CHƯA làm (Pending)
@@ -471,12 +481,12 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [x] Refresh rotation với absolute family TTL bảy ngày, logout, user-wide revoke khi reuse và chống concurrent fork.
 - [x] Quên/đặt lại mật khẩu bằng token 256-bit TTL 15 phút, newest-accepted-wins, Redis HMAC state không PII, transaction đổi password + revoke active refresh session và generic anti-enumeration response.
 - [x] Rate limit OTP/login/reset bằng Redis Lua, HMAC key không PII và fail-closed khi store lỗi; gateway thêm giới hạn recovery theo IP/instance.
-- [ ] API Admin khóa/mở tài khoản và vô hiệu hóa phiên hiện tại.
+- [x] API nội bộ Admin khóa/mở tài khoản, durable Admin recheck và vô hiệu hóa atomically mọi refresh session còn active.
 - [x] Security stateless/deny-by-default, CORS exact-origin có credentials và no-store cho response nhạy cảm; chỉ public các endpoint health/registration/login/token/password-recovery/Google cần thiết.
 - [x] Docker file-backed secret và script RSA-3072: private key chỉ vào Auth, public key vào các JWT consumer.
 - [x] Unit/integration/security test cho password login, Google Redis flow, JWT/JWKS, `/auth/me`, rotation/reuse/concurrency, CORS và PostgreSQL/Redis thật.
 - [x] Unit/integration/security test cho reset password với PostgreSQL/Redis thật, gồm privacy, quota, TTL, supersession, transaction, session revocation, replay và concurrency.
-- [ ] Unit/integration/security test cho Admin account control sau khi luồng đó được triển khai.
+- [x] Unit/integration/security test cho Admin account control; full Auth verify đạt 215 unit + 40 integration test với PostgreSQL/Redis thật.
 
 ## P08 — User/Profile Service
 
@@ -626,7 +636,8 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## Rủi ro và điểm cần chốt ngay
 
-- Auth đã phát JWT/refresh thật qua OTP, password login và Google OIDC, đồng thời đã có forgot/reset password; phần còn thiếu là Admin account control và account-link Google có re-auth cho email local nếu sản phẩm yêu cầu.
+- Core Auth đã hoàn thành qua OTP, password login, Google OIDC, JWT/refresh, forgot/reset password và Admin account control. Account-link Google có re-auth chỉ là hạng mục tùy chọn; production vẫn cần quy trình provisioning/bootstrap Admin được kiểm soát.
+- Admin account control bị ẩn khỏi public gateway và chưa có AuditLog vì proxy/audit thuộc P10 Admin Service. Access JWT stateless đã phát cho service khác vẫn có thể dùng tối đa 15 phút; chưa có denylist/introspection để thu hồi tức thời toàn hệ thống. API hiện là set-state idempotent theo last-commit-wins và chưa nhận expected version/`If-Match`; P10 phải serialize command hoặc bổ sung conditional mutation nếu nghiệp vụ cần chặn delayed unlock.
 - Password recovery dùng generic response và bounded async SMTP nhưng không cam kết timing tuyệt đối đồng nhất. Rate limit Nginx hiện theo từng gateway instance/client socket; triển khai sau LB/CDN hoặc nhiều replica phải cấu hình trusted Real IP, đồng bộ recovery CORS allowlist và dùng distributed ingress/WAF limiter. Production phải bật SMTP auth cùng STARTTLS bắt buộc.
 - JWT `typ=JWT` hiện tương thích decoder mặc định của Application, nhưng Application/Company/Job chưa cùng enforce đầy đủ issuer, audience, UUID `sub/jti`, role/header contract hoặc rollout previous key; P17/cross-service negative contract test vẫn pending và không được coi là hoàn tất trong task Auth này.
 - Profile chưa có API CV nên Application Submission sẽ lỗi tích hợp dù unit test đã đạt.

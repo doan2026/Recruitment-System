@@ -1,6 +1,8 @@
 package com.recruitment.auth.identity;
 
 import jakarta.persistence.LockModeType;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -17,6 +19,16 @@ public interface AuthUserRepository extends JpaRepository<AuthUser, UUID> {
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   @Query("select authUser from AuthUser authUser where authUser.id = :userId")
   Optional<AuthUser> findByIdForUpdate(@Param("userId") UUID userId);
+
+  @Lock(LockModeType.PESSIMISTIC_WRITE)
+  @Query("""
+      select authUser
+      from AuthUser authUser
+      where authUser.id in :userIds
+      order by authUser.id
+      """)
+  List<AuthUser> findAllByIdForUpdateOrdered(
+      @Param("userIds") Collection<UUID> userIds);
 
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   @Query("""
