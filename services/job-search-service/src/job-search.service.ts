@@ -11,6 +11,7 @@ import {
   JobSearchSort,
   JobSearchSource,
 } from './job-search.dto';
+import { JobIndexingService } from './job-indexing.service';
 import { PrismaService } from './prisma.service';
 
 interface JobSearchDocument {
@@ -52,6 +53,7 @@ export class JobSearchService {
   constructor(
     private readonly prisma: PrismaService,
     config: ConfigService,
+    private readonly indexing: JobIndexingService,
   ) {
     const configuredTimeout = Number(
       config.get<string>('ELASTICSEARCH_REQUEST_TIMEOUT_MS') ?? '2000',
@@ -66,11 +68,17 @@ export class JobSearchService {
       maxRetries: 0,
     });
     this.index = config.get<string>('ELASTICSEARCH_INDEX')?.trim() ||
-      'job_index_v2';
+      'job_index_v3';
   }
 
   async search(query: JobSearchQueryDto): Promise<JobSearchResultDto> {
     this.validateSalaryRange(query);
+    if (!this.indexing.isSearchReady()) {
+      this.logger.warn(
+        'Elasticsearch baseline is not ready; using PostgreSQL fallback',
+      );
+      return this.searchPostgres(query);
+    }
     try {
       return await this.searchElasticsearch(query);
     } catch (error) {

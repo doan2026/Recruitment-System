@@ -5,6 +5,7 @@ import {
   JobSearchSort,
   JobSearchSource,
 } from './job-search.dto';
+import { JobIndexingService } from './job-indexing.service';
 import { JobSearchService } from './job-search.service';
 import { PrismaService } from './prisma.service';
 
@@ -54,9 +55,11 @@ describe('JobSearchService', () => {
   let service: JobSearchService;
   let elasticSearch: jest.Mock;
   let transaction: jest.Mock;
+  let indexReady: jest.Mock;
 
   beforeEach(() => {
     transaction = jest.fn();
+    indexReady = jest.fn().mockReturnValue(true);
     const prisma = {
       job: {
         count: jest.fn(),
@@ -70,6 +73,7 @@ describe('JobSearchService', () => {
         ELASTICSEARCH_NODE: 'http://elasticsearch:9200',
         ELASTICSEARCH_INDEX: 'job_index',
       }),
+      { isSearchReady: indexReady } as unknown as JobIndexingService,
     );
     elasticSearch = jest.fn();
     Object.assign(service, { elastic: { search: elasticSearch } });
@@ -144,6 +148,20 @@ describe('JobSearchService', () => {
     expect(result.facets.locations).toEqual({ 'Ha Noi': 1 });
     expect(transaction).toHaveBeenCalledTimes(1);
   });
+
+  it(
+    'uses PostgreSQL while the Elasticsearch baseline is incomplete',
+    async () => {
+      indexReady.mockReturnValue(false);
+      transaction.mockResolvedValue([1, [publishedJob()]]);
+
+      const result = await service.search(query());
+
+      expect(result.source).toBe(JobSearchSource.POSTGRESQL);
+      expect(elasticSearch).not.toHaveBeenCalled();
+      expect(transaction).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('rejects an inverted salary range before querying a backend', async () => {
     await expect(

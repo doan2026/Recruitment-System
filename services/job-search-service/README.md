@@ -15,6 +15,7 @@ Nginx strips the `/jobs` gateway prefix before forwarding requests.
 | `GET /reindex/failures` | `GET /jobs/reindex/failures` | ADMIN |
 | `POST /reindex/failures/retry` | `POST /jobs/reindex/failures/retry` | ADMIN |
 | `GET /stats/active?company_id=` | `GET /jobs/stats/active?company_id=` | Internal |
+| `POST /details/bulk` | `POST /jobs/details/bulk` | Internal |
 | `GET /:id/exists` | `GET /jobs/:id/exists` | Internal |
 | `GET /:id` | `GET /jobs/:id` | Public, PUBLISHED only |
 | `PUT /:id` | `PUT /jobs/:id` | OWNER or creating MEMBER |
@@ -47,11 +48,20 @@ or repeated `skills`, `experienceYears`, `jobType`, `companyId`, `sort`,
 If Elasticsearch is unavailable or the index has not been created yet, the
 request falls back to PostgreSQL. PostgreSQL facets describe the returned page;
 Elasticsearch facets describe the complete filtered result set.
+Search also stays on PostgreSQL while an Elasticsearch baseline is incomplete.
+During that window `GET /health` reports `DEGRADED` with
+`searchIndexReady=false`; after the durable baseline completes it reports
+`UP` with `searchIndexReady=true` and search can use Elasticsearch.
 The Elasticsearch request timeout defaults to two seconds and is configurable
 with `ELASTICSEARCH_REQUEST_TIMEOUT_MS`.
-`ELASTICSEARCH_INDEX` defaults to the new versioned index `job_index_v2`.
+`ELASTICSEARCH_INDEX` defaults to the new versioned index `job_index_v3`.
 Never point this release at the legacy `job_index`: its strict mapping and
 internal document versions are incompatible with the new projection contract.
+At startup the service validates the strict mapping contract, all required
+field types/analyzers/keyword multifields (including usable `index` and
+`doc_values` settings), and the required `vietnamese_text` analyzer definition.
+A configured alias is accepted only when it resolves to
+one compatible concrete index; aliases with multiple targets are rejected.
 
 Every event-producing mutation increments the Job's positive
 `aggregate_version` and writes an immutable outbox row in the same PostgreSQL
@@ -101,9 +111,11 @@ Redis returns, and graceful shutdown does not wait forever on a cold outage.
 
 The worker reads PostgreSQL as the source of truth. It writes complete documents
 for current, non-expired `PUBLISHED` jobs and minimal non-searchable tombstones
-for every other status. Elasticsearch external versioning uses
-`aggregateVersion`, so an older concurrent task cannot overwrite a newer
-document or tombstone. Search explicitly filters `searchable=true`.
+for every other status. Each Elasticsearch document carries
+`aggregateVersion` and `indexGeneration`. An atomic scripted update compares
+that pair lexicographically, so an older generation of the same aggregate
+version cannot overwrite a newer document or tombstone. Search explicitly
+filters `searchable=true`.
 
 BullMQ retries processing with exponential backoff. After its final attempt,
 the same PostgreSQL sync row stores `failed_at`, a sanitized `last_error`, and
@@ -111,19 +123,37 @@ the attempt count as a durable dead letter. Admins can inspect failures through
 `GET /jobs/reindex/failures` and replay them through
 `POST /jobs/reindex/failures/retry`. BullMQ also retains a bounded failed-job
 history for diagnostics. `POST /jobs/reindex` increments a dispatch generation
-and reconciles every Job status idempotently; it never synthesizes Kafka domain
-events.
+and reconciles every Job status idempotently; each page of at most 200 Jobs is
+upserted with one set-based PostgreSQL statement instead of sequential writes.
+The dispatcher stops claiming new rows as soon as graceful shutdown begins.
+Both new and pre-existing compatible indices use persistent mapping metadata:
+`_meta.baselineVersion` and `_meta.baselineIndexUuid`. If either marker is
+missing, stale, or does not match the physical index UUID, startup queues a full
+baseline and keeps search unready. A crash before completion leaves the marker
+incomplete, so the next process restart safely resumes. The concrete index is
+refreshed before the marker is written; the service then revalidates its name,
+physical UUID, and marker before enabling Elasticsearch search. This makes the
+baseline documents search-visible when completion succeeds and prevents a
+replacement index from accepting a marker bound to the previous UUID. Alias or
+index target changes still require the drain-and-restart procedure below.
+Reindexing never synthesizes Kafka domain events.
 
 The migrations intentionally do not invent historical Kafka events or index
 intents. A populated environment must complete this release checklist:
 
 1. Stop and drain every old Job Service instance so no legacy writer remains.
 2. Apply the migration separately and configure the service with a new empty
-   `ELASTICSEARCH_INDEX=job_index_v2`; do not reuse the legacy `job_index`.
-3. Run an environment-specific baseline/replay plan that has been reviewed for
-   duplicate and ordering behavior.
-4. Start the new service, call `POST /jobs/reindex`, and wait until every
-   durable index-sync row is completed with no failed rows.
+   `ELASTICSEARCH_INDEX=job_index_v3`; do not reuse the legacy `job_index`.
+   If this setting is an alias, stop and drain all instances before changing
+   its target, then restart every instance so the new concrete index is
+   resolved, fully validated, and baseline-gated.
+3. Run an environment-specific historical Kafka/AI baseline or replay plan that
+   has been reviewed for duplicate and ordering behavior. Elasticsearch v3 is
+   baselined automatically by the service in the next step.
+4. Start the new service. Its new-index bootstrap queues the Elasticsearch
+   baseline automatically; calling `POST /jobs/reindex` remains a safe,
+   idempotent reconciliation. Wait until every durable index-sync row is
+   completed with no failed rows.
 5. Verify the Elasticsearch and AI projection/version baselines before
    restoring normal traffic.
 6. Retain the legacy index for the agreed rollback window, then remove it using
@@ -137,6 +167,16 @@ application. It must send `X-Internal-Api-Key` matching `INTERNAL_API_KEY`.
 The response distinguishes a missing job, a non-published job, and a passed
 deadline, and includes `companyId`, `recruiterId`, and `jobTitle` when the
 job exists.
+
+Application Service resolves bookmark lists through `POST /details/bulk` with
+the same internal API key. The body contains `jobIds`, from one to 100 unique
+UUIDs. The response preserves requested order for visible records, returns the
+full public-safe Job detail projection, and reports the remaining identifiers
+in `unavailableJobIds`. `PUBLISHED`, `CLOSED`, and `EXPIRED` Jobs stay visible
+so an existing bookmark remains understandable; missing and moderation-only
+statuses are unavailable and their private fields are not exposed. Every
+returned item includes `acceptingApplications` and `availabilityReason`, so a
+passed deadline or non-published lifecycle state is explicit.
 
 Application Service reads the Recruiter Dashboard active-job total from
 `GET /stats/active?company_id=<uuid>` using the same internal API key. The
@@ -152,11 +192,12 @@ npm test
 npm run build
 ```
 
-The verified local suite contains 39 unit tests. The isolated Docker gate
+The verified local suite contains 57 unit tests. The isolated Docker gate
 applies migrations to disposable PostgreSQL 16 and starts Kafka 3.8, authenticated
 Redis 7, and Elasticsearch 8.14.3 with index auto-creation disabled. It runs
-ten integration tests: one transaction/order/delivery outbox test and nine
-indexing, search, ordering, reindex, retry/dead-letter, and recovery tests:
+13 integration tests: one transaction/order/delivery outbox test, one
+PostgreSQL bulk-detail contract test, and 11 indexing, search, ordering,
+reindex, retry/dead-letter, outage, recovery, and restart tests:
 
 ```bash
 docker compose -f compose.test.yml up \

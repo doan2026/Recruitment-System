@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  HttpCode,
   HttpStatus,
   Param,
   Patch,
@@ -40,6 +41,11 @@ import {
 } from './job.dto';
 import { ActiveJobStatsDto } from './job-stats.dto';
 import { JobAvailabilityDto } from './job-availability.dto';
+import {
+  BulkJobDetailRequestDto,
+  BulkJobDetailResultDto,
+  JobDetailDto,
+} from './job-detail.dto';
 import {
   JobSearchItemDto,
   JobSearchQueryDto,
@@ -97,11 +103,20 @@ const activeJobStatsEnvelope = {
     meta: { type: 'object', nullable: true },
   },
 };
+const bulkJobDetailEnvelope = {
+  type: 'object',
+  properties: {
+    data: { $ref: getSchemaPath(BulkJobDetailResultDto) },
+    meta: { type: 'object', nullable: true },
+  },
+};
 
 @ApiTags('jobs')
 @ApiExtraModels(
   JobDto,
   JobAvailabilityDto,
+  JobDetailDto,
+  BulkJobDetailResultDto,
   ActiveJobStatsDto,
   JobSearchItemDto,
   JobSearchResultDto,
@@ -116,8 +131,17 @@ export class JobController {
   @Public()
   @Get('health')
   @ApiOperation({ summary: 'Job Service health check' })
-  health(): { service: string; status: string } {
-    return { service: 'job-search-service', status: 'UP' };
+  health(): {
+    service: string;
+    status: string;
+    searchIndexReady: boolean;
+  } {
+    const searchIndexReady = this.indexing.isSearchReady();
+    return {
+      service: 'job-search-service',
+      status: searchIndexReady ? 'UP' : 'DEGRADED',
+      searchIndexReady,
+    };
   }
   @Post()
   @Roles(SystemRole.RECRUITER)
@@ -208,6 +232,24 @@ export class JobController {
     @Query('company_id', COMPANY_ID_PIPE) companyId: string,
   ): Promise<ActiveJobStatsDto> {
     return this.jobs.getActiveJobStats(companyId);
+  }
+
+  @Internal()
+  @Post('details/bulk')
+  @HttpCode(HttpStatus.OK)
+  @ApiHeader({
+    name: 'X-Internal-Api-Key',
+    required: true,
+    description: 'Shared service-to-service secret',
+  })
+  @ApiOperation({
+    summary: 'Resolve public-safe job details for internal consumers',
+  })
+  @ApiOkResponse({ schema: bulkJobDetailEnvelope })
+  getBulkDetails(
+    @Body() dto: BulkJobDetailRequestDto,
+  ): Promise<BulkJobDetailResultDto> {
+    return this.jobs.getBulkDetails(dto.jobIds);
   }
 
   @Internal()
