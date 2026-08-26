@@ -212,9 +212,10 @@ class RegistrationPostgresRedisIT {
 
     verifyOtp(EMAIL, attempt.registrationId(), attempt.code())
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.email").value(EMAIL))
-        .andExpect(jsonPath("$.data.role").value("CANDIDATE"))
-        .andExpect(jsonPath("$.data.verified").value(true))
+        .andExpect(jsonPath("$.data.user.email").value(EMAIL))
+        .andExpect(jsonPath("$.data.user.role").value("CANDIDATE"))
+        .andExpect(jsonPath("$.data.accessToken").isString())
+        .andExpect(jsonPath("$.data.refreshToken").isString())
         .andExpect(content().string(not(containsString(attempt.code()))));
 
     AuthUser verified = users.findByNormalizedEmail(EMAIL).orElseThrow();
@@ -321,8 +322,8 @@ class RegistrationPostgresRedisIT {
         .andExpect(jsonPath("$.code").value("OTP_INVALID_OR_EXPIRED"));
     verifyOtp(EMAIL, superseded.registrationId(), codes.getLast())
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.role").value("RECRUITER"))
-        .andExpect(jsonPath("$.data.verified").value(true));
+        .andExpect(jsonPath("$.data.user.role").value("RECRUITER"))
+        .andExpect(jsonPath("$.data.refreshToken").isString());
   }
 
   @Test
@@ -357,7 +358,7 @@ class RegistrationPostgresRedisIT {
 
     verifyOtp(EMAIL, victim.registrationId(), victim.code())
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.role").value("RECRUITER"));
+        .andExpect(jsonPath("$.data.user.role").value("RECRUITER"));
     register(EMAIL, THIRD_PASSWORD, "CANDIDATE")
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("EMAIL_ALREADY_REGISTERED"));
@@ -464,7 +465,7 @@ class RegistrationPostgresRedisIT {
 
     verifyOtp(EMAIL, registrationId, code)
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.role").value("RECRUITER"));
+        .andExpect(jsonPath("$.data.user.role").value("RECRUITER"));
   }
 
   @Test
@@ -588,7 +589,7 @@ class RegistrationPostgresRedisIT {
     assertThat(codes).hasSize(2);
     verifyOtp(EMAIL, recovered.registrationId(), recovered.code())
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.verified").value(true));
+        .andExpect(jsonPath("$.data.accessToken").isString());
   }
 
   @Test
@@ -610,9 +611,11 @@ class RegistrationPostgresRedisIT {
     mvc.perform(post("/auth/login")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{}"))
-        .andExpect(status().isForbidden());
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     mvc.perform(get("/actuator/info"))
-        .andExpect(status().isForbidden());
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"));
 
     registerAttempt(EMAIL, PASSWORD, "RECRUITER", "OTP_REQUIRED");
   }
