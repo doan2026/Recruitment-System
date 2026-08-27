@@ -2,6 +2,7 @@ package com.recruitment.application.tracking;
 
 import com.recruitment.application.domain.ApplicationEntity;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 
@@ -10,5 +11,10 @@ public interface ApplicationTrackingRepository
 
     List<ApplicationEntity> findAllByCandidateIdOrderByAppliedAtDesc(
         UUID candidateId
+    );
+
+    Optional<ApplicationEntity> findByIdAndCompanyId(
+        UUID id,
+        UUID companyId
     );
 }

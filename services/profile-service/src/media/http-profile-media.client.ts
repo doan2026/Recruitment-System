@@ -13,6 +13,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 3000;
 const MIN_REQUEST_TIMEOUT_MS = 100;
 const MAX_REQUEST_TIMEOUT_MS = 10_000;
 const MAX_JSON_RESPONSE_BYTES = 64 * 1024;
+const MAX_DOWNLOAD_TTL_MS = 10 * 60 * 1000;
 const PROFILE_SERVICE_NAME = 'profile-service';
 
 const UUID_V4_PATTERN =
@@ -154,9 +155,15 @@ export class HttpProfileMediaClient extends ProfileMediaClient {
       throw this.badResponse();
     }
     const url = this.parseHttpsUrl(data.url);
+    const now = Date.now();
+    const expiresAt =
+      typeof data.expiresAt === 'string'
+        ? Date.parse(data.expiresAt)
+        : Number.NaN;
     if (
       !this.isDateTime(data.expiresAt) ||
-      Date.parse(data.expiresAt) <= Date.now()
+      expiresAt <= now ||
+      expiresAt > now + MAX_DOWNLOAD_TTL_MS
     ) {
       throw this.badResponse();
     }

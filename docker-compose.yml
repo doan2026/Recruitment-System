@@ -142,6 +142,9 @@ services:
     build: ./services/application-service
     env_file:
       - ./services/application-service/.env
+    environment:
+      PROFILE_INTERNAL_API_KEY: ${PROFILE_INTERNAL_API_KEY_APPLICATION:?PROFILE_INTERNAL_API_KEY_APPLICATION is required}
+      INTERNAL_API_KEY_PROFILE: ${APPLICATION_INTERNAL_API_KEY_PROFILE:?APPLICATION_INTERNAL_API_KEY_PROFILE is required}
     secrets:
       - source: jwt-public-key
         target: jwt-public.pem
@@ -195,6 +198,7 @@ services:
       JWT_AUDIENCE: ${JWT_AUDIENCE:-recruitment-api}
       MEDIA_SERVICE_URL: http://media-service:3000
       MEDIA_INTERNAL_API_KEY: ${MEDIA_INTERNAL_API_KEY_PROFILE:?MEDIA_INTERNAL_API_KEY_PROFILE is required}
+      INTERNAL_API_KEY_APPLICATION: ${PROFILE_INTERNAL_API_KEY_APPLICATION:?PROFILE_INTERNAL_API_KEY_APPLICATION is required}
       MEDIA_REQUEST_TIMEOUT_MS: ${PROFILE_MEDIA_REQUEST_TIMEOUT_MS:-3000}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       SWAGGER_ENABLED: "true"

@@ -1,6 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from '../common/auth/auth.decorators';
+import { InternalAuthService } from '../common/auth/internal-auth.service';
 import { JwtVerifierService } from '../common/auth/jwt-verifier.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -10,6 +11,7 @@ export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtVerifier: JwtVerifierService,
+    private readonly internalAuth: InternalAuthService,
   ) {}
 
   @Public()
@@ -25,6 +27,7 @@ export class HealthController {
   })
   async health(): Promise<{ service: string; status: string }> {
     this.jwtVerifier.assertConfiguration();
+    this.internalAuth.assertConfiguration();
     await this.prisma.$queryRaw`SELECT 1`;
     return { service: 'profile-service', status: 'UP' };
   }

@@ -7,6 +7,11 @@ export interface AuthUser {
   claims: Record<string, unknown>;
 }
 
+export interface InternalCaller {
+  service: 'application-service';
+}
+
 export interface AuthenticatedRequest extends Request {
   user?: AuthUser;
+  internalCaller?: InternalCaller;
 }
