@@ -437,7 +437,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Đã verify **17/17 unit + 26/26 TAP integration test** bằng image Node 24 và PostgreSQL 16 thật: cycle election/lease loss/watchdog/error path, cycle/job lease-expiry CAS, queue priority, lifecycle expire/recover, exact orphan ẩn khỏi context, canonical/sibling reconciliation, clean-pass reset, delete retry, outage recovery, lease reclaim/fencing, trigger audit, timeout cancellation và pagination. Migration deploy lần hai không pending; Prisma schema diff không drift.
 - Metadata `EXPIRED/REJECTED/DELETED`, cleanup job và audit event hiện được giữ để truy vết. Chính sách archive/retention, live Cloudinary smoke, alert vận hành và tải thật vẫn là hardening pending; task này không tuyên bố Media production-ready.
 
-## 2.18 Profile–Media Avatar & Uploaded CV Integration — đã hoàn thành và verify
+## 2.18 Profile–Media Avatar & Uploaded CV Integration — đã merge vào `develop` qua PR #38
 
 - Bổ sung `avatar_media_reference_id` cho Profile và `media_reference_id` nullable unique cho CV. Migration giữ nguyên avatar/CV URL legacy, còn CV upload mới bắt buộc `file_url=NULL` và có immutable Media reference; trigger CV đã dùng khóa thêm reference này. Upgrade test chứng minh dữ liệu cũ không bị viết lại hoặc mất.
 - Profile dùng internal Media client có service-specific key, timeout, redirect deny, giới hạn response 64 KiB và validation exact envelope/echoed ID. Chỉ file `ACTIVE`, owner `USER` đúng JWT subject và đúng type mới được chấp nhận; avatar phải public HTTPS, CV phải private và không có stable URL. Các status có thể làm lộ sự tồn tại file được gom thành `422 MEDIA_FILE_INVALID`.
