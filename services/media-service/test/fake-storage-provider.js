@@ -28,8 +28,10 @@ class FakeStorageProvider extends StorageProvider {
     this.failInspect = false;
     this.failDelete = false;
     this.inspectDelayMs = 0;
+    this.deleteDelayMs = 0;
     this.inspectHook = null;
     this.deleteHook = null;
+    this.deleteOptions = [];
   }
 
   assertConfiguration() {}
@@ -82,7 +84,7 @@ class FakeStorageProvider extends StorageProvider {
     if (this.failInspect) {
       throw new StorageUnavailableError('simulated lookup outage');
     }
-    const asset = this.assets.get(locator.publicId);
+    const asset = this.assets.get(this.assetKey(locator));
     if (!asset) {
       throw new StorageAssetNotFoundError('simulated missing asset');
     }
@@ -94,32 +96,80 @@ class FakeStorageProvider extends StorageProvider {
     };
   }
 
-  async deleteAsset(locator) {
+  async deleteAsset(locator, options = {}) {
     this.deleteCalls.push(locator.publicId);
+    this.deleteOptions.push(options);
     if (this.deleteHook) {
       await this.deleteHook(locator);
+    }
+    if (this.deleteDelayMs > 0) {
+      if (
+        options.timeoutMs !== undefined &&
+        this.deleteDelayMs > options.timeoutMs
+      ) {
+        throw new StorageUnavailableError(
+          'simulated delete timeout',
+        );
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, this.deleteDelayMs),
+      );
     }
     if (this.failDelete) {
       throw new StorageUnavailableError('simulated delete outage');
     }
-    this.assets.delete(locator.publicId);
+    return this.assets.delete(this.assetKey(locator));
   }
 
-  async deleteIntentAssets(contextFileId) {
-    const matches = [...this.assets.values()].filter(
-      (asset) => asset.contextFileId === contextFileId,
+  async deleteIntentAssets(contextFileId, options = {}) {
+    await this.reconcileIntentAssets(
+      contextFileId,
+      null,
+      options,
     );
-    await Promise.all(
-      matches.map((asset) =>
-        this.deleteAsset({
-          publicId: asset.publicId,
-          resourceType: asset.resourceType,
-          deliveryType: asset.deliveryType,
-          expectedFormat: asset.format,
-          contextFileId,
-        }),
+  }
+
+  async reconcileIntentAssets(
+    contextFileId,
+    preserve,
+    options = {},
+  ) {
+    const matches = [...this.assets.values()].filter(
+      (asset) =>
+        asset.contextFileId === contextFileId &&
+        asset.contextVisible !== false,
+    );
+    const isExpected = (asset) =>
+      preserve &&
+      asset.publicId === preserve.publicId &&
+      asset.resourceType === preserve.resourceType &&
+      asset.deliveryType === preserve.deliveryType &&
+      asset.format === preserve.expectedFormat &&
+      (preserve.expectedAssetId === undefined ||
+        asset.assetId === preserve.expectedAssetId);
+    const unexpected = matches.filter(
+      (asset) => !isExpected(asset),
+    );
+    const deletionResults = await Promise.all(
+      unexpected.map((asset) =>
+        this.deleteAsset(
+          {
+            publicId: asset.publicId,
+            resourceType: asset.resourceType,
+            deliveryType: asset.deliveryType,
+            expectedFormat: asset.format,
+            contextFileId,
+          },
+          options,
+        ),
       ),
     );
+    return {
+      observedAssets: matches.length,
+      deletedAssets: deletionResults.filter(Boolean).length,
+      preservedExpectedAsset:
+        Boolean(preserve) && matches.some(isExpected),
+    };
   }
 
   createDownloadUrl(locator, filename, expiresAt, canonicalUrl) {
@@ -190,8 +240,16 @@ class FakeStorageProvider extends StorageProvider {
       sample: defaultSample,
       ...overrides,
     };
-    this.assets.set(file.publicId, resource);
+    this.assets.set(this.assetKey(resource), resource);
     return resource;
+  }
+
+  assetKey(locator) {
+    return [
+      locator.resourceType,
+      locator.deliveryType,
+      locator.publicId,
+    ].join(':');
   }
 }
 

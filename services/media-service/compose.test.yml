@@ -20,6 +20,7 @@ services:
     environment:
       DATABASE_URL: postgresql://media_test:media_test_password@postgres-test:5432/media_test?schema=media
       ALLOW_MEDIA_SCHEMA_RESET: "true"
+      MEDIA_CLEANUP_ENABLED: "false"
       TZ: Asia/Ho_Chi_Minh
     depends_on:
       postgres-test:

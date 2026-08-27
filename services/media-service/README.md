@@ -12,17 +12,19 @@ Media Service là nguồn dữ liệu gốc cho metadata file và là service du
 - kiểm tra kích thước ảnh, thời lượng video và magic bytes có giới hạn 8 KiB cho file RAW;
 - public metadata/download, private download URL, soft delete và reference binding;
 - confirmation/delete fencing bằng `aggregateVersion`, lease recovery và exponential cooldown khi provider tạm lỗi;
+- scheduled cleanup/reconciliation bền vững cho intent hết hạn, object orphan/sibling, file bị reject và delete retry;
+- cycle election cùng heartbeat/fencing trên PostgreSQL, job lease bằng `SKIP LOCKED`, retry vô hạn có capped backoff và audit append-only;
 - API nội bộ phân quyền theo từng service;
 - Prisma migration, database constraints/trigger, Docker image non-root, migration job và gateway route;
 - unit test cùng integration test trên PostgreSQL 16.
 
 Chưa thuộc phạm vi đã hoàn thành:
 
-- scheduler dọn intent/file rác và reconciliation Cloudinary chạy nền;
 - live smoke test với tài khoản Cloudinary và sáu preset thật;
 - malware scanning và parser sâu cho PDF/DOC/DOCX;
 - staging/promote trước khi public asset được phục vụ;
-- distributed rate limit/token bucket cho confirm theo user/IP/toàn hệ thống và active-byte quota/retention;
+- distributed rate limit/token bucket cho confirm/cleanup theo user/IP/toàn hệ thống, active-byte quota và cảnh báo backlog;
+- chính sách archive/retention cho metadata, cleanup job và cleanup audit event;
 - media type/contract cho Offer letter;
 - wiring client ở Profile, Company, Chat, Application, Interview và AI;
 - tách database/runtime role, secret rotation và mTLS cho internal API.
@@ -135,11 +137,39 @@ PENDING -> VERIFYING -> ACTIVE
 - Idempotency key dài 8–128 ký tự safe; replay chỉ hợp lệ với cùng producer, owner, type và filename.
 - Quota logo/image/video tính cả reservation `PENDING`/`VERIFYING` chưa hết hạn; bước finalize khóa lại cùng scope và đếm `ACTIVE` để không vượt quota khi một confirm kéo dài qua TTL.
 - Transaction dùng PostgreSQL advisory/row lock ở `READ COMMITTED` và retry lỗi serialization/deadlock.
-- `VERIFYING` và `DELETE_PENDING` có lease 5 phút; `aggregateVersion` đóng vai trò fencing token nên worker giữ lease cũ không thể ghi đè worker đã renew. Hiện lease chỉ được khôi phục khi request confirm/delete mới tới.
+- `VERIFYING` và `DELETE_PENDING` có lease 5 phút; `aggregateVersion` đóng vai trò fencing token nên worker giữ lease cũ không thể ghi đè worker đã renew. Request mới và cleanup scheduler đều có thể khôi phục lease stale.
 - Provider lookup thất bại đưa file về `PENDING` với cooldown 5–60 giây tăng theo số lần thử; đây không thay thế distributed rate limit cho Cloudinary Admin API.
 - Delete provider failure chuyển `DELETE_FAILED` và có thể retry.
 
 Bind reference và transaction ở service consumer không phải distributed transaction. Consumer cần chiến lược bind-before-use và compensation/retry nếu domain commit thất bại.
+
+## Scheduled cleanup và reconciliation
+
+Root Compose bật scheduler theo mặc định; nếu chạy ứng dụng mà không khai báo `MEDIA_CLEANUP_ENABLED`, scheduler fail-safe ở trạng thái tắt. Mỗi cycle thực hiện:
+
+1. dùng giờ `clock_timestamp()` của PostgreSQL để chuyển `PENDING` hết hạn sang `EXPIRED`, khôi phục `VERIFYING` stale và phát hiện job còn thiếu;
+2. ưu tiên `FILE_DELETE`, sau đó `ORPHAN_PURGE`, cuối cùng mới đến `SIBLING_SWEEP` để backlog lịch sử không chặn xóa file khẩn cấp;
+3. claim job bằng `FOR UPDATE SKIP LOCKED`, tăng fencing token và xử lý object theo exact locator trước khi quét context `file_id`;
+4. phân trang Cloudinary Admin API tối đa 5 trang × 100 object trên mỗi resource type, dùng `fetch` với `AbortSignal` để timeout hoặc mất cycle lease có thể hủy request thật;
+5. chỉ đánh dấu reconciliation thành công sau hai clean pass cách nhau một khoảng ổn định. Lỗi provider được retry vô hạn với exponential backoff có trần, tránh biến outage dài thành object rác vĩnh viễn.
+
+Cycle leader được bầu bằng lease PostgreSQL và heartbeat. Watchdog cục bộ abort trước hạn nếu heartbeat bị treo; heartbeat lỗi/mất lease cũng dừng discovery/claim mới và không complete lease cũ. Cycle complete và job finalize đều CAS `lease_until > clock_timestamp()`, nên owner hết hạn không thể thắng trong khe thời gian trước lúc worker khác reclaim. Log kết quả cycle có `dueJobsRemaining`, `nonTerminalJobs` và `oldestDueAt` để theo dõi backlog.
+
+| Biến | Mặc định | Giới hạn/ý nghĩa |
+| --- | ---: | --- |
+| `MEDIA_CLEANUP_ENABLED` | `false` trong app, `true` ở root Compose | Bật/tắt scheduler |
+| `MEDIA_CLEANUP_INTERVAL_SECONDS` | 300 | 30–3600 giây giữa hai cycle |
+| `MEDIA_CLEANUP_BATCH_SIZE` | 5 | 1–20 job/cycle |
+| `MEDIA_CLEANUP_LEASE_SECONDS` | 300 | 60–1800 giây và tối thiểu `7 × provider timeout + 10` |
+| `MEDIA_CLEANUP_PROVIDER_TIMEOUT_SECONDS` | 20 | 1–60 giây cho mỗi request provider |
+| `MEDIA_CLEANUP_RETRY_BASE_SECONDS` | 30 | 5–3600 giây |
+| `MEDIA_CLEANUP_RETRY_MAX_SECONDS` | 21600 | 30–86400 giây và không nhỏ hơn retry base |
+| `MEDIA_CLEANUP_PROVIDER_GRACE_SECONDS` | 300 | 60–3600 giây sau cửa sổ upload trước khi sweep |
+| `MEDIA_CLEANUP_CLEAN_INTERVAL_SECONDS` | 60 | 10–3600 giây giữa hai clean pass |
+| `MEDIA_CLEANUP_EXPIRED_RETENTION_SECONDS` | 86400 | 3600–604800 giây trước khi purge intent hết hạn |
+| `MEDIA_CLEANUP_STARTUP_JITTER_SECONDS` | 30 | 0–300 giây |
+
+Mặc định 5 claim/5 phút được giữ bảo thủ để không vượt ngân sách Cloudinary Admin API; không nên tăng chỉ để xả backlog khi chưa biết giới hạn plan. Production cần alert theo ba trường backlog nói trên và chốt distributed provider-rate budget. Metadata `EXPIRED/REJECTED/DELETED`, cleanup job và event hiện được giữ để audit; task archive/retention vẫn pending.
 
 ## Cloudinary
 
@@ -192,7 +222,7 @@ docker compose -p recruitment-media-test-local -f compose.test.yml down -v --rem
 docker compose -p recruitment-media-test-local -f compose.test.yml up --build --abort-on-container-exit --exit-code-from media-tests
 ```
 
-Kết quả xác nhận gần nhất: **12/12 unit + 18/18 TAP integration test**. Integration test dùng PostgreSQL 16 thật và `FakeStorageProvider` deterministic; Cloudinary adapter được unit-test bằng SDK/fetch mock. Đây không phải live Cloudinary integration test.
+Kết quả xác nhận gần nhất: **17/17 unit + 26/26 TAP integration test**. Integration test dùng PostgreSQL 16 thật và `FakeStorageProvider` deterministic; Cloudinary adapter được unit-test bằng SDK/fetch mock. Đây không phải live Cloudinary integration test.
 
 Phạm vi test gồm:
 
@@ -203,6 +233,9 @@ Phạm vi test gồm:
 - private delivery và owner-scoped download;
 - concurrent reference bind, delete đang được tham chiếu và delete retry;
 - stale confirm/delete lease recovery, fencing worker cũ và quota recheck khi confirm vượt TTL;
+- cycle election/heartbeat loss/watchdog, DB clock, job lease reclaim/fencing và queue priority;
+- exact orphan cleanup khi context lookup không thấy object, active canonical/sibling reconciliation, hai clean pass và provider outage recovery;
+- Cloudinary context pagination, immutable `assetId`, request timeout có hủy thật và capped retry;
 - database state/audit constraints, hard-delete guard và migration safety.
 
 Kiểm tra migration lặp và schema drift:
@@ -218,8 +251,8 @@ Kết quả gần nhất: deploy lần hai không còn migration pending và `No
 ## Việc tiếp theo
 
 1. Tạo/kiểm tra sáu signed preset và chạy live Cloudinary smoke.
-2. Implement scheduled cleanup/reconciliation cho intent hết hạn, object orphan, `REJECTED` và delete retry.
-3. Chốt `fileId` + private delivery contract rồi nối Profile CV/avatar.
-4. Nối Company/Chat và các CV consumer Application/Interview/AI.
-5. Chốt media type riêng cho Offer letter.
+2. Chốt `fileId` + private delivery contract rồi nối Profile CV/avatar.
+3. Nối Company/Chat và các CV consumer Application/Interview/AI.
+4. Chốt media type riêng cho Offer letter.
+5. Bổ sung alert backlog, distributed provider-rate budget và chính sách archive/retention.
 6. Tách runtime/migrator DB role, đưa secret vào secret manager, bổ sung rotation/mTLS và chạy full Compose/E2E.

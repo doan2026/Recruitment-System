@@ -90,6 +90,7 @@ process.env.INTERNAL_API_KEY_INTERVIEW = INTERNAL_KEYS['interview-service'];
 process.env.INTERNAL_API_KEY_AI = INTERNAL_KEYS['ai-service'];
 process.env.SWAGGER_ENABLED = 'true';
 process.env.CORS_ORIGINS = 'http://localhost:3000';
+process.env.MEDIA_CLEANUP_ENABLED = 'false';
 
 const jwt = new JwtService();
 

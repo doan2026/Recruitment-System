@@ -39,6 +39,36 @@ const createProvider = (overrides = {}) =>
     new ConfigService({ ...configValues, ...overrides }),
   );
 
+const fetchContextPage = async (input, fetchOptions, handler) => {
+  const url = input instanceof URL ? input : new URL(input);
+  const match = url.pathname.match(
+    /^\/v1_1\/test-cloud\/resources\/(image|video|raw)\/context$/,
+  );
+  assert.ok(match, 'expected a Cloudinary Admin context URL');
+  assert.equal(fetchOptions.method, 'GET');
+  assert.equal(fetchOptions.redirect, 'error');
+  assert.ok(fetchOptions.signal instanceof AbortSignal);
+  assert.equal(
+    fetchOptions.headers.authorization,
+    'Basic ' +
+      Buffer.from('test-api-key:test-api-secret').toString('base64'),
+  );
+  const payload = await handler(
+    url.searchParams.get('key'),
+    url.searchParams.get('value'),
+    {
+      resource_type: match[1],
+      max_results: Number(url.searchParams.get('max_results')),
+      context: url.searchParams.get('context') === 'true',
+      next_cursor: url.searchParams.get('next_cursor') ?? undefined,
+    },
+  );
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+};
+
 test('Cloudinary adapter fails closed on missing or placeholder configuration', () => {
   assert.throws(() =>
     createProvider({ CLOUDINARY_API_SECRET: '' }).assertConfiguration(),
@@ -101,13 +131,10 @@ test('Cloudinary signed intent contains only controlled exact-format parameters'
 
 test('Cloudinary canonical inspection uses Admin metadata and bounded range bytes', async (t) => {
   const originalResource = cloudinary.api.resource;
-  const originalResourcesByContext =
-    cloudinary.api.resources_by_context;
   const originalUrl = cloudinary.url;
   const originalFetch = global.fetch;
   t.after(() => {
     cloudinary.api.resource = originalResource;
-    cloudinary.api.resources_by_context = originalResourcesByContext;
     cloudinary.url = originalUrl;
     global.fetch = originalFetch;
   });
@@ -139,7 +166,7 @@ test('Cloudinary canonical inspection uses Admin metadata and bounded range byte
     };
   };
   const contextLookups = [];
-  cloudinary.api.resources_by_context = async (
+  let contextHandler = async (
     key,
     value,
     options,
@@ -160,6 +187,10 @@ test('Cloudinary canonical inspection uses Admin metadata and bounded range byte
   };
   let fetchOptions;
   global.fetch = async (url, options) => {
+    const parsed = url instanceof URL ? url : new URL(url);
+    if (parsed.hostname === 'api.cloudinary.com') {
+      return fetchContextPage(url, options, contextHandler);
+    }
     assert.match(url, /^https:\/\/res\.cloudinary\.com\/test-cloud\//);
     fetchOptions = options;
     return new Response(Buffer.from('%PDF-1.7\n'), { status: 206 });
@@ -232,7 +263,7 @@ test('Cloudinary canonical inspection uses Admin metadata and bounded range byte
     format: 'pdf',
     context: { custom: { file_id: CONTEXT_FILE_ID } },
   };
-  cloudinary.api.resources_by_context = async (
+  contextHandler = async (
     key,
     value,
     options,
@@ -259,7 +290,7 @@ test('Cloudinary canonical inspection uses Admin metadata and bounded range byte
     StorageAssetMismatchError,
   );
 
-  cloudinary.api.resources_by_context = async (
+  contextHandler = async (
     key,
     value,
     options,
@@ -290,12 +321,11 @@ test('Cloudinary canonical inspection uses Admin metadata and bounded range byte
 test('Cloudinary private download and deletion preserve raw asset identity', async (t) => {
   const originalDownload = cloudinary.utils.private_download_url;
   const originalDestroy = cloudinary.uploader.destroy;
-  const originalResourcesByContext =
-    cloudinary.api.resources_by_context;
+  const originalFetch = global.fetch;
   t.after(() => {
     cloudinary.utils.private_download_url = originalDownload;
     cloudinary.uploader.destroy = originalDestroy;
-    cloudinary.api.resources_by_context = originalResourcesByContext;
+    global.fetch = originalFetch;
   });
 
   let downloadCall;
@@ -313,6 +343,9 @@ test('Cloudinary private download and deletion preserve raw asset identity', asy
     return { result: 'ok' };
   };
 
+  let contextHandler = async () => ({ resources: [] });
+  global.fetch = (url, options) =>
+    fetchContextPage(url, options, contextHandler);
   const provider = createProvider();
   const locator = {
     publicId:
@@ -321,6 +354,7 @@ test('Cloudinary private download and deletion preserve raw asset identity', asy
     deliveryType: StorageDeliveryType.AUTHENTICATED,
     expectedFormat: 'pdf',
     contextFileId: CONTEXT_FILE_ID,
+    expectedAssetId: 'canonical-raw-asset',
   };
   const expiresAt = new Date('2027-01-15T08:05:00.000Z');
   assert.equal(
@@ -342,26 +376,136 @@ test('Cloudinary private download and deletion preserve raw asset identity', asy
     Math.floor(expiresAt.getTime() / 1000),
   );
 
-  await provider.deleteAsset(locator);
+  await provider.deleteAsset(locator, { timeoutMs: 1234 });
   assert.equal(destroyCall.publicId, locator.publicId);
   assert.deepEqual(destroyCall.options, {
     resource_type: 'raw',
     type: 'authenticated',
     invalidate: false,
+    timeout: 1234,
   });
 
   const alternatePublicId =
     'recruitment/cv/alternate-image.pdf';
-  cloudinary.api.resources_by_context = async (
+  const destroyed = [];
+  cloudinary.uploader.destroy = async (publicId, options) => {
+    destroyed.push({ publicId, options });
+    return { result: 'ok' };
+  };
+  contextHandler = async (
     key,
     value,
     options,
   ) => {
     assert.equal(key, 'file_id');
     assert.equal(value, CONTEXT_FILE_ID);
-    const matchesAlternate =
-      options.resource_type === 'image' &&
-      (options.type === undefined || options.type === 'authenticated');
+    if (options.resource_type === 'raw') {
+      return {
+        resources: [
+          {
+            asset_id: 'canonical-raw-asset',
+            public_id: locator.publicId,
+            resource_type: 'raw',
+            type: 'authenticated',
+            format: 'pdf',
+            context: { custom: { file_id: CONTEXT_FILE_ID } },
+          },
+        ],
+      };
+    }
+    if (options.resource_type === 'image') {
+      return {
+        resources: [
+          {
+            asset_id: 'alternate-image-asset',
+            public_id: alternatePublicId,
+            resource_type: 'image',
+            type: 'authenticated',
+            format: 'pdf',
+            context: { custom: { file_id: CONTEXT_FILE_ID } },
+          },
+        ],
+      };
+    }
+    return { resources: [] };
+  };
+  const reconciliation = await provider.reconcileIntentAssets(
+    CONTEXT_FILE_ID,
+    locator,
+  );
+  assert.deepEqual(reconciliation, {
+    observedAssets: 2,
+    deletedAssets: 1,
+    preservedExpectedAsset: true,
+  });
+  assert.deepEqual(
+    destroyed.map((entry) => entry.publicId),
+    [alternatePublicId],
+  );
+
+  destroyed.length = 0;
+  contextHandler = async (
+    key,
+    value,
+    options,
+  ) => {
+    assert.equal(key, 'file_id');
+    assert.equal(value, CONTEXT_FILE_ID);
+    return {
+      resources:
+        options.resource_type === 'raw'
+          ? [
+              {
+                asset_id: 'replacement-raw-asset',
+                public_id: locator.publicId,
+                resource_type: 'raw',
+                type: 'authenticated',
+                format: 'pdf',
+                context: {
+                  custom: { file_id: CONTEXT_FILE_ID },
+                },
+              },
+            ]
+          : [],
+    };
+  };
+  const replaced = await provider.reconcileIntentAssets(
+    CONTEXT_FILE_ID,
+    locator,
+    { timeoutMs: 2222 },
+  );
+  assert.deepEqual(replaced, {
+    observedAssets: 1,
+    deletedAssets: 1,
+    preservedExpectedAsset: false,
+  });
+  assert.equal(destroyed[0].publicId, locator.publicId);
+  assert.equal(destroyed[0].options.timeout, 2222);
+
+  const secondAlternatePublicId =
+    'recruitment/cv/alternate-image-page-2.pdf';
+  contextHandler = async (
+    key,
+    value,
+    options,
+  ) => {
+    assert.equal(key, 'file_id');
+    assert.equal(value, CONTEXT_FILE_ID);
+    const matchesAlternate = options.resource_type === 'image';
+    if (matchesAlternate && options.next_cursor === 'image-page-2') {
+      return {
+        resources: [
+          {
+            asset_id: 'alternate-image-asset-page-2',
+            public_id: secondAlternatePublicId,
+            resource_type: 'image',
+            type: 'authenticated',
+            format: 'pdf',
+            context: { custom: { file_id: CONTEXT_FILE_ID } },
+          },
+        ],
+      };
+    }
     return {
       resources: matchesAlternate
         ? [
@@ -375,11 +519,18 @@ test('Cloudinary private download and deletion preserve raw asset identity', asy
             },
           ]
         : [],
+      ...(matchesAlternate
+        ? { next_cursor: 'image-page-2' }
+        : {}),
     };
   };
+  destroyed.length = 0;
   await provider.deleteIntentAssets(CONTEXT_FILE_ID);
-  assert.equal(destroyCall.publicId, alternatePublicId);
-  assert.deepEqual(destroyCall.options, {
+  assert.deepEqual(
+    destroyed.map((entry) => entry.publicId).sort(),
+    [alternatePublicId, secondAlternatePublicId].sort(),
+  );
+  assert.deepEqual(destroyed[0].options, {
     resource_type: 'image',
     type: 'authenticated',
     invalidate: false,
@@ -390,4 +541,25 @@ test('Cloudinary private download and deletion preserve raw asset identity', asy
     () => provider.deleteAsset(locator),
     StorageUnavailableError,
   );
+
+  global.fetch = async (_url, options) =>
+    new Promise((resolve, reject) => {
+      options.signal.addEventListener(
+        'abort',
+        () => reject(options.signal.reason),
+        { once: true },
+      );
+    });
+  const timeoutKeepAlive = setTimeout(() => {}, 1000);
+  try {
+    await assert.rejects(
+      () =>
+        provider.reconcileIntentAssets(CONTEXT_FILE_ID, null, {
+          timeoutMs: 10,
+        }),
+      StorageUnavailableError,
+    );
+  } finally {
+    clearTimeout(timeoutKeepAlive);
+  }
 });

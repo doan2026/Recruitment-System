@@ -317,6 +317,14 @@ export class MediaService {
     return this.deleteFile(fileId);
   }
 
+  async deleteForMaintenance(
+    fileId: string,
+    providerTimeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<FileMetadataDto> {
+    return this.deleteFile(fileId, providerTimeoutMs, signal);
+  }
+
   private async createIntent(
     context: CreateIntentContext,
     input: CreateUploadIntentDto,
@@ -811,6 +819,8 @@ export class MediaService {
 
   private async deleteFile(
     fileId: string,
+    providerTimeoutMs?: number,
+    signal?: AbortSignal,
   ): Promise<FileMetadataDto> {
     const claimed = await this.withTransactionRetry(async (tx) => {
       await tx.$queryRaw(
@@ -830,9 +840,13 @@ export class MediaService {
       }
       const resumingDelete =
         current.status === FileStatus.DELETE_PENDING;
+      const maintenanceNow =
+        providerTimeoutMs === undefined
+          ? undefined
+          : await this.databaseNow(tx);
       const leaseIsFresh =
         current.updatedAt.getTime() >
-        this.clock().getTime() - OPERATION_LEASE_MS;
+        (maintenanceNow ?? this.clock()).getTime() - OPERATION_LEASE_MS;
       if (
         (resumingDelete && leaseIsFresh) ||
         (!resumingDelete && !DELETABLE_STATUSES.has(current.status))
@@ -873,8 +887,28 @@ export class MediaService {
     }
 
     try {
-      await this.storage.deleteAsset(this.toLocator(claimed));
-      await this.storage.deleteIntentAssets(claimed.id);
+      const options =
+        providerTimeoutMs === undefined
+          ? {}
+          : { timeoutMs: providerTimeoutMs, signal };
+      if (signal?.aborted) {
+        throw new StorageUnavailableError(
+          'Media cleanup operation was cancelled',
+        );
+      }
+      await this.storage.deleteAsset(
+        this.toLocator(claimed),
+        options,
+      );
+      if (signal?.aborted) {
+        throw new StorageUnavailableError(
+          'Media cleanup operation was cancelled',
+        );
+      }
+      await this.storage.deleteIntentAssets(
+        claimed.id,
+        options,
+      );
     } catch (error) {
       const failed = await this.prisma.fileMeta.updateMany({
         where: {
@@ -1091,7 +1125,21 @@ export class MediaService {
       deliveryType: file.storageDeliveryType,
       expectedFormat: file.expectedFormat,
       contextFileId: file.id,
+      expectedAssetId: file.assetId ?? undefined,
     };
+  }
+
+  private async databaseNow(
+    tx: Prisma.TransactionClient,
+  ): Promise<Date> {
+    const rows = await tx.$queryRaw<Array<{ now: Date }>>(
+      Prisma.sql`SELECT clock_timestamp() AS "now"`,
+    );
+    const now = rows[0]?.now;
+    if (!(now instanceof Date)) {
+      throw new Error('Database clock is unavailable');
+    }
+    return now;
   }
 
   private normalizeIdempotencyKey(

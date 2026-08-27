@@ -9,9 +9,11 @@ import { MediaPolicy } from '../media/media-policy';
 import {
   AssetLocator,
   InspectedAsset,
+  IntentAssetReconciliationResult,
   SignedUploadCapability,
   StorageAssetMismatchError,
   StorageAssetNotFoundError,
+  StorageOperationOptions,
   StorageProvider,
   StorageUnavailableError,
   UploadIntentForSigning,
@@ -57,6 +59,10 @@ const ALL_RESOURCE_TYPES: readonly StorageResourceType[] = [
   StorageResourceType.VIDEO,
   StorageResourceType.RAW,
 ];
+
+const CONTEXT_PAGE_SIZE = 100;
+const MAX_CONTEXT_PAGES = 5;
+const DEFAULT_ADMIN_TIMEOUT_MS = 60_000;
 
 const DELIVERY_VALUES: Record<StorageDeliveryType, string> = {
   [StorageDeliveryType.UPLOAD]: 'upload',
@@ -242,8 +248,12 @@ export class CloudinaryStorageProvider extends StorageProvider {
     return result;
   }
 
-  async deleteAsset(locator: AssetLocator): Promise<void> {
+  async deleteAsset(
+    locator: AssetLocator,
+    options: StorageOperationOptions = {},
+  ): Promise<boolean> {
     this.ensureConfigured();
+    this.assertNotAborted(options.signal);
     try {
       const response = (await cloudinary.uploader.destroy(
         locator.publicId,
@@ -252,44 +262,90 @@ export class CloudinaryStorageProvider extends StorageProvider {
           type: DELIVERY_VALUES[locator.deliveryType],
           invalidate:
             locator.deliveryType === StorageDeliveryType.UPLOAD,
+          ...(options.timeoutMs === undefined
+            ? {}
+            : { timeout: options.timeoutMs }),
         },
       )) as unknown as CloudinaryDestroyResult;
-      if (response.result !== 'ok' && response.result !== 'not found') {
+      if (response.result === 'not found') {
+        return false;
+      }
+      if (response.result !== 'ok') {
         throw new StorageUnavailableError(
           'Cloudinary did not confirm deletion',
         );
       }
+      return true;
     } catch (error) {
       if (error instanceof StorageUnavailableError) {
         throw error;
       }
       if (this.isNotFound(error)) {
-        return;
+        return false;
       }
       throw new StorageUnavailableError('Cloudinary deletion failed');
     }
   }
 
-  async deleteIntentAssets(contextFileId: string): Promise<void> {
+  async deleteIntentAssets(
+    contextFileId: string,
+    options: StorageOperationOptions = {},
+  ): Promise<void> {
+    await this.reconcileIntentAssets(contextFileId, null, options);
+  }
+
+  async reconcileIntentAssets(
+    contextFileId: string,
+    preserve: AssetLocator | null,
+    options: StorageOperationOptions = {},
+  ): Promise<IntentAssetReconciliationResult> {
     this.ensureConfigured();
-    const resources = await this.listIntentAssets(contextFileId);
-    await Promise.all(
-      resources.map((resource) =>
-        this.deleteAsset({
-          publicId: this.requiredString(resource.public_id),
-          resourceType: this.resourceTypeFromProvider(
-            this.requiredString(resource.resource_type),
-          ),
-          deliveryType: this.deliveryTypeFromProvider(
-            this.requiredString(resource.type),
-          ),
-          expectedFormat: this.normalizeFormat(
-            this.requiredString(resource.format),
-          ),
-          contextFileId,
-        }),
+    const resources = await this.listIntentAssets(
+      contextFileId,
+      ALL_RESOURCE_TYPES,
+      options,
+    );
+    const assets = resources.map((resource) => ({
+      assetId: this.requiredString(resource.asset_id),
+      locator: {
+        publicId: this.requiredString(resource.public_id),
+        resourceType: this.resourceTypeFromProvider(
+          this.requiredString(resource.resource_type),
+        ),
+        deliveryType: this.deliveryTypeFromProvider(
+          this.requiredString(resource.type),
+        ),
+        expectedFormat: this.normalizeFormat(
+          this.requiredString(resource.format),
+        ),
+        contextFileId,
+      } satisfies AssetLocator,
+    }));
+    const isExpected = (asset: {
+      assetId: string;
+      locator: AssetLocator;
+    }): boolean =>
+      preserve !== null &&
+      asset.locator.publicId === preserve.publicId &&
+      asset.locator.resourceType === preserve.resourceType &&
+      asset.locator.deliveryType === preserve.deliveryType &&
+      asset.locator.expectedFormat === preserve.expectedFormat &&
+      (preserve.expectedAssetId === undefined ||
+        asset.assetId === preserve.expectedAssetId);
+    const unexpected = assets.filter(
+      (asset) => !isExpected(asset),
+    );
+    const deletionResults = await Promise.all(
+      unexpected.map((asset) =>
+        this.deleteAsset(asset.locator, options),
       ),
     );
+    return {
+      observedAssets: assets.length,
+      deletedAssets: deletionResults.filter(Boolean).length,
+      preservedExpectedAsset:
+        preserve !== null && assets.some(isExpected),
+    };
   }
 
   createDownloadUrl(
@@ -415,42 +471,45 @@ export class CloudinaryStorageProvider extends StorageProvider {
     contextFileId: string,
     resourceTypes: readonly StorageResourceType[] =
       ALL_RESOURCE_TYPES,
+    options: StorageOperationOptions = {},
   ): Promise<CloudinaryResource[]> {
-    let responses: Array<{
-      resourceType: StorageResourceType;
-      response: CloudinaryResourceList;
-    }>;
     try {
-      responses = await Promise.all(
-        resourceTypes.map(
-          async (resourceType) =>
-            ({
-              resourceType,
-              response:
-                (await cloudinary.api.resources_by_context(
-                  'file_id',
-                  contextFileId,
-                  {
-                    resource_type: RESOURCE_VALUES[resourceType],
-                    max_results: 10,
-                    context: true,
-                  },
-                )) as unknown as CloudinaryResourceList,
-            }),
+      const pages = await Promise.all(
+        resourceTypes.map((resourceType) =>
+          this.listIntentAssetsForResourceType(
+            contextFileId,
+            resourceType,
+            options,
+          ),
         ),
       );
-    } catch {
+      return pages.flat();
+    } catch (error) {
+      if (error instanceof StorageUnavailableError) {
+        throw error;
+      }
       throw new StorageUnavailableError(
         'Cloudinary context lookup failed',
       );
     }
+  }
 
+  private async listIntentAssetsForResourceType(
+    contextFileId: string,
+    resourceType: StorageResourceType,
+    options: StorageOperationOptions,
+  ): Promise<CloudinaryResource[]> {
     const resources: CloudinaryResource[] = [];
-    for (const { resourceType, response } of responses) {
-      if (
-        !Array.isArray(response.resources) ||
-        response.next_cursor
-      ) {
+    let nextCursor: string | undefined;
+    for (let page = 0; page < MAX_CONTEXT_PAGES; page += 1) {
+      const response =
+        await this.fetchIntentAssetsPage(
+          contextFileId,
+          resourceType,
+          nextCursor,
+          options,
+        );
+      if (!Array.isArray(response.resources)) {
         throw new StorageUnavailableError(
           'Cloudinary returned an invalid context lookup',
         );
@@ -482,8 +541,106 @@ export class CloudinaryStorageProvider extends StorageProvider {
         }
         resources.push(resource);
       }
+
+      if (
+        response.next_cursor !== undefined &&
+        (typeof response.next_cursor !== 'string' ||
+          response.next_cursor.length === 0)
+      ) {
+        throw new StorageUnavailableError(
+          'Cloudinary returned an invalid context cursor',
+        );
+      }
+      nextCursor = response.next_cursor as string | undefined;
+      if (nextCursor === undefined) {
+        return resources;
+      }
     }
-    return resources;
+    throw new StorageUnavailableError(
+      'Cloudinary context lookup exceeded the safe page limit',
+    );
+  }
+
+  private async fetchIntentAssetsPage(
+    contextFileId: string,
+    resourceType: StorageResourceType,
+    nextCursor: string | undefined,
+    options: StorageOperationOptions,
+  ): Promise<CloudinaryResourceList> {
+    this.assertNotAborted(options.signal);
+    const timeoutMs = options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+      throw new StorageUnavailableError(
+        'Cloudinary request timeout is invalid',
+      );
+    }
+    const cloudName = this.required('CLOUDINARY_CLOUD_NAME');
+    const apiKey = this.required('CLOUDINARY_API_KEY');
+    const apiSecret = this.required('CLOUDINARY_API_SECRET');
+    const url = new URL(
+      'https://api.cloudinary.com/v1_1/' +
+        encodeURIComponent(cloudName) +
+        '/resources/' +
+        RESOURCE_VALUES[resourceType] +
+        '/context',
+    );
+    url.searchParams.set('key', 'file_id');
+    url.searchParams.set('value', contextFileId);
+    url.searchParams.set('max_results', String(CONTEXT_PAGE_SIZE));
+    url.searchParams.set('context', 'true');
+    if (nextCursor !== undefined) {
+      url.searchParams.set('next_cursor', nextCursor);
+    }
+
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, timeoutSignal])
+      : timeoutSignal;
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          accept: 'application/json',
+          authorization:
+            'Basic ' +
+            Buffer.from(apiKey + ':' + apiSecret).toString('base64'),
+        },
+        redirect: 'error',
+        signal,
+      });
+    } catch {
+      throw new StorageUnavailableError(
+        'Cloudinary context lookup failed',
+      );
+    }
+    if (!response.ok) {
+      throw new StorageUnavailableError(
+        'Cloudinary context lookup returned an error',
+      );
+    }
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new StorageUnavailableError(
+        'Cloudinary returned an invalid context lookup',
+      );
+    }
+    if (typeof payload !== 'object' || payload === null) {
+      throw new StorageUnavailableError(
+        'Cloudinary returned an invalid context lookup',
+      );
+    }
+    return payload as CloudinaryResourceList;
+  }
+
+  private assertNotAborted(signal: AbortSignal | undefined): void {
+    if (signal?.aborted) {
+      throw new StorageUnavailableError(
+        'Cloudinary operation was cancelled',
+      );
+    }
   }
 
   private validateCanonicalUrl(value: string): string {
