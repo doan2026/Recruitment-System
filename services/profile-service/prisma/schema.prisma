@@ -15,29 +15,30 @@ enum CvType {
 }
 
 model Profile {
-  id                    String        @id @default(uuid()) @db.Uuid
-  userId                String        @unique(map: "profiles_user_id_key") @map("user_id") @db.Uuid
-  fullName              String?       @map("full_name") @db.VarChar(160)
-  headline              String?       @db.VarChar(200)
-  summary               String?
-  phone                 String?       @db.VarChar(32)
-  address               String?       @db.VarChar(500)
-  avatarFileId          String?       @map("avatar_file_id") @db.Uuid
-  avatarUrl             String?       @map("avatar_url") @db.VarChar(2048)
-  githubUrl             String?       @map("github_url") @db.VarChar(2048)
-  linkedinUrl           String?       @map("linkedin_url") @db.VarChar(2048)
-  portfolioUrl          String?       @map("portfolio_url") @db.VarChar(2048)
-  completionRuleVersion Int           @default(1) @map("completion_rule_version")
-  completionPercent     Int           @default(0) @map("completion_percent")
-  aggregateVersion      Int           @default(1) @map("aggregate_version")
-  createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt             DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
-  educations            Education[]
-  experiences           Experience[]
-  skills                Skill[]
-  certificates          Certificate[]
-  projects              Project[]
-  cvs                   Cv[]
+  id                     String        @id @default(uuid()) @db.Uuid
+  userId                 String        @unique(map: "profiles_user_id_key") @map("user_id") @db.Uuid
+  fullName               String?       @map("full_name") @db.VarChar(160)
+  headline               String?       @db.VarChar(200)
+  summary                String?
+  phone                  String?       @db.VarChar(32)
+  address                String?       @db.VarChar(500)
+  avatarFileId           String?       @map("avatar_file_id") @db.Uuid
+  avatarUrl              String?       @map("avatar_url") @db.VarChar(2048)
+  avatarMediaReferenceId String?       @unique(map: "profiles_avatar_media_reference_id_key") @map("avatar_media_reference_id") @db.Uuid
+  githubUrl              String?       @map("github_url") @db.VarChar(2048)
+  linkedinUrl            String?       @map("linkedin_url") @db.VarChar(2048)
+  portfolioUrl           String?       @map("portfolio_url") @db.VarChar(2048)
+  completionRuleVersion  Int           @default(1) @map("completion_rule_version")
+  completionPercent      Int           @default(0) @map("completion_percent")
+  aggregateVersion       Int           @default(1) @map("aggregate_version")
+  createdAt              DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  educations             Education[]
+  experiences            Experience[]
+  skills                 Skill[]
+  certificates           Certificate[]
+  projects               Project[]
+  cvs                    Cv[]
 
   @@map("profiles")
 }
@@ -126,16 +127,18 @@ model Project {
   @@map("projects")
 }
 
-/// fileUrl must be a canonical HTTPS URL confirmed by Media Service, never a
-/// client-provided or short-lived signed URL. Application stores cvId, so a
-/// future service layer must not mutate file/content after a CV is first used.
+/// fileUrl is a deprecated compatibility field for legacy public CVs. New
+/// private CVs use mediaReferenceId and resolve access through Media Service.
+/// Application stores cvId, so the service layer must not mutate file/content
+/// after a CV is first used.
 model Cv {
   id                   String    @id @default(uuid()) @db.Uuid
   userId               String    @map("user_id") @db.Uuid
   title                String    @db.VarChar(160)
   type                 CvType
   fileId               String    @unique(map: "cvs_file_id_key") @map("file_id") @db.Uuid
-  fileUrl              String    @map("file_url") @db.VarChar(2048)
+  fileUrl              String?   @map("file_url") @db.VarChar(2048)
+  mediaReferenceId     String?   @unique(map: "cvs_media_reference_id_key") @map("media_reference_id") @db.Uuid
   templateId           String?   @map("template_id") @db.VarChar(100)
   contentJson          Json?     @map("content_json") @db.JsonB
   contentSchemaVersion Int?      @map("content_schema_version")

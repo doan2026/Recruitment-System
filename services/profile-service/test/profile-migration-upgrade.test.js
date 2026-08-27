@@ -55,13 +55,16 @@ const main = async () => {
     await prisma.$executeRawUnsafe(`
       INSERT INTO "profile"."profiles"
         ("id", "user_id", "full_name", "headline", "summary",
-         "github_url", "completion_percent", "updated_at")
+         "avatar_file_id", "avatar_url", "github_url",
+         "completion_percent", "updated_at")
       VALUES
         ('71000000-0000-4000-8000-000000000001',
          '71000000-0000-4000-8000-000000000002',
          'Legacy Candidate',
          E'\\t',
          E'\\n',
+         '71000000-0000-4000-8000-000000000005',
+         'https://media.example.com/avatars/legacy-candidate.jpg',
          'https://github.com/legacy-candidate',
          7,
          CURRENT_TIMESTAMP)
@@ -86,8 +89,21 @@ const main = async () => {
          'typescript',
          CURRENT_TIMESTAMP)
     `);
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO "profile"."cvs"
+        ("id", "user_id", "title", "type", "file_id", "file_url", "updated_at")
+      VALUES
+        ('71000000-0000-4000-8000-000000000006',
+         '71000000-0000-4000-8000-000000000002',
+         'Legacy CV',
+         'UPLOAD',
+         '71000000-0000-4000-8000-000000000007',
+         'https://media.example.com/cvs/legacy-candidate.pdf',
+         CURRENT_TIMESTAMP)
+    `);
 
     executeMigration('20260827010000_profile_completion_rule');
+    executeMigration('20260827130000_profile_media_integration');
 
     const rows = await prisma.$queryRawUnsafe(`
       SELECT "completion_percent", "completion_rule_version"
@@ -97,7 +113,74 @@ const main = async () => {
     assert.equal(rows.length, 1);
     assert.equal(rows[0].completion_percent, 50);
     assert.equal(rows[0].completion_rule_version, 1);
-    process.stdout.write('Profile completion upgrade backfill: OK\n');
+
+    const avatarRows = await prisma.$queryRawUnsafe(`
+      SELECT
+        "avatar_file_id"::text AS "avatarFileId",
+        "avatar_url" AS "avatarUrl",
+        "avatar_media_reference_id"::text AS "avatarMediaReferenceId"
+      FROM "profile"."profiles"
+      WHERE "user_id" = '71000000-0000-4000-8000-000000000002'::uuid
+    `);
+    assert.deepEqual(avatarRows, [
+      {
+        avatarFileId: '71000000-0000-4000-8000-000000000005',
+        avatarUrl: 'https://media.example.com/avatars/legacy-candidate.jpg',
+        avatarMediaReferenceId: null,
+      },
+    ]);
+
+    const cvRows = await prisma.$queryRawUnsafe(`
+      SELECT
+        "file_id"::text AS "fileId",
+        "file_url" AS "fileUrl",
+        "media_reference_id"::text AS "mediaReferenceId"
+      FROM "profile"."cvs"
+      WHERE "id" = '71000000-0000-4000-8000-000000000006'::uuid
+    `);
+    assert.deepEqual(cvRows, [
+      {
+        fileId: '71000000-0000-4000-8000-000000000007',
+        fileUrl: 'https://media.example.com/cvs/legacy-candidate.pdf',
+        mediaReferenceId: null,
+      },
+    ]);
+
+    const mediaColumns = await prisma.$queryRawUnsafe(`
+      SELECT
+        "table_name" AS "tableName",
+        "column_name" AS "columnName",
+        "is_nullable" AS "isNullable",
+        "data_type" AS "dataType"
+      FROM "information_schema"."columns"
+      WHERE "table_schema" = 'profile'
+        AND (
+          ("table_name" = 'profiles' AND "column_name" = 'avatar_media_reference_id')
+          OR ("table_name" = 'cvs' AND "column_name" IN ('file_url', 'media_reference_id'))
+        )
+      ORDER BY "table_name", "column_name"
+    `);
+    assert.deepEqual(mediaColumns, [
+      {
+        tableName: 'cvs',
+        columnName: 'file_url',
+        isNullable: 'YES',
+        dataType: 'character varying',
+      },
+      {
+        tableName: 'cvs',
+        columnName: 'media_reference_id',
+        isNullable: 'YES',
+        dataType: 'uuid',
+      },
+      {
+        tableName: 'profiles',
+        columnName: 'avatar_media_reference_id',
+        isNullable: 'YES',
+        dataType: 'uuid',
+      },
+    ]);
+    process.stdout.write('Profile completion and Media upgrade preservation: OK\n');
   } finally {
     if (canResetSchema) {
       await prisma.$executeRawUnsafe(
