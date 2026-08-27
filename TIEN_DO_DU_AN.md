@@ -426,7 +426,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Docker Node 24 chạy non-root, fail-fast trước khi listen; root Compose có one-shot `media-migrate`, dependency và biến bắt buộc. Đã verify **12/12 unit + 18/18 TAP integration test** trên PostgreSQL 16.15, migration deploy lần hai không còn pending, schema diff không drift, runtime image/fail-fast và Nginx 1.30.4 `nginx -t` đều đạt; production dependency audit báo 0 vulnerability.
 - Scheduled cleanup/reconciliation được hoàn thành ở mục 2.17. Phần còn lại của P09 là live smoke với sáu Cloudinary preset thật, malware/deep PDF/DOC/DOCX parser, staging/promote public asset, distributed provider limiter/active-byte quota, archive/retention, Offer letter, wiring các consumer và tách migrator/runtime credential cùng secret rotation/mTLS.
 
-## 2.17 File/Media Scheduled Cleanup & Reconciliation — đã hoàn thành và verify
+## 2.17 File/Media Scheduled Cleanup & Reconciliation — đã merge vào `develop` qua PR #37
 
 - Bổ sung migration `MediaCleanupJob`, append-only `MediaCleanupEvent` và `MediaMaintenanceControl`; job, event và metadata không hard-delete, terminal job bất biến, state/lease shape được bảo vệ bằng CHECK/trigger và scan lifecycle có index `status + updated_at + id`.
 - Scheduler dùng `clock_timestamp()` của PostgreSQL, cycle leader lease có heartbeat/fencing, watchdog và startup jitter. Heartbeat treo/lỗi hoặc mất lease sẽ abort cycle, hủy Admin request đang chạy và dừng discovery/claim mới; shutdown và error path cũng abort cycle đang hoạt động.
