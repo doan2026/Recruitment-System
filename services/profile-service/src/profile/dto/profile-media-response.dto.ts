@@ -45,3 +45,32 @@ export class CvDownloadResponseDto {
   @ApiProperty({ format: 'date-time' })
   expiresAt!: string;
 }
+
+export class DeletedCvResponseDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ format: 'uuid' })
+  userId!: string;
+
+  @ApiProperty({ enum: ['SOFT'], example: 'SOFT' })
+  deletionMode!: 'SOFT';
+
+  @ApiProperty({ example: true })
+  isDeleted!: true;
+
+  @ApiProperty({ format: 'date-time' })
+  deletedAt!: string;
+
+  @ApiProperty({
+    format: 'uuid',
+    nullable: true,
+    example: null,
+    description:
+      'CV selected as the new default, or null when no reassignment was needed or possible',
+  })
+  replacementDefaultCvId!: string | null;
+
+  @ApiProperty({ minimum: 1 })
+  aggregateVersion!: number;
+}

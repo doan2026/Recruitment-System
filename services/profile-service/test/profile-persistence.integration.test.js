@@ -322,9 +322,23 @@ test('Profile persistence constraints on PostgreSQL 16', async (t) => {
         data: { isDeleted: true, deletedAt: new Date() },
       }),
     );
-    const deleted = await prisma.cv.update({
-      where: { id: cv.id },
-      data: { isDefault: false, isDeleted: true, deletedAt: new Date() },
+    const deleted = await prisma.$transaction(async (transaction) => {
+      await transaction.cv.update({
+        where: { id: cv.id },
+        data: { isDefault: false },
+      });
+      await transaction.cv.update({
+        where: { id: unused.id },
+        data: { isDefault: true },
+      });
+      const softDeleted = await transaction.cv.update({
+        where: { id: cv.id },
+        data: { isDeleted: true, deletedAt: new Date() },
+      });
+      await transaction.$executeRawUnsafe(
+        'SET CONSTRAINTS "profile"."cvs_default_invariant_deferred" IMMEDIATE',
+      );
+      return softDeleted;
     });
     assert.equal(deleted.isDeleted, true);
   });

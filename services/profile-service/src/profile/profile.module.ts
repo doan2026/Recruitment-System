@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ApplicationClientModule } from '../application/application-client.module';
 import { MediaClientModule } from '../media/media-client.module';
 import { InternalCvController } from './internal-cv.controller';
 import { InternalCvService } from './internal-cv.service';
@@ -8,7 +9,7 @@ import { ProfileController } from './profile.controller';
 import { ProfileService } from './profile.service';
 
 @Module({
-  imports: [MediaClientModule],
+  imports: [ApplicationClientModule, MediaClientModule],
   controllers: [
     InternalCvController,
     ProfileMediaController,
