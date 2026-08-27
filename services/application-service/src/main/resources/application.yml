@@ -39,8 +39,12 @@ spring:
 clients:
   job-service-url: ${JOB_SERVICE_URL:http://job-search-service:3000}
   profile-service-url: ${PROFILE_SERVICE_URL:http://profile-service:3000}
+  profile-internal-api-key: ${PROFILE_INTERNAL_API_KEY}
   ai-service-url: ${AI_SERVICE_URL:http://ai-service:8000}
   internal-api-key: ${INTERNAL_API_KEY}
+
+internal:
+  profile-api-key: ${INTERNAL_API_KEY_PROFILE}
 
 application-events:
   topic: ${KAFKA_APPLICATION_TOPIC:application-events}

@@ -117,6 +117,7 @@ class RecruiterDashboardPostgresIT {
                 application.application_event_outbox,
                 application.application_history,
                 application.bookmarks,
+                application.application_cv_usage,
                 application.applications
             CASCADE
             """

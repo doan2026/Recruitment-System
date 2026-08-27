@@ -421,6 +421,7 @@ test('download sends the expectation and accepts only HTTPS future expiry', asyn
   const invalidDownloads = [
     { ...expected, url: 'http://download.example/candidate.pdf' },
     { ...expected, expiresAt: new Date(Date.now() - 1000).toISOString() },
+    { ...expected, expiresAt: '2099-01-01T00:00:00.000Z' },
     { ...expected, expiresAt: null },
   ];
   for (const invalid of invalidDownloads) {

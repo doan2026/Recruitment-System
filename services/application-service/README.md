@@ -4,7 +4,9 @@ This Spring Boot 3 / Java 21 service owns candidate submission, bookmarks,
 application tracking, recruiter evaluations, the application pipeline, job
 offers, the company-wide Recruiter Dashboard, and on-demand AI match
 scores. Nginx strips the `/applications` gateway prefix before forwarding those
-requests. The dedicated `/offers` gateway route preserves its prefix.
+requests. The dedicated `/offers` gateway route preserves its prefix. Gateway
+traffic cannot reach `/applications/internal...`, and public Profile/Application
+routes discard client-supplied internal identity headers.
 
 | Internal | Gateway | Access |
 | --- | --- | --- |
@@ -16,6 +18,8 @@ requests. The dedicated `/offers` gateway route preserves its prefix.
 | `POST /{applicationId}/match-score/refresh` | `POST /applications/{applicationId}/match-score/refresh` | RECRUITER |
 | `PATCH /{applicationId}/status` | `PATCH /applications/{applicationId}/status` | RECRUITER |
 | `POST /{applicationId}/evaluation` | `POST /applications/{applicationId}/evaluation` | RECRUITER |
+| `GET /{applicationId}/cv` | `GET /applications/{applicationId}/cv` | RECRUITER |
+| `POST /{applicationId}/cv/download-url` | `POST /applications/{applicationId}/cv/download-url` | RECRUITER |
 | `POST /{applicationId}/offer` | `POST /applications/{applicationId}/offer` | RECRUITER |
 | `PATCH /offers/{offerId}/respond` | `PATCH /offers/{offerId}/respond` | CANDIDATE |
 | `PATCH /{applicationId}/withdraw` | `PATCH /applications/{applicationId}/withdraw` | CANDIDATE |
@@ -32,6 +36,59 @@ recruiter. A recruiter from another company is denied. This company-wide
 Application Pipeline policy does not change Job Service ownership rules:
 `MEMBER` can still edit or delete only jobs they created, while `OWNER` can
 manage every job.
+
+## Canonical Profile CV contract
+
+Candidate submission no longer lists Candidate CVs and scans a permissive
+response. Application calls `POST /internal/v1/cvs/verify` with both
+`X-Internal-Service: application-service`/`X-Internal-Api-Key` and the
+Candidate bearer token from the submission request. Profile independently
+verifies the strict Candidate JWT and requires its subject to equal the
+requested `candidateId`. Application then validates the exact response
+envelope, echoed candidate/CV identifiers, Media-backed file ID, type,
+deleted state, aggregate version, and timestamps. Missing, wrong-owner,
+deleted, and legacy URL-only revisions remain the existing public
+`CV_NOT_AVAILABLE` result.
+
+Recruiters access the immutable revision selected at submission through:
+
+- `GET /applications/{applicationId}/cv`, whose public data is limited to
+  `cvId`, `title`, `type`, `isDeleted`, and `createdAt`.
+- `POST /applications/{applicationId}/cv/download-url`, whose public data is
+  limited to `cvId`, short-lived HTTPS `url`, and `expiresAt`.
+
+Both endpoints resolve Company membership before querying Application or
+Profile, scope the Application lookup by `applicationId` plus the authorized
+`companyId`, and derive `candidateId`/`cvId` only from the stored Application.
+The Recruiter bearer token is never forwarded to Profile. Application calls
+Profile detail/download with its service identity, validates the exact echoed
+revision, and permits a soft-deleted historical revision because an existing
+Application must continue to reference what was submitted. Both public
+responses use `Cache-Control: no-store`; neither response exposes Candidate
+identity, `fileId`, stable file URL, Media reference, builder content, Profile
+PII, aggregate version, or local first-use metadata.
+
+Flyway V6 adds the durable `application_cv_usage` ledger. Migration takes a
+write-blocking lock while readers continue, rejects pre-existing cross-Candidate reuse of one
+`cvId`, and backfills every existing Application. An `AFTER INSERT` trigger
+upserts `first_used_at` and `application_count` in the same transaction as
+Application creation; rollback therefore leaves no false usage evidence. A
+separate trigger makes Application identity, Candidate, CV, Job, Company,
+Recruiter, and applied time immutable. The ledger has no FK back to
+Application, survives later Application-row deletion, and treats every status
+as used.
+
+Profile can query that authority through the Swagger-hidden
+`POST /internal/v1/cv-usages/lookup`, authenticated only as
+`X-Internal-Service: profile-service` with its dedicated key. The request is
+`{candidateId, cvId}` and the response is
+`{candidateId, cvId, used, firstUsedAt, applicationCount}`; the internal
+response is also `no-store`. A mismatched Candidate for an already-used
+`cvId` fails closed. Profile's local `firstUsedAt` mirror is not synchronized
+yet. A `used=false` lookup is not sufficient to authorize hard delete because
+a concurrent submission can win between lookup and delete; Profile keeps hard
+delete disabled until a future deletion fence/reservation closes that TOCTOU
+window.
 
 Recruiter Dashboard is available through
 `GET /applications/stats?company_id=<uuid>`. The requested company must match
@@ -185,12 +242,13 @@ Submission performs these checks in order:
 
 1. Verify the Job through `GET /jobs/:id/exists` using
    `X-Internal-Api-Key`.
-2. Verify that the selected CV appears in the authenticated candidate's
-   `GET /profile/cv?user_id=` response.
+2. Verify the selected CV through Profile's
+   `POST /internal/v1/cvs/verify`, using the Application service key plus the
+   forwarded Candidate bearer JWT and validating the exact echoed owner/CV.
 3. Reject an existing active application.
 4. Enforce a 30-day cooldown after the latest `REJECTED` application.
-5. Store `Application(APPLIED)`, initial `ApplicationHistory`, and a Kafka
-   outbox row in one database transaction.
+5. Store `Application(APPLIED)`, initial `ApplicationHistory`, the V6 CV-usage
+   ledger update, and a Kafka outbox row in one database transaction.
 
 The database also has a partial unique index for active candidate/job pairs,
 which protects against two concurrent submission requests. The outbox publisher
@@ -212,6 +270,10 @@ sends `application-events` with a stable `event_id` and exponential retry.
 ```
 
 ```bash
+export PROFILE_SERVICE_URL='http://localhost:3000'
+export PROFILE_INTERNAL_API_KEY='replace-with-a-distinct-application-to-profile-key-of-at-least-32-bytes'
+export INTERNAL_API_KEY_PROFILE='replace-with-a-distinct-profile-to-application-key-of-at-least-32-bytes'
+
 mvn test
 mvn package
 
@@ -226,5 +288,16 @@ Dashboard cohort/funnel semantics, `DAY/WEEK/MONTH` time-series buckets and DST
 boundaries, outbox delivery to a real Kafka consumer, and published-row
 idempotency. AI Match verification covers score replacement, optimistic-lock
 conflicts, downstream failure preservation, the `0..100` database constraint,
-and the absence of history/outbox side effects. The verified Application
-Service suite passes 173 unit tests and 35 PostgreSQL/Kafka integration tests.
+and the absence of history/outbox side effects. CV-contract coverage includes
+dual-auth submission verification, strict Profile-response validation,
+Company-first recruiter authorization, minimal/no-store public DTOs, internal
+key hardening, V6 backfill/trigger/rollback/immutability, cross-Candidate
+rejection, usage retention after Application deletion, and usage lookup. The
+verified Application Service suite passes 212 unit tests and 43
+PostgreSQL/Kafka integration tests.
+
+In Root Compose, use two distinct keys: `PROFILE_INTERNAL_API_KEY_APPLICATION`
+maps to Application's `PROFILE_INTERNAL_API_KEY` and Profile's
+`INTERNAL_API_KEY_APPLICATION`; `APPLICATION_INTERNAL_API_KEY_PROFILE` maps to
+Application's `INTERNAL_API_KEY_PROFILE`. Each key must be a non-placeholder
+value of at least 32 bytes.

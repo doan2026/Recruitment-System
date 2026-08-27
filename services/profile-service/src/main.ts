@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { InternalAuthService } from './common/auth/internal-auth.service';
 
 export const configureApplication = (
   app: INestApplication,
@@ -71,6 +72,7 @@ export async function bootstrap(): Promise<void> {
     throw new Error('PORT must be an integer between 1 and 65535');
   }
 
+  app.get(InternalAuthService).assertConfiguration();
   app.enableShutdownHooks();
   await app.listen(port, '0.0.0.0');
 }
