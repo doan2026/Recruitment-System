@@ -1,6 +1,7 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { Cv, CvType, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { ApplicationCvUsageClient } from '../application/application-cv-usage.client';
 import { ApiException } from '../common/http/api-exception';
 import {
   BoundMediaReference,
@@ -10,9 +11,13 @@ import {
   VerifiedMediaFile,
 } from '../media/profile-media.client';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateUploadedCvDto } from './dto/profile-media-input.dto';
+import {
+  CreateUploadedCvDto,
+  RenameUploadedCvDto,
+} from './dto/profile-media-input.dto';
 import {
   CvDownloadResponseDto,
+  DeletedCvResponseDto,
   UploadedCvResponseDto,
 } from './dto/profile-media-response.dto';
 import { PROFILE_COMPLETION_RULE_VERSION } from './profile-completion';
@@ -24,6 +29,11 @@ import {
 const CV_LIMIT = 5;
 const AVATAR_REFERENCE_TYPE = 'PROFILE_AVATAR';
 const CV_REFERENCE_TYPE = 'PROFILE_CV';
+const UPLOADED_MEDIA_BACKED_CV = {
+  type: CvType.UPLOAD,
+  fileUrl: null,
+  mediaReferenceId: { not: null },
+} satisfies Prisma.CvWhereInput;
 
 type Transaction = Prisma.TransactionClient;
 
@@ -45,6 +55,7 @@ export class ProfileMediaService {
     private readonly prisma: PrismaService,
     private readonly profiles: ProfileService,
     private readonly media: ProfileMediaClient,
+    private readonly applicationUsages: ApplicationCvUsageClient,
   ) {}
 
   async attachAvatar(
@@ -202,6 +213,7 @@ export class ProfileMediaService {
             data: { aggregateVersion: { increment: 1 } },
           });
         }
+        await this.assertCvDefaultInvariant(transaction);
         return {
           cv: created,
           mediaReferenceAccepted: true,
@@ -264,6 +276,176 @@ export class ProfileMediaService {
     return this.toDownloadResponse(download);
   }
 
+  async renameUploadedCv(
+    userIdInput: string,
+    cvIdInput: string,
+    dto: RenameUploadedCvDto,
+  ): Promise<UploadedCvResponseDto> {
+    const userId = this.canonicalUuid(userIdInput);
+    const cvId = this.canonicalUuid(cvIdInput);
+    return this.profiles.runMutation(async (transaction) => {
+      const profileId = await this.lockExistingProfile(
+        transaction,
+        userId,
+      );
+      const cv = await this.findLifecycleCv(
+        transaction,
+        userId,
+        cvId,
+        false,
+      );
+      if (cv.title === dto.title) {
+        return this.toCvResponse(cv);
+      }
+      this.assertExpectedCvVersion(cv, dto.expectedAggregateVersion);
+
+      const updated = await transaction.cv.update({
+        where: { id: cv.id },
+        data: {
+          title: dto.title,
+          aggregateVersion: { increment: 1 },
+        },
+      });
+      await this.bumpProfileVersion(transaction, profileId);
+      await this.assertCvDefaultInvariant(transaction);
+      return this.toCvResponse(updated);
+    });
+  }
+
+  async setDefaultUploadedCv(
+    userIdInput: string,
+    cvIdInput: string,
+    expectedAggregateVersion: number,
+  ): Promise<UploadedCvResponseDto> {
+    const userId = this.canonicalUuid(userIdInput);
+    const cvId = this.canonicalUuid(cvIdInput);
+    return this.profiles.runMutation(async (transaction) => {
+      const profileId = await this.lockExistingProfile(
+        transaction,
+        userId,
+      );
+      const target = await this.findLifecycleCv(
+        transaction,
+        userId,
+        cvId,
+        false,
+      );
+      if (target.isDefault) {
+        return this.toCvResponse(target);
+      }
+      this.assertExpectedCvVersion(target, expectedAggregateVersion);
+
+      await transaction.cv.updateMany({
+        where: {
+          userId,
+          isDeleted: false,
+          isDefault: true,
+          id: { not: target.id },
+        },
+        data: {
+          isDefault: false,
+          aggregateVersion: { increment: 1 },
+        },
+      });
+      const updated = await transaction.cv.update({
+        where: { id: target.id },
+        data: {
+          isDefault: true,
+          aggregateVersion: { increment: 1 },
+        },
+      });
+      await this.bumpProfileVersion(transaction, profileId);
+      await this.assertCvDefaultInvariant(transaction);
+      return this.toCvResponse(updated);
+    });
+  }
+
+  async softDeleteUploadedCv(
+    userIdInput: string,
+    cvIdInput: string,
+    expectedAggregateVersion: number,
+  ): Promise<DeletedCvResponseDto> {
+    const userId = this.canonicalUuid(userIdInput);
+    const cvId = this.canonicalUuid(cvIdInput);
+    const snapshot = await this.findLifecycleCv(
+      this.prisma,
+      userId,
+      cvId,
+      true,
+    );
+    if (snapshot.isDeleted) {
+      return this.toDeletedCvResponse(snapshot, null);
+    }
+    this.assertExpectedCvVersion(
+      snapshot,
+      expectedAggregateVersion,
+    );
+
+    const usage = await this.applicationUsages.lookup(userId, cvId);
+    const authoritativeFirstUsedAt = this.validateUsageTimeline(
+      snapshot,
+      usage.used,
+      usage.firstUsedAt,
+    );
+
+    return this.profiles.runMutation(async (transaction) => {
+      const profileId = await this.lockExistingProfile(
+        transaction,
+        userId,
+      );
+      const current = await this.findLifecycleCv(
+        transaction,
+        userId,
+        cvId,
+        true,
+      );
+      if (current.isDeleted) {
+        return this.toDeletedCvResponse(current, null);
+      }
+      this.assertExpectedCvVersion(current, expectedAggregateVersion);
+
+      const replacement = current.isDefault
+        ? await transaction.cv.findFirst({
+            where: {
+              userId,
+              isDeleted: false,
+              id: { not: current.id },
+            },
+            orderBy: [
+              { createdAt: 'desc' },
+              { id: 'asc' },
+            ],
+          })
+        : null;
+      const deleted = await transaction.cv.update({
+        where: { id: current.id },
+        data: {
+          isDefault: false,
+          isDeleted: true,
+          deletedAt: new Date(),
+          firstUsedAt:
+            current.firstUsedAt ?? authoritativeFirstUsedAt,
+          aggregateVersion: { increment: 1 },
+        },
+      });
+      if (replacement) {
+        await transaction.cv.update({
+          where: { id: replacement.id },
+          data: {
+            isDefault: true,
+            aggregateVersion: { increment: 1 },
+          },
+        });
+      }
+      await this.bumpProfileVersion(transaction, profileId);
+      await this.assertCvDefaultInvariant(transaction);
+      return this.toDeletedCvResponse(
+        deleted,
+        replacement?.id ?? null,
+      );
+    });
+  }
+
   private async lockProfile(
     transaction: Transaction,
     userId: string,
@@ -285,6 +467,42 @@ export class ProfileMediaService {
       select: { id: true },
     });
     return { id: created.id, created: true };
+  }
+
+  private async lockExistingProfile(
+    transaction: Transaction,
+    userId: string,
+  ): Promise<string> {
+    const rows = await transaction.$queryRaw<{ id: string }[]>`
+      SELECT "id"::text AS "id"
+      FROM "profile"."profiles"
+      WHERE "user_id" = ${userId}::uuid
+      FOR UPDATE
+    `;
+    if (!rows[0]) {
+      throw this.cvNotFound();
+    }
+    return rows[0].id;
+  }
+
+  private async bumpProfileVersion(
+    transaction: Transaction,
+    profileId: string,
+  ): Promise<void> {
+    await transaction.profile.update({
+      where: { id: profileId },
+      data: { aggregateVersion: { increment: 1 } },
+    });
+  }
+
+  private async assertCvDefaultInvariant(
+    transaction: Transaction,
+  ): Promise<void> {
+    // Prisma interactive transactions can otherwise resolve before surfacing
+    // an error raised only by an INITIALLY DEFERRED trigger at COMMIT.
+    await transaction.$executeRawUnsafe(
+      'SET CONSTRAINTS "profile"."cvs_default_invariant_deferred" IMMEDIATE',
+    );
   }
 
   private async findExactUploadedCv(
@@ -323,6 +541,85 @@ export class ProfileMediaService {
       );
     }
     return cv;
+  }
+
+  private async findLifecycleCv(
+    client: Pick<PrismaService, 'cv'> | Transaction,
+    userId: string,
+    cvId: string,
+    includeDeleted: boolean,
+  ): Promise<Cv> {
+    const cv = await client.cv.findFirst({
+      where: {
+        id: cvId,
+        userId,
+        ...UPLOADED_MEDIA_BACKED_CV,
+        ...(includeDeleted ? {} : { isDeleted: false }),
+      },
+    });
+    if (!cv) {
+      throw this.cvNotFound();
+    }
+    return cv;
+  }
+
+  private assertExpectedCvVersion(
+    cv: Cv,
+    expectedAggregateVersion: number,
+  ): void {
+    if (cv.aggregateVersion !== expectedAggregateVersion) {
+      throw new ApiException(
+        'CV_VERSION_CONFLICT',
+        'The CV changed after it was read; reload it and retry',
+        HttpStatus.CONFLICT,
+        {
+          expectedAggregateVersion,
+          actualAggregateVersion: cv.aggregateVersion,
+        },
+      );
+    }
+  }
+
+  private validateUsageTimeline(
+    cv: Cv,
+    used: boolean,
+    firstUsedAtValue: string | null,
+  ): Date | null {
+    if (!used) {
+      if (firstUsedAtValue !== null || cv.firstUsedAt !== null) {
+        throw this.invalidApplicationUsage();
+      }
+      return null;
+    }
+    if (firstUsedAtValue === null) {
+      throw this.invalidApplicationUsage();
+    }
+    const firstUsedAt = new Date(firstUsedAtValue);
+    if (
+      Number.isNaN(firstUsedAt.getTime()) ||
+      firstUsedAt.getTime() < cv.createdAt.getTime() ||
+      (cv.firstUsedAt !== null &&
+        cv.firstUsedAt.getTime() !== firstUsedAt.getTime())
+    ) {
+      throw this.invalidApplicationUsage();
+    }
+    return firstUsedAt;
+  }
+
+  private invalidApplicationUsage(): ApiException {
+    return new ApiException(
+      'APPLICATION_CV_USAGE_INVALID',
+      'Application Service returned inconsistent CV usage data',
+      HttpStatus.SERVICE_UNAVAILABLE,
+    );
+  }
+
+  private cvNotFound(): ApiException {
+    return new ApiException(
+      'CV_NOT_FOUND',
+      'The requested CV was not found',
+      HttpStatus.NOT_FOUND,
+    );
   }
 
   private requireAvatarUrl(file: VerifiedMediaFile): string {
@@ -435,6 +732,32 @@ export class ProfileMediaService {
       url: download.url,
       expiresAt: download.expiresAt,
     };
+  }
+
+  private toDeletedCvResponse(
+    cv: Cv,
+    replacementDefaultCvId: string | null,
+  ): DeletedCvResponseDto {
+    if (!cv.isDeleted || cv.deletedAt === null) {
+      throw new ApiException(
+        'CV_STATE_INVALID',
+        'The CV deletion state is inconsistent',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+    return {
+      id: cv.id,
+      userId: cv.userId,
+      deletionMode: 'SOFT',
+      isDeleted: true,
+      deletedAt: cv.deletedAt.toISOString(),
+      replacementDefaultCvId,
+      aggregateVersion: cv.aggregateVersion,
+    };
+  }
+
+  private canonicalUuid(value: string): string {
+    return value.toLowerCase();
   }
 
   private assertOwner(actorId: string, userId: string): void {

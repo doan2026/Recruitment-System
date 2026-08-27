@@ -6,6 +6,7 @@ import {
   HttpCode,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Put,
 } from '@nestjs/common';
@@ -34,9 +35,12 @@ import { ApiErrorResponseDto } from '../common/http/api-error-response.dto';
 import {
   AttachAvatarDto,
   CreateUploadedCvDto,
+  CvVersionPreconditionDto,
+  RenameUploadedCvDto,
 } from './dto/profile-media-input.dto';
 import {
   CvDownloadResponseDto,
+  DeletedCvResponseDto,
   UploadedCvResponseDto,
 } from './dto/profile-media-response.dto';
 import { ProfileResponseDto } from './dto/profile-response.dto';
@@ -77,6 +81,7 @@ const CV_LIST_ENVELOPE = {
   ProfileResponseDto,
   UploadedCvResponseDto,
   CvDownloadResponseDto,
+  DeletedCvResponseDto,
   ApiErrorResponseDto,
 )
 @Roles(SystemRole.CANDIDATE)
@@ -124,6 +129,54 @@ export class ProfileMediaController {
     @CurrentUser() user: AuthUser,
   ): Promise<UploadedCvResponseDto[]> {
     return this.media.listUploadedCvs(user.id);
+  }
+
+  @Patch(['cvs/:id', 'cv/:id'])
+  @ApiOperation({ summary: 'Rename one of my active uploaded CVs' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOkResponse({ schema: envelope(UploadedCvResponseDto) })
+  renameCv(
+    @CurrentUser() user: AuthUser,
+    @Param('id', UUID_PIPE) id: string,
+    @Body() dto: RenameUploadedCvDto,
+  ): Promise<UploadedCvResponseDto> {
+    return this.media.renameUploadedCv(user.id, id, dto);
+  }
+
+  @Patch(['cvs/:id/default', 'cv/:id/default'])
+  @ApiOperation({ summary: 'Make one of my active uploaded CVs the default' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOkResponse({ schema: envelope(UploadedCvResponseDto) })
+  setDefaultCv(
+    @CurrentUser() user: AuthUser,
+    @Param('id', UUID_PIPE) id: string,
+    @Body() dto: CvVersionPreconditionDto,
+  ): Promise<UploadedCvResponseDto> {
+    return this.media.setDefaultUploadedCv(
+      user.id,
+      id,
+      dto.expectedAggregateVersion,
+    );
+  }
+
+  @Delete(['cvs/:id', 'cv/:id'])
+  @ApiOperation({
+    summary: 'Soft-delete one of my uploaded CVs',
+    description:
+      'The CV record and its private Media reference are retained so historical applications remain resolvable.',
+  })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOkResponse({ schema: envelope(DeletedCvResponseDto) })
+  deleteCv(
+    @CurrentUser() user: AuthUser,
+    @Param('id', UUID_PIPE) id: string,
+    @Body() dto: CvVersionPreconditionDto,
+  ): Promise<DeletedCvResponseDto> {
+    return this.media.softDeleteUploadedCv(
+      user.id,
+      id,
+      dto.expectedAggregateVersion,
+    );
   }
 
   @Post(['cvs/:id/download-url', 'cv/:id/download-url'])

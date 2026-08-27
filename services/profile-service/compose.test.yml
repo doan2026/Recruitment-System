@@ -22,8 +22,11 @@ services:
       ALLOW_PROFILE_SCHEMA_RESET: "true"
       MEDIA_SERVICE_URL: http://media-service.invalid:3000
       MEDIA_INTERNAL_API_KEY: profile-test-media-internal-key-000000000000
+      APPLICATION_SERVICE_URL: http://application-service.invalid:8080
+      APPLICATION_INTERNAL_API_KEY: profile-test-to-application-key-000000000000
       INTERNAL_API_KEY_APPLICATION: profile-test-application-key-0000000000000
       MEDIA_REQUEST_TIMEOUT_MS: "300"
+      APPLICATION_REQUEST_TIMEOUT_MS: "300"
       TZ: Asia/Ho_Chi_Minh
     depends_on:
       postgres-test:

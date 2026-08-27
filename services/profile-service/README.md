@@ -7,7 +7,7 @@ NestJS/Prisma service that owns Candidate profile data and CV metadata in the Po
 - `Profile` is keyed internally by UUID and has a unique external Auth `user_id`; no cross-service database foreign key is used.
 - Owned `Education`, `Experience`, `Skill`, `Certificate`, and `Project` rows cascade with the profile.
 - `Cv` references `Profile.user_id` with `ON DELETE RESTRICT`, stores upload/online-builder metadata, a schema version, aggregate version, default/deleted state, and first-use marker. New uploaded CVs store an immutable Media reference and no public URL; the nullable `file_url` column remains only for legacy compatibility.
-- A partial unique index allows at most one active default CV per Candidate.
+- A partial unique index prevents more than one active default CV per Candidate, while a deferred database constraint requires exactly one default whenever active CVs exist. The lifecycle migration takes Profile/CV writer locks, deterministically backfills the newest active CV (then UUID ascending) for legacy Candidates without a default, and increments both affected CV and Profile aggregate versions.
 - Once `first_used_at` is set, CV file and content form an immutable revision. Editing a used Online CV must clone its content into a new CV/revision ID; an unused CV may still be edited in place. Application now owns a durable usage ledger and lookup API, but all hard deletes remain fail-closed because a separate lookup followed by delete has a TOCTOU race; a deletion fence/reservation contract is still required.
 
 Database constraints validate percentages, dates, normalized skills, HTTPS URLs, builder JSON size/shape, and CV delete/default/identity state.
@@ -39,7 +39,16 @@ Database constraints validate percentages, dates, normalized skills, HTTPS URLs,
 - `GET /internal/v1/candidates/:candidateId/cvs` returns active Media-backed `UPLOAD` and `ONLINE` revisions, default first and then newest. `GET /internal/v1/candidates/:candidateId/cvs/:cvId` resolves one exact Media-backed revision and deliberately permits a soft-deleted revision so an authorized recruiter can inspect what an existing Application referenced.
 - `POST /internal/v1/candidates/:candidateId/cvs/:cvId/download-url` resolves the same exact revision and asks Media for a short-lived private URL. It never returns a stable file URL and sets `Cache-Control: private, no-store` plus `Pragma: no-cache`.
 - The internal metadata projection is limited to `cvId`, `candidateId`, `title`, `type`, `fileId`, `isDefault`, `isDeleted`, `firstUsedAt`, `aggregateVersion`, `createdAt`, and `updatedAt`. It excludes `fileUrl`, `mediaReferenceId`, builder `contentJson`, and Profile PII. All internal endpoints are excluded from Swagger and legacy URL-only rows are excluded from this contract.
-- Application's V6 usage ledger is now the durable source of truth for whether a `cvId` has ever been submitted. Profile does not yet mirror its `firstUsedAt` from that ledger, and hard delete remains disabled until the next lifecycle task adds an atomic deletion fence/reservation; rename, default handover, and soft delete do not need to wait for hard delete.
+- Application's V6 usage ledger is the durable source of truth for whether a `cvId` has ever been submitted. Profile consumes its exact lookup contract during soft delete and mirrors the authoritative `firstUsedAt` when present. Hard delete remains disabled because a separate `used=false` lookup followed by delete has a TOCTOU race with concurrent submission; an atomic cross-service deletion fence/reservation is still required.
+
+## Candidate CV lifecycle implemented
+
+- `PATCH /cvs/:id` renames an active owned uploaded CV with `{title, expectedAggregateVersion}`. `PATCH /cvs/:id/default` atomically hands the default flag to an active owned uploaded CV with `{expectedAggregateVersion}`. Singular `/cv/:id` aliases remain supported.
+- `DELETE /cvs/:id` is deliberately soft-delete-only and requires `{expectedAggregateVersion}`. It returns `deletionMode=SOFT`, `deletedAt`, the replacement default CV ID when one was selected, and the new CV aggregate version. The row, `fileId`, and immutable Media reference are retained so Application can continue to resolve the exact historical revision; Profile does not release the Media reference.
+- Rename, default handover, and delete use compare-and-set semantics under the existing Serializable Profile lock/retry boundary. Exact rename/default retries are no-ops. Deleting the current default chooses the newest remaining active CV, with UUID ascending as a deterministic tie-breaker; deleting the last active CV leaves no default.
+- Before a first soft delete, Profile calls Application's hidden `POST /internal/v1/cv-usages/lookup` outside the database transaction, validates the exact echoed usage state, then re-locks and rechecks the CV version before mutation. A used CV mirrors the authoritative `firstUsedAt`; an unused CV is still soft-deleted. Invalid, unauthorized, unavailable, redirected, oversized, or inconsistent Application responses fail closed without a Profile mutation.
+- The Profile-to-Application direction uses `APPLICATION_SERVICE_URL`, `APPLICATION_INTERNAL_API_KEY`, and `APPLICATION_REQUEST_TIMEOUT_MS`. Its key is distinct from `INTERNAL_API_KEY_APPLICATION`, which protects the Application-to-Profile direction; startup/readiness validation rejects missing, placeholder, short, malformed, or equal directional keys.
+- Hard delete is not exposed. Local serializable transactions and a pre-delete lookup cannot serialize with a concurrent Application submission across two databases, so opening hard delete safely requires a deletion fence/reservation owned by the Application submission path. If submission commits after an unused lookup result, the local `firstUsedAt` mirror can temporarily remain null; Application's durable ledger remains authoritative and the retained soft-deleted row/Media reference prevents data loss.
 
 ### Completion rule v1
 
@@ -66,8 +75,11 @@ npm ci
 export DATABASE_URL='postgresql://profile:profile@localhost:5432/recruitment?schema=profile'
 export MEDIA_SERVICE_URL='http://localhost:3001'
 export MEDIA_INTERNAL_API_KEY='replace-with-at-least-32-random-bytes'
+export APPLICATION_SERVICE_URL='http://localhost:8081'
+export APPLICATION_INTERNAL_API_KEY='replace-with-a-distinct-profile-to-application-key-of-at-least-32-bytes'
 export INTERNAL_API_KEY_APPLICATION='replace-with-a-distinct-application-to-profile-key-of-at-least-32-bytes'
 export MEDIA_REQUEST_TIMEOUT_MS='3000'
+export APPLICATION_REQUEST_TIMEOUT_MS='3000'
 export JWT_JWKS_URI='http://localhost:8080/auth/.well-known/jwks.json'
 export JWT_ALLOW_INSECURE_JWKS='true'
 export JWT_ISSUER='https://auth.recruitment.local'
@@ -83,7 +95,7 @@ Run migrations as a separate deployment job with a dedicated DDL-capable migrato
 
 ## PostgreSQL integration test
 
-The Docker suite exercises both upgrade paths: completion backfill from a whitespace-bearing legacy Profile and Media integration over existing avatar/CV rows without rewriting their legacy URLs. It then deploys all migrations to a clean PostgreSQL 16 instance, runs 19 unit tests and 45 integration tests, and deploys migrations a second time to prove there are no pending changes. Destructive test scripts fail before `DROP/TRUNCATE` unless `ALLOW_PROFILE_SCHEMA_RESET=true` and the database name ends in `_test`. Coverage includes real constraints/relations/JSONB/CV revision behavior, strict JWT failures, validation/IDOR for all child types, OpenAPI contracts, collection caps, Unicode normalization, completion persistence, Media response hardening, private CV delivery, compensation, concurrent Profile/avatar/CV writes, internal key hardening, dual-auth submission verification, historical soft-deleted revision reads, privacy projection, and exact download authorization:
+The Docker suite exercises completion, Media, and CV-lifecycle upgrade paths without rewriting legacy URLs. It deploys all migrations to a clean PostgreSQL 16 instance, runs 29 unit tests and 53 integration tests, and deploys migrations a second time to prove there are no pending changes. The lifecycle upgrade test also holds an in-flight legacy CV writer while migration starts, proving the writer lock closes the backfill/trigger-install race before the deterministic exact-one-default invariant becomes visible. Destructive test scripts fail before `DROP/TRUNCATE` unless `ALLOW_PROFILE_SCHEMA_RESET=true` and the database name ends in `_test`. Coverage includes real constraints/relations/JSONB/CV revision behavior, strict JWT failures, validation/IDOR for all child types, OpenAPI contracts, collection caps, Unicode normalization, completion persistence, Media response hardening, private CV delivery, compensation, concurrent Profile/avatar/CV writes, internal key hardening, dual-auth submission verification, historical soft-deleted revision reads, privacy projection, exact download authorization, rename/version CAS, atomic default handover, deterministic delete reassignment, Application usage failure rollback, `firstUsedAt` mirroring, retained historical Media references, direct-SQL invariant enforcement, and migration race safety:
 
 ```bash
 docker compose -f compose.test.yml up --build --abort-on-container-exit --exit-code-from profile-tests
@@ -92,9 +104,7 @@ docker compose -f compose.test.yml down -v
 
 ## Deliberately pending P08 work
 
-- Candidate CV lifecycle beyond registration/list/detail: rename, atomic default handover, soft delete with deterministic replacement default, and compare-and-set behavior. The five-CV cap and first default are already enforced.
 - CV Builder create/edit/clone behavior and versioned JSON API. Editing a used Online CV must create a new immutable revision rather than mutate the `cvId` referenced by an Application.
-- Mirroring Application's durable `firstUsedAt` into Profile. The Application ledger and lookup are authoritative today, so Profile must not infer unused state from its still-null local mirror.
 - Hard delete remains disabled even for a lookup result of `used=false`: the lookup-to-delete window is racy with a concurrent submission. A future deletion fence/reservation or equivalent serialization with Application must close that race before unused-only hard delete can be exposed.
 - The edit API/UI must make the revision behavior explicit: reopening a used Online CV creates a new `cv_id`, preserving exactly what Application referenced; default selection may then move to the new revision transactionally.
 - A deployed multi-service REST contract/E2E suite remains part of P17. The service suites cover the canonical request/response and security behavior, but this task does not claim the full Candidate or Recruiter journey.
@@ -102,5 +112,5 @@ docker compose -f compose.test.yml down -v
 - A durable Media-reference release outbox/reconciler. Current cleanup is post-commit best effort with bounded retry and preserves database correctness, but can leak a reference after process failure or prolonged Media outage.
 - Separate PostgreSQL role grants so Profile PII is inaccessible to other service roles. The image supports a separate migration job, but repository-wide grants are still pending.
 - Root Compose currently follows the repository's shared-PostgreSQL/schema-per-service layout. This is an explicit deviation from the architecture document's separate `profile-db` database/container and must be resolved or formally accepted before production.
-- Candidate Profile `aggregate_version` is monotonic and transactional, and CV registration now enforces the max-five rule under the Profile lock. CV compare-and-set, exact-one-default handover after update/delete, and atomic CV+event-intent writes belong to later service/event tasks.
+- Candidate Profile and CV aggregate versions are monotonic and transactional; registration enforces the max-five rule, lifecycle mutations use compare-and-set, and the database now enforces exactly one default whenever active CVs exist. Atomic CV+event-intent writes belong to the later event task.
 - Distributed per-user/ingress rate limiting remains production hardening; collection rows are now transactionally bounded, but request frequency still needs a shared gateway/WAF policy for multi-replica production.
