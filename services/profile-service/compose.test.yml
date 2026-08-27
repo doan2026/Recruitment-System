@@ -20,6 +20,9 @@ services:
     environment:
       DATABASE_URL: postgresql://profile_test:profile_test_password@postgres-test:5432/profile_test?schema=profile
       ALLOW_PROFILE_SCHEMA_RESET: "true"
+      MEDIA_SERVICE_URL: http://media-service.invalid:3000
+      MEDIA_INTERNAL_API_KEY: profile-test-media-internal-key-000000000000
+      MEDIA_REQUEST_TIMEOUT_MS: "300"
       TZ: Asia/Ho_Chi_Minh
     depends_on:
       postgres-test:

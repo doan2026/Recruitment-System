@@ -13,6 +13,9 @@ let canResetSchema = false;
 const USER_ID = '10000000-0000-4000-8000-000000000001';
 const DEFAULT_FILE_ID = '20000000-0000-4000-8000-000000000001';
 const ONLINE_FILE_ID = '20000000-0000-4000-8000-000000000002';
+const DEFAULT_MEDIA_REFERENCE_ID = '21000000-0000-4000-8000-000000000001';
+const AVATAR_FILE_ID = '30000000-0000-4000-8000-000000000001';
+const AVATAR_MEDIA_REFERENCE_ID = '31000000-0000-4000-8000-000000000001';
 
 async function truncateProfileSchema() {
   await prisma.$executeRawUnsafe(
@@ -29,6 +32,9 @@ async function createCompleteProfile() {
       summary: 'Builds reliable distributed systems.',
       phone: '+84 912 345 678',
       address: 'Ha Noi',
+      avatarFileId: AVATAR_FILE_ID,
+      avatarUrl: 'https://media.example.com/avatars/nguyen-van-an.jpg',
+      avatarMediaReferenceId: AVATAR_MEDIA_REFERENCE_ID,
       githubUrl: 'https://github.com/nguyenvanan',
       linkedinUrl: 'https://www.linkedin.com/in/nguyenvanan',
       portfolioUrl: 'https://example.com',
@@ -111,7 +117,7 @@ test('Profile persistence constraints on PostgreSQL 16', async (t) => {
         title: 'Backend CV',
         type: CvType.UPLOAD,
         fileId: DEFAULT_FILE_ID,
-        fileUrl: 'https://media.example.com/cv/backend.pdf',
+        mediaReferenceId: DEFAULT_MEDIA_REFERENCE_ID,
         isDefault: true,
       },
     });
@@ -133,6 +139,9 @@ test('Profile persistence constraints on PostgreSQL 16', async (t) => {
       sections: ['skills'],
     });
     assert.equal(uploaded.isDefault, true);
+    assert.equal(uploaded.fileUrl, null);
+    assert.equal(uploaded.mediaReferenceId, DEFAULT_MEDIA_REFERENCE_ID);
+    assert.equal(profile.avatarMediaReferenceId, AVATAR_MEDIA_REFERENCE_ID);
   });
 
   await t.test('rejects invalid profile values and duplicate normalized skills', async () => {
@@ -154,7 +163,17 @@ test('Profile persistence constraints on PostgreSQL 16', async (t) => {
     await assert.rejects(() =>
       prisma.profile.update({
         where: { id: profile.id },
-        data: { avatarFileId: '30000000-0000-4000-8000-000000000001' },
+        data: { avatarFileId: null },
+      }),
+    );
+    await assert.rejects(() =>
+      prisma.profile.create({
+        data: {
+          userId: '10000000-0000-4000-8000-000000000005',
+          avatarFileId: '30000000-0000-4000-8000-000000000005',
+          avatarUrl: 'https://media.example.com/avatars/duplicate-reference.jpg',
+          avatarMediaReferenceId: AVATAR_MEDIA_REFERENCE_ID,
+        },
       }),
     );
     await assert.rejects(() =>
@@ -191,6 +210,39 @@ test('Profile persistence constraints on PostgreSQL 16', async (t) => {
           fileId: '20000000-0000-4000-8000-000000000003',
           fileUrl: 'https://media.example.com/cv/second.pdf',
           isDefault: true,
+        },
+      }),
+    );
+    await assert.rejects(() =>
+      prisma.cv.create({
+        data: {
+          userId: USER_ID,
+          title: 'Missing Media location',
+          type: CvType.UPLOAD,
+          fileId: '20000000-0000-4000-8000-000000000005',
+        },
+      }),
+    );
+    await assert.rejects(() =>
+      prisma.cv.create({
+        data: {
+          userId: USER_ID,
+          title: 'Ambiguous Media location',
+          type: CvType.UPLOAD,
+          fileId: '20000000-0000-4000-8000-000000000006',
+          fileUrl: 'https://media.example.com/cv/ambiguous.pdf',
+          mediaReferenceId: '21000000-0000-4000-8000-000000000006',
+        },
+      }),
+    );
+    await assert.rejects(() =>
+      prisma.cv.create({
+        data: {
+          userId: USER_ID,
+          title: 'Duplicate Media reference',
+          type: CvType.UPLOAD,
+          fileId: '20000000-0000-4000-8000-000000000007',
+          mediaReferenceId: DEFAULT_MEDIA_REFERENCE_ID,
         },
       }),
     );
@@ -255,6 +307,12 @@ test('Profile persistence constraints on PostgreSQL 16', async (t) => {
       prisma.cv.update({
         where: { id: cv.id },
         data: { fileUrl: 'https://media.example.com/cv/replaced.pdf' },
+      }),
+    );
+    await assert.rejects(() =>
+      prisma.cv.update({
+        where: { id: cv.id },
+        data: { mediaReferenceId: '21000000-0000-4000-8000-000000000099' },
       }),
     );
     await assert.rejects(() => prisma.cv.delete({ where: { id: cv.id } }));

@@ -193,6 +193,9 @@ services:
       JWT_ALLOW_INSECURE_JWKS: "true"
       JWT_ISSUER: ${JWT_ISSUER:-https://auth.recruitment.local}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-recruitment-api}
+      MEDIA_SERVICE_URL: http://media-service:3000
+      MEDIA_INTERNAL_API_KEY: ${MEDIA_INTERNAL_API_KEY_PROFILE:?MEDIA_INTERNAL_API_KEY_PROFILE is required}
+      MEDIA_REQUEST_TIMEOUT_MS: ${PROFILE_MEDIA_REQUEST_TIMEOUT_MS:-3000}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       SWAGGER_ENABLED: "true"
     secrets:
@@ -206,6 +209,8 @@ services:
         condition: service_completed_successfully
       auth-service:
         condition: service_started
+      media-service:
+        condition: service_healthy
     expose:
       - "3000"
 

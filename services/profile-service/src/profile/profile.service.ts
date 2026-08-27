@@ -81,6 +81,12 @@ interface LockedProfile {
   created: boolean;
 }
 
+export interface AvatarProjectionMutation {
+  profile: ProfileResponseDto;
+  previousMediaReferenceId: string | null;
+  mediaReferenceAccepted: boolean;
+}
+
 @Injectable()
 export class ProfileService {
   constructor(private readonly prisma: PrismaService) {}
@@ -140,6 +146,121 @@ export class ProfileService {
         locked.id,
         !locked.created,
       );
+    });
+  }
+
+  async getExactAvatarProjection(
+    actorId: string,
+    userId: string,
+    fileId: string,
+  ): Promise<ProfileResponseDto | null> {
+    this.assertOwner(actorId, userId);
+    const profile = await this.prisma.$transaction(
+      (transaction) =>
+        transaction.profile.findFirst({
+          where: {
+            userId,
+            avatarFileId: fileId,
+            avatarMediaReferenceId: { not: null },
+          },
+          include: PROFILE_WITH_BLOCKS,
+        }),
+      {
+        isolationLevel:
+          Prisma.TransactionIsolationLevel.RepeatableRead,
+      },
+    );
+    return profile ? this.toResponse(profile) : null;
+  }
+
+  async attachAvatarProjection(
+    actorId: string,
+    userId: string,
+    fileId: string,
+    url: string,
+    mediaReferenceId: string,
+  ): Promise<AvatarProjectionMutation> {
+    this.assertOwner(actorId, userId);
+    return this.runMutation(async (transaction) => {
+      const locked = await this.lockProfile(
+        transaction,
+        userId,
+        true,
+      );
+      const current = await transaction.profile.findUniqueOrThrow({
+        where: { id: locked.id },
+        include: PROFILE_WITH_BLOCKS,
+      });
+      if (
+        current.avatarFileId === fileId &&
+        current.avatarMediaReferenceId !== null
+      ) {
+        return {
+          profile: this.toResponse(current),
+          previousMediaReferenceId: current.avatarMediaReferenceId,
+          mediaReferenceAccepted:
+            current.avatarMediaReferenceId === mediaReferenceId,
+        };
+      }
+      await transaction.profile.update({
+        where: { id: locked.id },
+        data: {
+          avatarFileId: fileId,
+          avatarUrl: url,
+          avatarMediaReferenceId: mediaReferenceId,
+        },
+      });
+      return {
+        profile: await this.refreshAggregate(
+          transaction,
+          locked.id,
+          !locked.created,
+        ),
+        previousMediaReferenceId: current.avatarMediaReferenceId,
+        mediaReferenceAccepted: true,
+      };
+    });
+  }
+
+  async removeAvatarProjection(
+    actorId: string,
+    userId: string,
+  ): Promise<AvatarProjectionMutation> {
+    this.assertOwner(actorId, userId);
+    return this.runMutation(async (transaction) => {
+      const locked = await this.lockProfile(
+        transaction,
+        userId,
+        false,
+      );
+      const current = await transaction.profile.findUniqueOrThrow({
+        where: { id: locked.id },
+        include: PROFILE_WITH_BLOCKS,
+      });
+      if (!current.avatarFileId) {
+        return {
+          profile: this.toResponse(current),
+          previousMediaReferenceId: null,
+          mediaReferenceAccepted: false,
+        };
+      }
+      await transaction.profile.update({
+        where: { id: locked.id },
+        data: {
+          avatarFileId: null,
+          avatarUrl: null,
+          avatarMediaReferenceId: null,
+        },
+      });
+      return {
+        profile: await this.refreshAggregate(
+          transaction,
+          locked.id,
+          true,
+        ),
+        previousMediaReferenceId: current.avatarMediaReferenceId,
+        mediaReferenceAccepted: false,
+      };
     });
   }
 
@@ -771,11 +892,11 @@ export class ProfileService {
     }
   }
 
-  private async runMutation(
+  async runMutation<T>(
     operation: (
       transaction: Transaction,
-    ) => Promise<ProfileResponseDto>,
-  ): Promise<ProfileResponseDto> {
+    ) => Promise<T>,
+  ): Promise<T> {
     const maxAttempts = 8;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
@@ -832,7 +953,12 @@ export class ProfileService {
     }
     return (
       error.code === 'P2002' &&
-      ['profiles_user_id', 'user_id'].some((name) =>
+      [
+        'profiles_user_id',
+        'user_id',
+        'cvs_file_id',
+        'file_id',
+      ].some((name) =>
         JSON.stringify(error.meta?.target ?? '').includes(
           name,
         ),
