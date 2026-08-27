@@ -34,6 +34,7 @@ export interface AssetLocator {
   deliveryType: StorageDeliveryType;
   expectedFormat: string;
   contextFileId: string;
+  expectedAssetId?: string;
 }
 
 export interface InspectedAsset {
@@ -54,6 +55,17 @@ export interface InspectedAsset {
   sample?: Buffer;
 }
 
+export interface IntentAssetReconciliationResult {
+  observedAssets: number;
+  deletedAssets: number;
+  preservedExpectedAsset: boolean;
+}
+
+export interface StorageOperationOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
 export class StorageAssetNotFoundError extends Error {}
 export class StorageAssetMismatchError extends Error {}
 export class StorageUnavailableError extends Error {}
@@ -65,10 +77,19 @@ export abstract class StorageProvider {
     intent: UploadIntentForSigning,
   ): SignedUploadCapability;
   abstract inspectAsset(locator: AssetLocator): Promise<InspectedAsset>;
-  abstract deleteAsset(locator: AssetLocator): Promise<void>;
+  abstract deleteAsset(
+    locator: AssetLocator,
+    options?: StorageOperationOptions,
+  ): Promise<boolean>;
   abstract deleteIntentAssets(
     contextFileId: string,
+    options?: StorageOperationOptions,
   ): Promise<void>;
+  abstract reconcileIntentAssets(
+    contextFileId: string,
+    preserve: AssetLocator | null,
+    options?: StorageOperationOptions,
+  ): Promise<IntentAssetReconciliationResult>;
   abstract createDownloadUrl(
     locator: AssetLocator,
     filename: string,

@@ -53,6 +53,34 @@ enum StorageDeliveryType {
   @@map("storage_delivery_type")
 }
 
+enum MediaCleanupKind {
+  ORPHAN_PURGE
+  SIBLING_SWEEP
+  FILE_DELETE
+
+  @@map("media_cleanup_kind")
+}
+
+enum MediaCleanupStatus {
+  READY
+  RUNNING
+  RETRY
+  SUCCEEDED
+  CANCELLED
+
+  @@map("media_cleanup_status")
+}
+
+enum MediaCleanupEventType {
+  CLAIMED
+  SUCCEEDED
+  RETRY_SCHEDULED
+  CANCELLED
+  FENCE_LOST
+
+  @@map("media_cleanup_event_type")
+}
+
 model FileMeta {
   id                   String              @id @default(uuid()) @db.Uuid
   requestedBy          String              @map("requested_by") @db.Uuid
@@ -90,14 +118,67 @@ model FileMeta {
   createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt            DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
   references           FileReference[]
+  cleanupJobs          MediaCleanupJob[]
 
   @@unique([storageResourceType, storageDeliveryType, publicId], map: "file_meta_storage_identity_key")
   @@unique([requestedBy, idempotencyKey], map: "file_meta_request_idempotency_key")
   @@index([requestedBy, createdAt], map: "file_meta_requester_created_idx")
   @@index([ownerType, ownerId, status], map: "file_meta_owner_status_idx")
   @@index([status, intentExpiresAt], map: "file_meta_status_expiry_idx")
+  @@index([status, updatedAt, id], map: "file_meta_status_updated_idx")
   @@index([mediaType, status], map: "file_meta_type_status_idx")
   @@map("file_meta")
+}
+
+model MediaCleanupJob {
+  id            String              @id @default(uuid()) @db.Uuid
+  fileId        String              @map("file_id") @db.Uuid
+  kind          MediaCleanupKind
+  status        MediaCleanupStatus  @default(READY)
+  attemptCount  Int                 @default(0) @map("attempt_count")
+  cleanPasses   Int                 @default(0) @map("clean_passes")
+  nextAttemptAt DateTime            @map("next_attempt_at") @db.Timestamptz(3)
+  leaseOwner    String?             @map("lease_owner") @db.VarChar(64)
+  leaseFence    Int                 @default(0) @map("lease_fence")
+  leaseUntil    DateTime?           @map("lease_until") @db.Timestamptz(3)
+  lastErrorCode String?             @map("last_error_code") @db.VarChar(64)
+  completedAt   DateTime?           @map("completed_at") @db.Timestamptz(3)
+  createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  file          FileMeta            @relation(fields: [fileId], references: [id], onDelete: Restrict)
+  events        MediaCleanupEvent[]
+
+  @@unique([fileId, kind], map: "media_cleanup_job_file_kind_key")
+  @@index([status, nextAttemptAt, id], map: "media_cleanup_job_due_idx")
+  @@index([status, leaseUntil, id], map: "media_cleanup_job_lease_idx")
+  @@map("media_cleanup_job")
+}
+
+model MediaCleanupEvent {
+  id            BigInt                @id @default(autoincrement())
+  jobId         String                @map("job_id") @db.Uuid
+  eventType     MediaCleanupEventType @map("event_type")
+  attemptCount  Int                   @map("attempt_count")
+  leaseFence    Int                   @map("lease_fence")
+  workerId      String                @map("worker_id") @db.VarChar(64)
+  errorCode     String?               @map("error_code") @db.VarChar(64)
+  deletedAssets Int?                  @map("deleted_assets")
+  occurredAt    DateTime              @default(now()) @map("occurred_at") @db.Timestamptz(3)
+  job           MediaCleanupJob       @relation(fields: [jobId], references: [id], onDelete: Restrict)
+
+  @@index([jobId, id], map: "media_cleanup_event_job_idx")
+  @@map("media_cleanup_event")
+}
+
+model MediaMaintenanceControl {
+  name       String    @id @db.VarChar(64)
+  nextRunAt  DateTime  @map("next_run_at") @db.Timestamptz(3)
+  leaseOwner String?   @map("lease_owner") @db.VarChar(64)
+  leaseFence Int       @default(0) @map("lease_fence")
+  leaseUntil DateTime? @map("lease_until") @db.Timestamptz(3)
+  updatedAt  DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("media_maintenance_control")
 }
 
 model FileReference {

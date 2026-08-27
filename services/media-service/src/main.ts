@@ -6,6 +6,7 @@ import { AppModule } from './app.module';
 import { InternalAuthService } from './common/auth/internal-auth.service';
 import { JwtVerifierService } from './common/auth/jwt-verifier.service';
 import { PrismaService } from './prisma/prisma.service';
+import { MediaCleanupScheduler } from './media/media-maintenance.service';
 import { StorageProvider } from './storage/storage-provider';
 
 export const configureApplication = (
@@ -77,6 +78,7 @@ export async function bootstrap(): Promise<void> {
   app.get(JwtVerifierService).assertConfiguration();
   app.get(InternalAuthService).assertConfiguration();
   app.get(StorageProvider).assertConfiguration();
+  app.get(MediaCleanupScheduler).assertConfiguration();
   await app.get(PrismaService).$queryRaw`SELECT 1`;
 
   app.enableShutdownHooks();

@@ -2,7 +2,7 @@
 
 > Ngày cập nhật: 27/08/2026
 > Nhánh đối chiếu chính: `develop`
-> Nhánh triển khai lần cập nhật: `feature/media-service/signed-upload-ownership`
+> Nhánh triển khai lần cập nhật: `feature/media-service/scheduled-cleanup-reconciliation`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -20,7 +20,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 | --- | --- | --- |
 | Auth Service | Người 1 | ✅ Core Auth đã hoàn thành gồm đăng ký/OTP, password login, Google OIDC, JWT/JWKS, refresh rotation, logout, reset password, `/auth/me` và Admin account control; account-link Google chỉ còn là hạng mục tùy chọn nếu sản phẩm yêu cầu |
 | User/Profile Service | Người 1 | 🟡 Persistence và Candidate CRUD/completion/auth/Swagger đã hoàn thành; Media, CV APIs/events và recruiter-related read còn pending |
-| File/Media Service | Người 1 | 🟡 Core signed upload/confirm, ownership, reference, private delivery, migration và PostgreSQL test đã hoàn thành; scheduler/reconciliation, live Cloudinary, Offer letter và wiring consumer còn pending |
+| File/Media Service | Người 1 | 🟡 Core signed upload/confirm cùng durable scheduled cleanup/reconciliation đã hoàn thành và verify trên PostgreSQL 16; live Cloudinary, Offer letter, wiring consumer và production hardening còn pending |
 | Admin & Statistics Service | Người 1 | ⏳ Scaffold |
 | Company Service | Người 2 | ✅ Nghiệp vụ chính đã merge |
 | Job & Search Service | Người 2 | 🟡 CRUD/search, transactional `job-events` và Redis/BullMQ/Elasticsearch integration đã hoàn thành; AI recommendation còn thiếu |
@@ -62,7 +62,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** sinh signed upload; client upload trực tiếp lên Cloudinary; xác nhận metadata; xóa file đúng quyền; dọn file rác định kỳ.
 - **Chức năng chính:** `POST /files/signature`, `POST /files`, `DELETE /files/:id`, xác minh MIME/dung lượng/thư mục, ownership và trạng thái file.
 - **Phụ thuộc:** Auth; được Profile, Company, Chat, Interview và Application/Offer sử dụng.
-- **Trạng thái:** core signed upload/confirm, canonical provider verification, ownership, reference binding, private delivery, soft delete, migration và PostgreSQL test đã hoàn thành; scheduler/reconciliation, live Cloudinary, malware/deep parser, Offer letter và wiring consumer còn pending.
+- **Trạng thái:** core signed upload/confirm, canonical provider verification, ownership/reference/private delivery và durable scheduled cleanup/reconciliation đã hoàn thành, gồm distributed lease/fencing, retry, orphan/sibling sweep và PostgreSQL test; live Cloudinary, malware/deep parser, Offer letter, wiring consumer cùng production hardening còn pending.
 
 ## T04 — Admin & Statistics Service
 
@@ -158,7 +158,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Mục tiêu:** chứng minh các luồng xuyên service chạy thật, ổn định và có thể triển khai.
 - **Công nghệ/công cụ:** unit/integration/E2E test, Docker Compose, CI/CD, Swagger/OpenAPI, logging/metrics/tracing.
 - **Đầu ra:** test contract REST/Kafka; migration sạch; test concurrency/idempotency; security test; smoke test; tài liệu môi trường; backup/restore; monitoring.
-- **Trạng thái:** đã có unit/integration test tập trung ở Company, Job/Search, Application, AI và Profile; Profile đạt 1 migration-upgrade check + 8 unit + 23 integration test Docker với PostgreSQL 16.15 sạch, Job/Search đạt 57 unit test và 13 integration test Docker với PostgreSQL 16, Kafka 3.8, Redis 7 và Elasticsearch 8.14.3, Application đạt 173 unit test và 35 integration test, AI đạt 188 test với PostgreSQL 16/pgvector cùng Kafka 3.8 thật; chưa có E2E toàn hệ thống.
+- **Trạng thái:** đã có unit/integration test tập trung ở Company, Job/Search, Application, AI, Profile và Media; Profile đạt 1 migration-upgrade check + 8 unit + 23 integration test Docker với PostgreSQL 16.15 sạch, Media đạt 17 unit + 26 integration test PostgreSQL 16, Job/Search đạt 57 unit test và 13 integration test Docker với PostgreSQL 16, Kafka 3.8, Redis 7 và Elasticsearch 8.14.3, Application đạt 173 unit test và 35 integration test, AI đạt 188 test với PostgreSQL 16/pgvector cùng Kafka 3.8 thật; chưa có E2E toàn hệ thống.
 
 ---
 
@@ -424,7 +424,18 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Prisma/PostgreSQL quản lý intent, canonical metadata, trạng thái, audit và immutable reference. Idempotency, tối đa 20 intent còn hạn/requester/type, atomic 60 intent/requester/giờ, quota công ty, advisory/row lock, lease 5 phút và `aggregateVersion` fencing bảo vệ confirm/delete đồng thời; quota được kiểm tra lại khi finalize để chặn race vượt TTL.
 - Confirm kiểm tra exact public ID/folder/context, resource/delivery type, format, timestamp, byte size, kích thước ảnh, thời lượng video và tối đa 8 KiB magic bytes cho RAW. CV/attachment dùng private authenticated delivery; file đang được tham chiếu không thể xóa; provider outage có cooldown tăng dần và delete failure có trạng thái retry rõ ràng.
 - Docker Node 24 chạy non-root, fail-fast trước khi listen; root Compose có one-shot `media-migrate`, dependency và biến bắt buộc. Đã verify **12/12 unit + 18/18 TAP integration test** trên PostgreSQL 16.15, migration deploy lần hai không còn pending, schema diff không drift, runtime image/fail-fast và Nginx 1.30.4 `nginx -t` đều đạt; production dependency audit báo 0 vulnerability.
-- Phần chưa hoàn thành của P09 là scheduled cleanup/reconciliation, live smoke với sáu Cloudinary preset thật, malware/deep PDF/DOC/DOCX parser, staging/promote public asset, distributed confirm limiter/active-byte quota/retention, Offer letter, wiring các consumer và tách migrator/runtime credential cùng secret rotation/mTLS.
+- Scheduled cleanup/reconciliation được hoàn thành ở mục 2.17. Phần còn lại của P09 là live smoke với sáu Cloudinary preset thật, malware/deep PDF/DOC/DOCX parser, staging/promote public asset, distributed provider limiter/active-byte quota, archive/retention, Offer letter, wiring các consumer và tách migrator/runtime credential cùng secret rotation/mTLS.
+
+## 2.17 File/Media Scheduled Cleanup & Reconciliation — đã merge vào `develop` qua PR #37
+
+- Bổ sung migration `MediaCleanupJob`, append-only `MediaCleanupEvent` và `MediaMaintenanceControl`; job, event và metadata không hard-delete, terminal job bất biến, state/lease shape được bảo vệ bằng CHECK/trigger và scan lifecycle có index `status + updated_at + id`.
+- Scheduler dùng `clock_timestamp()` của PostgreSQL, cycle leader lease có heartbeat/fencing, watchdog và startup jitter. Heartbeat treo/lỗi hoặc mất lease sẽ abort cycle, hủy Admin request đang chạy và dừng discovery/claim mới; shutdown và error path cũng abort cycle đang hoạt động.
+- Job được claim bằng `FOR UPDATE SKIP LOCKED`, có lease/fence riêng và ưu tiên `FILE_DELETE → ORPHAN_PURGE → SIBLING_SWEEP` để backlog lịch sử không chặn xóa khẩn cấp. Cycle complete và job finalize đều CAS lease còn hạn theo DB clock; lease tối thiểu phải bao phủ chuỗi xấu nhất `7 × provider timeout + 10 giây`.
+- `PENDING` hết hạn chuyển `EXPIRED`; `VERIFYING`/`DELETE_PENDING` stale được phục hồi; delete failure được retry. Orphan purge xóa idempotent exact locator trước khi sweep context; active reconciliation giữ canonical chỉ khi immutable `assetId` khớp và xóa sibling/replacement bất thường.
+- Cloudinary context lookup dùng REST `fetch` với Basic Auth, `AbortSignal` timeout/cycle cancellation, tối đa 5 trang × 100 object cho từng `image`/`video`/`raw`. Reconciliation cần hai clean pass kể từ lần xóa cuối; provider outage retry vô hạn với exponential backoff có trần để không để object rác vĩnh viễn.
+- Mỗi cycle log `dueJobsRemaining`, `nonTerminalJobs`, `oldestDueAt`. Mặc định 5 claim/5 phút cố ý bảo thủ theo ngân sách Cloudinary Admin API; production còn phải chốt alert/backlog threshold và distributed provider-rate budget trước khi tăng throughput.
+- Đã verify **17/17 unit + 26/26 TAP integration test** bằng image Node 24 và PostgreSQL 16 thật: cycle election/lease loss/watchdog/error path, cycle/job lease-expiry CAS, queue priority, lifecycle expire/recover, exact orphan ẩn khỏi context, canonical/sibling reconciliation, clean-pass reset, delete retry, outage recovery, lease reclaim/fencing, trigger audit, timeout cancellation và pagination. Migration deploy lần hai không pending; Prisma schema diff không drift.
+- Metadata `EXPIRED/REJECTED/DELETED`, cleanup job và audit event hiện được giữ để truy vết. Chính sách archive/retention, live Cloudinary smoke, alert vận hành và tải thật vẫn là hardening pending; task này không tuyên bố Media production-ready.
 
 ---
 
@@ -535,10 +546,10 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [x] Tạo Prisma migration cho metadata, upload intent, trạng thái, audit và immutable reference; kiểm tra migration lặp và schema drift.
 - [x] Implement signed upload, confirm chỉ bằng `fileId`, owner-scoped metadata/download và soft delete theo ownership; có idempotency, quota, rate limit, lease recovery và fencing.
 - [x] Kiểm tra canonical format/MIME policy, byte size, image dimensions, video duration, resource/delivery type, public ID/folder/context và RAW magic bytes; deep parser/malware scan vẫn pending.
-- [ ] Scheduled cleanup cho upload chưa được xác nhận/file rác.
+- [x] Scheduled cleanup/reconciliation cho intent hết hạn, exact orphan, object sibling/replacement, `REJECTED`, stale lease và delete retry; có distributed cycle/job lease-fencing, hai clean pass, bounded Cloudinary pagination/timeout và PostgreSQL integration test.
 - [x] API nội bộ xác minh `file_id`, cấp private download và bind/release reference cho Profile, Company, Application, Chat, Interview và AI theo scope riêng.
 - [ ] Bổ sung media type/contract riêng cho Offer letter; không dùng tạm type khác.
-- [x] Test intent hết hạn, file giả mạo, exact size boundary đủ sáu type, provider outage, delete đang được tham chiếu/failure, stale lease/fencing, rate/quota concurrency trên PostgreSQL 16.
+- [x] Test intent hết hạn, file giả mạo, exact size boundary đủ sáu type, provider outage, delete đang được tham chiếu/failure, stale lease/fencing, rate/quota concurrency, scheduler lease loss/watchdog/error path, expired finalize CAS, priority, orphan/sibling cleanup và retry recovery trên PostgreSQL 16; full Media đạt 17 unit + 26 integration test.
 - [ ] Chạy live smoke với tài khoản Cloudinary và sáu signed preset thật; test hiện dùng fake provider deterministic và Cloudinary SDK/fetch mock.
 
 ## P10 — Admin & Statistics Service
@@ -663,7 +674,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## Thứ tự ưu tiên đề xuất
 
-1. Hoàn thiện Media scheduler/reconciliation, live Cloudinary smoke và nối Profile CV/avatar; core signed upload/ownership/reference đã hoàn thành, còn Offer letter cần policy riêng.
+1. Chạy live Cloudinary smoke rồi nối Media với Profile CV/avatar; core signed upload/ownership/reference và scheduler/reconciliation đã hoàn thành, còn Offer letter cần policy riêng.
 2. Hoàn thiện quản lý/CV Builder/internal CV APIs của Profile và tích hợp `fileId`; core Auth và Candidate Profile CRUD đã hoàn thành.
 3. Hoàn thiện Profile/File + contract `cv-events` để triển khai CV consumer; phần Redis/BullMQ/Elasticsearch và reindex hardening của Job Service đã hoàn thành.
 4. Implement recommendation jobs/candidates, nối `GET /jobs/recommended`, rồi bổ sung filter kỹ năng của Application.
@@ -694,6 +705,6 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Cấu hình Elasticsearch sai field/type/analyzer hoặc alias trỏ nhiều concrete index hiện bị từ chối trước khi ghi; checklist rollout phải kiểm tra mapping/alias. Graceful shutdown đã release intent nếu gặp race ngay sau claim, nhưng deployment vẫn cần dành thời gian drain dispatcher/worker thay vì kill cưỡng bức.
 - Outbox chưa có job retention tự động; payload chứa cả description/requirements. Các FK từ outbox và `job_index_sync` tới Job đang là `RESTRICT`, nên hard-delete Job sẽ bị chặn; cần chốt soft-delete hoặc thiết kế tombstone intent độc lập trước khi triển khai xóa cứng, không được đổi sang `CASCADE` khi chưa bảo đảm sự kiện/index xóa vẫn được phát.
 - Pipeline chung vẫn cho phép Application ở `OFFER` chuyển thẳng sang `REJECTED` hoặc `WITHDRAWN`; khi đó bản ghi Offer có thể còn `SENT` dù phản hồi tiếp theo đã bị chặn. Cần chốt quy tắc đồng bộ/hủy Offer trong task lifecycle tiếp theo.
-- Media confirm hiện có per-file exponential cooldown và atomic 60 upload intent/requester/giờ, nhưng chưa có distributed token bucket toàn cục cho Cloudinary Admin API; scheduler/reconciliation, live preset smoke, malware/deep parser và staging/promote public asset vẫn là điều kiện trước production.
+- Media confirm hiện có per-file cooldown và atomic 60 upload intent/requester/giờ; scheduler/reconciliation đã có DB-clock, distributed cycle/job lease-fencing, watchdog, exact orphan/sibling sweep, timeout cancellation và capped retry. Tuy nhiên chưa có distributed token bucket toàn cục cho Cloudinary Admin API, alert backlog, cleanup audit/archive retention, live preset smoke, malware/deep parser hoặc staging/promote public asset; các mục này vẫn là điều kiện trước production.
 - Docker daemon/Testcontainers đã hoạt động; AI API/worker đã verify migration, non-root, readiness, Kafka 3.8, PostgreSQL 16/pgvector và model thật; Media đã verify PostgreSQL 16, runtime image và Nginx riêng. Docker Compose toàn hệ thống vẫn chưa được kiểm chứng và hiện thiếu file môi trường runtime của một số service.
 - Nginx đã có route độc lập `/offers/`; route `/bookmarks` và exact path không có dấu `/` cuối vẫn còn pending.
