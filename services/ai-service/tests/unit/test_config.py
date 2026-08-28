@@ -240,3 +240,71 @@ def test_application_lifespan_validates_configuration() -> None:
     with pytest.raises(RuntimeError, match="DATABASE_URL must be configured"):
         with TestClient(application):
             pass
+
+
+def test_chat_configuration_is_conditionally_required_and_valid() -> None:
+    disabled = Settings(
+        database_url=DATABASE_URL,
+        internal_api_key="shared-secret",
+        internal_api_key_job_search=SCOPED_KEY,
+        internal_api_key_job_search_candidates=CANDIDATE_SCOPED_KEY,
+    )
+    disabled.validate()
+
+    enabled = Settings(
+        database_url=DATABASE_URL,
+        internal_api_key="shared-secret",
+        internal_api_key_job_search=SCOPED_KEY,
+        internal_api_key_job_search_candidates=CANDIDATE_SCOPED_KEY,
+        chat_enabled=True,
+        redis_url="redis://:secret@redis:6379/15",
+        chat_redis_key_secret="chat-redis-key-secret-000000000001",
+        anthropic_api_key="anthropic-api-key-00000000000000001",
+        jwt_issuer="https://auth.recruitment.local",
+        jwt_audience="recruitment-api",
+        jwt_jwks_uri="http://auth-service:8080/auth/.well-known/jwks.json",
+        jwt_jwks_allowed_hosts=("auth-service",),
+        jwt_allow_insecure_jwks=True,
+    )
+    enabled.validate()
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"redis_url": "redis://redis:6379"}, "REDIS_URL"),
+        ({"chat_redis_key_secret": "short"}, "CHAT_REDIS_KEY_SECRET"),
+        (
+            {"anthropic_api_key": "replace-with-provider-key-00000000"},
+            "ANTHROPIC_API_KEY",
+        ),
+        ({"anthropic_model": "INVALID MODEL"}, "ANTHROPIC_MODEL"),
+        ({"jwt_issuer": ""}, "JWT_ISSUER"),
+        ({"jwt_jwks_allowed_hosts": ()}, "JWT JWKS"),
+        ({"chat_global_rate_limit": 5}, "CHAT_GLOBAL_RATE_LIMIT"),
+        ({"chat_session_lock_seconds": 19}, "CHAT_SESSION_LOCK_SECONDS"),
+    ],
+)
+def test_chat_configuration_fails_closed(
+    changes: dict[str, object],
+    message: str,
+) -> None:
+    values: dict[str, object] = {
+        "database_url": DATABASE_URL,
+        "internal_api_key": "shared-secret",
+        "internal_api_key_job_search": SCOPED_KEY,
+        "internal_api_key_job_search_candidates": CANDIDATE_SCOPED_KEY,
+        "chat_enabled": True,
+        "redis_url": "redis://:secret@redis:6379/15",
+        "chat_redis_key_secret": "chat-redis-key-secret-000000000001",
+        "anthropic_api_key": "anthropic-api-key-00000000000000001",
+        "jwt_issuer": "https://auth.recruitment.local",
+        "jwt_audience": "recruitment-api",
+        "jwt_jwks_uri": "http://auth-service:8080/auth/.well-known/jwks.json",
+        "jwt_jwks_allowed_hosts": ("auth-service",),
+        "jwt_allow_insecure_jwks": True,
+    }
+    values.update(changes)
+
+    with pytest.raises(RuntimeError, match=message):
+        Settings(**values).validate()  # type: ignore[arg-type]

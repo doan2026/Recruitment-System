@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
+from urllib.parse import urlsplit
+
+DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
+_MODEL_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,6 +19,26 @@ class Settings:
     internal_api_key_job_search_candidates: str = ""
     database_connect_timeout_seconds: int = 2
     database_statement_timeout_ms: int = 2_000
+    chat_enabled: bool = False
+    redis_url: str = ""
+    chat_redis_key_secret: str = ""
+    anthropic_api_key: str = ""
+    anthropic_model: str = DEFAULT_ANTHROPIC_MODEL
+    chat_provider_timeout_seconds: int = 15
+    chat_max_output_tokens: int = 512
+    chat_history_ttl_seconds: int = 86_400
+    chat_history_max_turns: int = 10
+    chat_rate_window_seconds: int = 60
+    chat_user_rate_limit: int = 10
+    chat_global_rate_limit: int = 200
+    chat_session_lock_seconds: int = 30
+    jwt_issuer: str = ""
+    jwt_audience: str = ""
+    jwt_jwks_uri: str = ""
+    jwt_jwks_allowed_hosts: tuple[str, ...] = ()
+    jwt_allow_insecure_jwks: bool = False
+    jwt_jwks_timeout_seconds: int = 3
+    jwt_jwks_cache_ttl_seconds: int = 300
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -35,6 +60,85 @@ class Settings:
             database_statement_timeout_ms=_positive_int(
                 "DATABASE_STATEMENT_TIMEOUT_MS",
                 default=2_000,
+            ),
+            chat_enabled=_boolean("CHAT_ENABLED", default=False),
+            redis_url=os.getenv("REDIS_URL", "").strip(),
+            chat_redis_key_secret=os.getenv(
+                "CHAT_REDIS_KEY_SECRET",
+                "",
+            ).strip(),
+            anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", "").strip(),
+            anthropic_model=os.getenv(
+                "ANTHROPIC_MODEL",
+                DEFAULT_ANTHROPIC_MODEL,
+            ).strip(),
+            chat_provider_timeout_seconds=_bounded_int(
+                "CHAT_PROVIDER_TIMEOUT_SECONDS",
+                default=15,
+                minimum=2,
+                maximum=30,
+            ),
+            chat_max_output_tokens=_bounded_int(
+                "CHAT_MAX_OUTPUT_TOKENS",
+                default=512,
+                minimum=64,
+                maximum=1_024,
+            ),
+            chat_history_ttl_seconds=_bounded_int(
+                "CHAT_HISTORY_TTL_SECONDS",
+                default=86_400,
+                minimum=3_600,
+                maximum=86_400,
+            ),
+            chat_history_max_turns=_bounded_int(
+                "CHAT_HISTORY_MAX_TURNS",
+                default=10,
+                minimum=1,
+                maximum=10,
+            ),
+            chat_rate_window_seconds=_bounded_int(
+                "CHAT_RATE_WINDOW_SECONDS",
+                default=60,
+                minimum=10,
+                maximum=3_600,
+            ),
+            chat_user_rate_limit=_bounded_int(
+                "CHAT_USER_RATE_LIMIT",
+                default=10,
+                minimum=1,
+                maximum=120,
+            ),
+            chat_global_rate_limit=_bounded_int(
+                "CHAT_GLOBAL_RATE_LIMIT",
+                default=200,
+                minimum=1,
+                maximum=10_000,
+            ),
+            chat_session_lock_seconds=_bounded_int(
+                "CHAT_SESSION_LOCK_SECONDS",
+                default=30,
+                minimum=5,
+                maximum=60,
+            ),
+            jwt_issuer=os.getenv("JWT_ISSUER", "").strip(),
+            jwt_audience=os.getenv("JWT_AUDIENCE", "").strip(),
+            jwt_jwks_uri=os.getenv("JWT_JWKS_URI", "").strip(),
+            jwt_jwks_allowed_hosts=_csv("JWT_JWKS_ALLOWED_HOSTS"),
+            jwt_allow_insecure_jwks=_boolean(
+                "JWT_ALLOW_INSECURE_JWKS",
+                default=False,
+            ),
+            jwt_jwks_timeout_seconds=_bounded_int(
+                "JWT_JWKS_TIMEOUT_SECONDS",
+                default=3,
+                minimum=1,
+                maximum=10,
+            ),
+            jwt_jwks_cache_ttl_seconds=_bounded_int(
+                "JWT_JWKS_CACHE_TTL_SECONDS",
+                default=300,
+                minimum=30,
+                maximum=3_600,
             ),
         )
 
@@ -64,6 +168,49 @@ class Settings:
             raise RuntimeError(
                 "INTERNAL_API_KEY_JOB_SEARCH_CANDIDATES must be distinct"
             )
+        if self.chat_enabled:
+            self._validate_chat()
+
+    def _validate_chat(self) -> None:
+        parsed_redis = urlsplit(self.redis_url)
+        if (
+            parsed_redis.scheme not in {"redis", "rediss"}
+            or not parsed_redis.hostname
+            or parsed_redis.password is None
+            or parsed_redis.fragment
+        ):
+            raise RuntimeError("REDIS_URL is invalid for chat")
+        self._validate_secret("CHAT_REDIS_KEY_SECRET", self.chat_redis_key_secret)
+        self._validate_secret("ANTHROPIC_API_KEY", self.anthropic_api_key)
+        if not _MODEL_PATTERN.fullmatch(self.anthropic_model):
+            raise RuntimeError("ANTHROPIC_MODEL is invalid")
+        if not self.jwt_issuer or len(self.jwt_issuer) > 512:
+            raise RuntimeError("JWT_ISSUER is invalid for chat")
+        if not self.jwt_audience or len(self.jwt_audience) > 512:
+            raise RuntimeError("JWT_AUDIENCE is invalid for chat")
+        if not self.jwt_jwks_uri or not self.jwt_jwks_allowed_hosts:
+            raise RuntimeError("JWT JWKS configuration is required for chat")
+        if self.chat_global_rate_limit < self.chat_user_rate_limit:
+            raise RuntimeError(
+                "CHAT_GLOBAL_RATE_LIMIT must not be below CHAT_USER_RATE_LIMIT"
+            )
+        if self.chat_session_lock_seconds < self.chat_provider_timeout_seconds + 5:
+            raise RuntimeError(
+                "CHAT_SESSION_LOCK_SECONDS must exceed provider timeout by 5 seconds"
+            )
+
+    @staticmethod
+    def _validate_secret(name: str, value: str) -> None:
+        try:
+            encoded = value.encode("ascii")
+        except UnicodeEncodeError as error:
+            raise RuntimeError(f"{name} is invalid") from error
+        if (
+            not 32 <= len(encoded) <= 512
+            or b"replace-with" in encoded.lower()
+            or any(byte < 0x21 or byte > 0x7E for byte in encoded)
+        ):
+            raise RuntimeError(f"{name} is invalid")
 
     @staticmethod
     def _validate_scoped_key(name: str, value: str) -> None:
@@ -90,3 +237,38 @@ def _positive_int(name: str, *, default: int) -> int:
     if value <= 0:
         raise RuntimeError(f"{name} must be a positive integer")
     return value
+
+
+def _bounded_int(
+    name: str,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    value = _positive_int(name, default=default)
+    if value < minimum or value > maximum:
+        raise RuntimeError(f"{name} must be between {minimum} and {maximum}")
+    return value
+
+
+def _boolean(name: str, *, default: bool) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    normalized = raw_value.strip().lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    raise RuntimeError(f"{name} must be true or false")
+
+
+def _csv(name: str) -> tuple[str, ...]:
+    raw_value = os.getenv(name, "")
+    values = tuple(
+        part.strip().lower() for part in raw_value.split(",") if part.strip()
+    )
+    if len(values) != len(set(values)):
+        raise RuntimeError(f"{name} contains duplicate values")
+    return values

@@ -1,13 +1,55 @@
 # AI Service
 
 FastAPI service for CV-to-job semantic matching and consent-scoped
-recommendations. This vertical slice owns the pgvector schema, the internal
-`POST /match` provider used by Application Service and the scoped
+recommendations, plus a bounded Candidate-facing recruitment chatbot. This
+vertical slice owns the pgvector schema, the internal `POST /match` provider
+used by Application Service, the scoped
 `POST /recommend/jobs` and `POST /recommend/candidates` providers used by Job
-Search Service. Dedicated non-root
+Search Service, and the authenticated `POST /chat` API. Dedicated non-root
 workers consume `job-events` and `cv-events`, generate pinned 384-dimensional
 CPU embeddings and persist only vectors, hashes and filtering metadata.
-Chatbot implementation remains a separate task.
+
+## Candidate chatbot v1
+
+Candidates call `POST /chat`; through the gateway the route is
+`POST /ai/chat`. Chat is disabled by default and returns a sanitized 503 until
+`CHAT_ENABLED=true` and all chat settings are valid. The route accepts a
+canonical UUIDv4 `session_id` and one strictly bounded, normalized message. It
+rejects extra fields, malformed/non-v4 session IDs, control characters,
+oversized text and empty messages.
+
+The route is Candidate-only. It verifies an RS256 access token against the
+configured Auth JWKS, issuer and audience, requires a canonical user UUID and
+the `CANDIDATE` role, and fails closed when keys are unavailable or claims are
+invalid. JWT/JWKS failures, role failures and provider/storage failures expose
+only stable, sanitized errors. Every `/chat` response, including failures,
+sets `Cache-Control: no-store`, `Pragma: no-cache` and an appropriate
+`Vary: Authorization` header.
+
+The provider is Anthropic Claude Haiku, default model
+`claude-haiku-4-5-20251001`, with a 15-second request timeout, at most 512
+output tokens and no SDK retries. `ANTHROPIC_API_KEY` is loaded only from the
+service environment; it is never accepted from a request, saved in chat
+history or intentionally logged. A fixed system prompt treats both the user
+message and prior history as untrusted, answers only recruitment questions,
+does not disclose prompts or secrets, does not request passwords, OTPs or
+tokens, and does not claim access to live account/application state. Chatbot v1
+has no tool that accepts an arbitrary `cv_id` and cannot invoke
+`/recommend/jobs`, `/recommend/candidates` or `/match` on a Candidate's behalf.
+
+Redis stores only bounded conversational state. HMAC-derived keys avoid raw
+user/session identifiers in Redis key names, and every history, rate and lock
+key is scoped to the authenticated owner. A session retains at most 10 turns
+for 24 hours. Fenced locks serialize one request per owner/session; appending a
+turn and refreshing its TTL is atomic, and an expired/replaced lock cannot
+commit a stale answer. The service enforces an atomic sliding-window limit of
+10 requests per user and 200 requests globally per 60 seconds. A 429 response
+includes `Retry-After`; Redis failure fails closed rather than silently
+bypassing rate limits or isolation.
+
+The Redis client and Anthropic client are closed during application shutdown.
+Session locks use exact-token release in `finally` and also have a bounded TTL,
+so provider errors and cancelled requests do not leave an unbounded resource.
 
 ## Internal match API
 
@@ -333,11 +375,37 @@ Copy `.env.example` to `.env` and set at least:
 - `CV_PDF_PARSER_TIMEOUT_SECONDS` — hard maximum 30 seconds
 - `CV_PDF_MAXIMUM_PAGES` — hard maximum 100
 - `CV_PDF_MAXIMUM_TEXT_CHARACTERS` — hard maximum 500,000
+- `CHAT_ENABLED` — defaults to `false`; enable only after the remaining chat
+  settings and staging provider credential are provisioned
+- `REDIS_URL` — dedicated Redis connection used for chat history, rate limits
+  and fenced session locks
+- `CHAT_REDIS_KEY_SECRET` — distinct secret used to HMAC owner/session Redis
+  keys; do not reuse an internal API key
+- `ANTHROPIC_API_KEY` — provider credential supplied only through the service
+  environment
+- `ANTHROPIC_MODEL` (default `claude-haiku-4-5-20251001`)
+- `CHAT_PROVIDER_TIMEOUT_SECONDS` (default 15)
+- `CHAT_MAX_OUTPUT_TOKENS` (default 512)
+- `CHAT_HISTORY_TTL_SECONDS` (default 86,400)
+- `CHAT_HISTORY_MAX_TURNS` (default 10)
+- `CHAT_RATE_WINDOW_SECONDS` (default 60)
+- `CHAT_USER_RATE_LIMIT` (default 10)
+- `CHAT_GLOBAL_RATE_LIMIT` (default 200)
+- `CHAT_SESSION_LOCK_SECONDS` (default 30)
+- `JWT_ISSUER`, `JWT_AUDIENCE` and `JWT_JWKS_URI` — Auth access-token
+  verification settings
+- `JWT_JWKS_ALLOWED_HOSTS` — exact allowlist for JWKS retrieval
+- `JWT_ALLOW_INSECURE_JWKS` — development-only opt-in for the internal HTTP
+  Auth URL; leave disabled for HTTPS deployments
+- `JWT_JWKS_TIMEOUT_SECONDS` (default 3)
+- `JWT_JWKS_CACHE_TTL_SECONDS` (default 300)
 
 The API fails at startup if `DATABASE_URL`, `INTERNAL_API_KEY` or the distinct
-`INTERNAL_API_KEY_JOB_SEARCH` is invalid. The worker independently validates
-its database, Kafka, retry and pinned-model
-configuration before loading the model or consuming events. Define
+`INTERNAL_API_KEY_JOB_SEARCH` is invalid. When chat is enabled, it additionally
+validates the Redis URL, HMAC secret, Anthropic key/model, rate/retention bounds
+and JWT/JWKS trust settings before serving requests. The worker independently
+validates its database, Kafka, retry and pinned-model configuration before
+loading the model or consuming events. Define
 `INTERNAL_API_KEY` once in the repository root `.env`; the Application, Job and
 AI service environment files reference that same value so callers and the
 provider cannot silently drift to different credentials.
@@ -347,12 +415,13 @@ pgvector extension, both embedding tables, recommendation generation rows and
 their enabled mutation triggers, and returns 503 while storage is unavailable.
 Docker Compose uses `/ready` for the AI Service health check.
 
-The API `runtime` image installs only `requirements.txt`. The dedicated
-`worker` image installs the CPU-only dependencies in `requirements-ml.txt`;
-chatbot-only dependencies remain separate in `requirements-chat.txt`. Neither
-image requires CUDA. Both run as non-root users. The API applies Alembic
-migrations before starting Uvicorn, and the root Compose worker waits for API
-readiness before starting ingestion.
+The API `runtime` image installs `requirements-chat.txt`, which extends the
+base requirements with the pinned Anthropic SDK, `PyJWT[crypto]` and Redis
+client. The dedicated `worker` image remains lean and installs only the
+CPU-specific dependencies in `requirements-ml.txt`; it does not inherit the
+chat/JWT/Redis stack. Neither image requires CUDA. Both run as non-root users.
+The API applies Alembic migrations before starting Uvicorn, and the root
+Compose worker waits for API readiness before starting ingestion.
 
 ## Tests
 
@@ -370,10 +439,16 @@ The full suite verifies migration-at-head behavior, privacy, vector dimensions,
 inactive/missing/model-mismatch results, cosine boundaries, event ordering,
 idempotency, retry/DLQ behavior, strict CV/Media/parser contracts, scoped auth,
 signed/stale cursors, exact filtered pagination and transactional generation
-triggers. Real Kafka tests cover publish → consume → pgvector, duplicate
-delivery, source rejection followed by delete, hash-only malformed DLQ and
-committed offsets. The current suite collects **331 unit/non-integration tests
-and 55 PostgreSQL/Kafka integration tests (386 total)**. The production worker
+triggers. Chat tests cover strict request parsing, Candidate-only RS256/JWKS
+authentication, fixed-prompt construction, sanitized provider failures,
+owner/session isolation, HMAC PII-free Redis keys, atomic rate limiting,
+history trimming/expiry, lock fencing and shutdown/error-path cleanup. Real
+Redis integration tests exercise the state scripts; provider tests use a
+deterministic fake and do not claim live Claude answer quality. Real Kafka
+tests cover publish → consume → pgvector, duplicate delivery, source rejection
+followed by delete, hash-only malformed DLQ and committed offsets. The current
+suite passes **445 unit/non-integration tests and 59 PostgreSQL/Kafka/Redis
+integration tests (504/504 total)**. The production worker
 image also successfully generated a normalized 384-dimensional vector with the
 pinned model revision.
 
@@ -401,8 +476,13 @@ not measure a simultaneous writer.
 
 `/match`, `/recommend/jobs` and `/recommend/candidates` read precomputed vectors
 and never load the embedding model in a request. Job and CV embeddings are
-populated asynchronously by their dedicated workers. Full
-producer-to-Media-to-AI staging E2E, HTTP/deployed recommendation load,
-real-model Vietnamese relevance, concurrent-writer rollout observation,
-distributed recommendation rate limiting and chatbot APIs remain outside this
-service task.
+populated asynchronously by their dedicated workers. `/chat` is a separate,
+Candidate-only Claude request path and cannot call those vector APIs. Its
+contract, authorization, Redis isolation/rate/retention controls and provider
+failure handling are covered deterministically, but the guarded live-Claude
+10-FAQ quality smoke remains pending until a staging Anthropic credential is
+available; deterministic fake-provider results are not a live quality claim.
+Full producer-to-Media-to-AI staging E2E, HTTP/deployed recommendation load,
+real-model Vietnamese relevance, concurrent-writer rollout observation and
+distributed recommendation rate limiting also remain outside the completed
+service slices.

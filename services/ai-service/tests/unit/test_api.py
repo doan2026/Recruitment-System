@@ -252,22 +252,17 @@ def test_match_rejects_invalid_repository_result(result: MatchResult) -> None:
     assert_service_unavailable(response)
 
 
-def test_health_and_chat_placeholder_remain_available() -> None:
+def test_health_remains_available_and_chat_placeholder_is_removed() -> None:
     repository = StubMatchRepository(result=MatchResult(0.5, None))
 
     with make_client(repository) as client:
         health = client.get("/health")
-        chat = client.post(
-            "/chat",
-            json={"session_id": "session-1", "message": "Hello"},
-        )
+        chat = client.post("/chat", json={"session_id": "invalid", "message": "Hello"})
 
     assert health.status_code == 200
     assert health.json() == {"service": "ai-service", "status": "UP"}
-    assert chat.status_code == 200
-    assert chat.json() == {
-        "message": "AI chat service is ready for provider integration."
-    }
+    assert chat.status_code == 503
+    assert chat.json()["code"] == "CHAT_NOT_CONFIGURED"
     assert repository.calls == []
 
 
