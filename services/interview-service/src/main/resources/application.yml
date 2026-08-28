@@ -1,8 +1,61 @@
+server:
+  port: ${PORT:8080}
+
 spring:
-  application: { name: interview-service }
+  application:
+    name: interview-service
   datasource:
     url: ${DATABASE_URL}
     username: ${POSTGRES_USER}
     password: ${POSTGRES_PASSWORD}
-  jpa: { open-in-view: false, hibernate: { ddl-auto: validate } }
-management: { endpoints: { web: { exposure: { include: health,info } } } }
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: interview
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    create-schemas: true
+    default-schema: interview
+    schemas: interview
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:kafka:9092}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          public-key-location: file:${JWT_PUBLIC_KEY_PATH}
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+
+interview:
+  jwt:
+    issuer: ${JWT_ISSUER:https://auth.recruitment.local}
+    audience: ${JWT_AUDIENCE:recruitment-api}
+    public-key-path: ${JWT_PUBLIC_KEY_PATH}
+  cors:
+    allowed-origins: ${CORS_ORIGINS:http://localhost:3000}
+  application-client:
+    base-url: ${APPLICATION_SERVICE_URL:http://application-service:8080}
+    allowed-hosts: ${APPLICATION_SERVICE_ALLOWED_HOSTS:application-service}
+    request-timeout-ms: ${APPLICATION_REQUEST_TIMEOUT_MS:2000}
+    internal-api-key: ${APPLICATION_INTERNAL_API_KEY}
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+springdoc:
+  swagger-ui:
+    path: /docs
