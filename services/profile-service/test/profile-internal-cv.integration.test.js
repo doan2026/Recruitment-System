@@ -186,7 +186,7 @@ before(async () => {
   await assertSafeTestDatabase(prisma);
   canResetSchema = true;
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "profile"."profiles" CASCADE',
+    'TRUNCATE TABLE "profile"."cv_event_outbox", "profile"."profiles" CASCADE',
   );
 
   mediaServer = createServer((request, response) => {
@@ -295,7 +295,7 @@ after(async () => {
   try {
     if (canResetSchema) {
       await prisma.$executeRawUnsafe(
-        'TRUNCATE TABLE "profile"."profiles" CASCADE',
+        'TRUNCATE TABLE "profile"."cv_event_outbox", "profile"."profiles" CASCADE',
       );
     }
     if (app) await app.close();

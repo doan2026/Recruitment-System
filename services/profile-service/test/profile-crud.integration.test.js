@@ -126,7 +126,7 @@ before(async () => {
   await assertSafeTestDatabase(prisma);
   canResetSchema = true;
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "profile"."profiles" CASCADE',
+    'TRUNCATE TABLE "profile"."cv_event_outbox", "profile"."profiles" CASCADE',
   );
   app = await NestFactory.create(AppModule, { logger: false });
   configureApplication(app);
@@ -139,7 +139,7 @@ after(async () => {
   try {
     if (canResetSchema) {
       await prisma.$executeRawUnsafe(
-        'TRUNCATE TABLE "profile"."profiles" CASCADE',
+        'TRUNCATE TABLE "profile"."cv_event_outbox", "profile"."profiles" CASCADE',
       );
     }
     if (app) {

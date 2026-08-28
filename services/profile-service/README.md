@@ -58,6 +58,14 @@ Database constraints validate percentages, dates, normalized skills, HTTPS URLs,
 
 Deploy Application V7 before enabling the new Profile deletion path. Wait for the Application migration to backfill gates and for every Application replica to serve the acquire endpoint; the database trigger then protects submissions from both new and old writers. Deploy the Profile migration and new Profile replicas second, then drain all old Profile replicas before declaring rollout complete: old code remains safely soft-delete-only but does not create resumable workflows or stable retired-file errors. Keep the Profile fence and Media-cleanup workers enabled until `PENDING_FENCE` workflows and due cleanup jobs have drained; do not remove or reopen Application gate rows during a rollback because a committed `FENCED` decision is permanent. Legacy soft-deleted rows are retained, stay soft-only, and are not part of this drain.
 
+## Transactional CV events implemented
+
+- Every AI-relevant CV mutation appends an immutable `cv_event_outbox` row in the same Serializable PostgreSQL transaction. Kafka delivery is at-least-once with a stable `event_id`; the message key is `cv_id`, and consumers must deduplicate by event ID and reject older aggregate versions. The outbox deliberately has no foreign key to CV/Profile so a `DELETED` tombstone survives physical CV deletion.
+- `cv-events` schema v1 is a flat snake_case value with exactly nine fields: `event_id`, `action`, `cv_id`, `candidate_id`, `file_id`, `cv_type`, `occurred_at`, `schema_version`, and `aggregate_version`. `schema_version` is 1; action is `UPSERTED`, `DEACTIVATED`, or `DELETED`; `cv_type` is `UPLOAD` or `ONLINE`. The payload never contains a file/download URL, Media reference, builder JSON, CV title, or Profile PII. AI uses its distinct Media service credential and the candidate/file/type tuple to request a short-lived private download URL only for `UPSERTED`.
+- Upload and Online root creation emit `UPSERTED`. A revision atomically emits `DEACTIVATED` for its retained predecessor and `UPSERTED` for its new snapshot. Rename/default changes do not emit because the PDF content is unchanged. Explicit delete emits nothing while the Application fence remains `PENDING_FENCE`; terminal `USED` emits `DEACTIVATED` and preserves the historical vector, while terminal unused `FENCED` hard deletion emits `DELETED`. Retry/reconciliation replays never append a second terminal event.
+- Multiple replicas claim due events with `FOR UPDATE SKIP LOCKED`, block a later unpublished version of the same CV, and use owner plus monotonic lease fencing for renew/success/retry compare-and-set. Kafka request/retry bounds fit inside the validated lease, long sends heartbeat the lease, failures persist only a sanitized error code with bounded exponential jitter, and an ACK-before-database-mark crash may safely redeliver the same event ID.
+- `CV_EVENT_PUBLISHER_ENABLED=false` pauses dispatch without disabling transactional append. This is the safe rollout switch: migrate and deploy Profile writers first, deploy the strict AI consumer and its distinct Media key, then enable dispatch. The migration intentionally does not synthesize events for historical active CVs; a reviewed active Media-backed baseline/replay is required for an already populated environment. Published-row retention, Kafka TLS/SASL, backlog/oldest-age alerts, and deployed Profile–Media–AI E2E remain production rollout requirements.
+
 ## Online CV Builder implemented
 
 - `POST /cvs/online` publishes an owner-only Online CV snapshot from `title`, safe `templateId`, `contentSchemaVersion=1`, object `contentJson`, and a confirmed private PDF `fileId`. `GET /cvs/:id/builder` reopens only the Candidate's active Online snapshot. `POST /cvs/:id/revisions` accepts a full replacement snapshot plus `expectedAggregateVersion` and always returns a new `cvId`; singular `/cv` aliases are supported.
@@ -98,6 +106,9 @@ export MEDIA_REQUEST_TIMEOUT_MS='3000'
 export APPLICATION_REQUEST_TIMEOUT_MS='3000'
 export CV_DELETION_RECONCILE_ENABLED='true'
 export CV_MEDIA_CLEANUP_ENABLED='true'
+export KAFKA_BROKERS='localhost:9092'
+export KAFKA_CV_TOPIC='cv-events'
+export CV_EVENT_PUBLISHER_ENABLED='true'
 export JWT_JWKS_URI='http://localhost:8080/auth/.well-known/jwks.json'
 export JWT_ALLOW_INSECURE_JWKS='true'
 export JWT_ISSUER='https://auth.recruitment.local'
@@ -111,9 +122,13 @@ npm run start
 
 Run migrations as a separate deployment job with a dedicated DDL-capable migrator role. `npm run start:prod` only starts the compiled service so its runtime database role can remain DML-only; the production image runs as the non-root `node` user.
 
-## PostgreSQL integration test
+## PostgreSQL/Kafka integration test
 
-The Docker suite exercises completion, Media, CV lifecycle, deletion-fence, and Online Builder upgrade paths without rewriting legacy URLs. It deploys all migrations to a clean PostgreSQL 16 instance and deploys them a second time to prove there are no pending changes. Upgrade coverage holds legacy writers open independently while the writer-locking migrations wait, then proves deterministic backfill includes the committed rows. Destructive test scripts fail before `DROP/TRUNCATE` unless `ALLOW_PROFILE_SCHEMA_RESET=true` and the database name ends in `_test`. Coverage includes real constraints/relations/JSONB, strict JWT failures, validation/IDOR, OpenAPI contracts, collection/CV-retention caps, completion persistence, Media hardening/private delivery/compensation, canonical Application access, lifecycle CAS/default behavior, `USED` retention, fenced hard deletion, pending-saga recovery, durable Media cleanup retry, direct-SQL authorization guards, versioned Builder JSON at the exact JSONB byte boundary, immutable snapshots, idempotent create/revision, concurrent successor serialization, historical revision resolution, and migration safety:
+The Docker suite exercises completion, Media, CV lifecycle, deletion-fence, transactional CV event intents, and Online Builder upgrade paths without rewriting legacy URLs. It deploys all migrations to a clean PostgreSQL 16 instance and deploys them a second time to prove there are no pending changes. Upgrade coverage holds legacy writers open independently while the writer-locking migrations wait, then proves deterministic backfill includes the committed rows. Destructive test scripts fail before `DROP/TRUNCATE` unless `ALLOW_PROFILE_SCHEMA_RESET=true` and the database name ends in `_test`. Coverage includes real constraints/relations/JSONB, strict JWT failures, validation/IDOR, OpenAPI contracts, collection/CV-retention caps, completion persistence, Media hardening/private delivery/compensation, canonical Application access, lifecycle CAS/default behavior, `USED` retention, fenced hard deletion, pending-saga recovery, durable Media cleanup retry, exact/private outbox payloads, direct-SQL authorization/immutability guards, versioned Builder JSON at the exact JSONB byte boundary, immutable snapshots, idempotent create/revision, concurrent successor serialization, historical revision resolution, and migration safety:
+
+The suite also starts an isolated Apache Kafka 3.8 broker with topic auto-creation disabled and proves `cv_id` keys, exact nine-field payloads, per-CV aggregate-version order, persisted `published_at`, and that retrying terminal outbox rows emits no extra records.
+
+The verified clean Compose run passes 46 unit tests and 66 integration tests, applies all seven migrations to PostgreSQL 16, and reports no pending migration on the second deploy.
 
 ```bash
 docker compose -f compose.test.yml up --build --abort-on-container-exit --exit-code-from profile-tests
@@ -124,9 +139,9 @@ docker compose -f compose.test.yml down -v
 
 - The Candidate CV Manager/Builder UI, template components, browser PDF renderer, and live Cloudinary preset smoke remain frontend/deployment work. The backend contract intentionally starts from an already confirmed Media `fileId` and does not claim a server-side renderer.
 - A deployed multi-service REST contract/E2E suite remains part of P17. The service suites cover the canonical request/response and security behavior, but this task does not claim the full Candidate or Recruiter journey.
-- Canonical versioned `cv-events` contract, transactional writer, publisher/retry/retention, and AI consumer integration.
+- The companion P11 slice now implements AI's strict `cv-events` consumer and bounded private-PDF embedding pipeline. A controlled historical baseline, live Profile–Media–AI/Cloudinary E2E, automatic published-row retention, monitoring, and Kafka TLS/SASL remain rollout work.
 - Avatar replacement/removal still uses bounded post-commit reference cleanup. CV hard deletion has its own durable cleanup job, but extending the same durable mechanism to every Profile Media lifecycle remains future hardening.
 - Separate PostgreSQL role grants so Profile PII is inaccessible to other service roles. The image supports a separate migration job, but repository-wide grants are still pending.
 - Root Compose currently follows the repository's shared-PostgreSQL/schema-per-service layout. This is an explicit deviation from the architecture document's separate `profile-db` database/container and must be resolved or formally accepted before production.
-- Candidate Profile and CV aggregate versions are monotonic and transactional; registration enforces the max-five rule, lifecycle mutations use compare-and-set, and the database now enforces exactly one default whenever active CVs exist. Atomic CV+event-intent writes belong to the later event task.
+- Candidate Profile and CV aggregate versions are monotonic and transactional; registration enforces the max-five rule, lifecycle mutations use compare-and-set, the database enforces exactly one default whenever active CVs exist, and AI-relevant CV changes now commit their event intent atomically.
 - Distributed per-user/ingress rate limiting remains production hardening; collection rows and retained CV snapshots are now transactionally bounded, but request frequency still needs a shared gateway/WAF policy for multi-replica production.

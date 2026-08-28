@@ -233,7 +233,7 @@ before(async () => {
   await assertSafeTestDatabase(prisma);
   canResetSchema = true;
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "profile"."profiles" CASCADE',
+    'TRUNCATE TABLE "profile"."cv_event_outbox", "profile"."profiles" CASCADE',
   );
 
   usageServer = createServer((request, response) => {
@@ -348,7 +348,7 @@ after(async () => {
   try {
     if (canResetSchema) {
       await prisma.$executeRawUnsafe(
-        'TRUNCATE TABLE "profile"."profiles" CASCADE',
+        'TRUNCATE TABLE "profile"."cv_event_outbox", "profile"."profiles" CASCADE',
       );
     }
     if (app) await app.close();
@@ -591,6 +591,14 @@ test('Profile CV lifecycle integration', async (t) => {
     assert.equal(row.isDefault, false);
     assert.equal(row.firstUsedAt.toISOString(), USED_AT_B1);
     assert.equal(row.mediaReferenceId, mediaReferenceBefore);
+    const retainedEvents = await prisma.cvEventOutbox.findMany({
+      where: { cvId: CV_B1 },
+    });
+    assert.deepEqual(
+      retainedEvents.map((event) => [event.action, event.aggregateVersion]),
+      [['DEACTIVATED', 2]],
+    );
+    assert.equal(retainedEvents[0].payload.file_id, row.fileId);
     const active = await prisma.cv.findMany({
       where: { userId: CANDIDATE_B, isDeleted: false },
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
@@ -629,6 +637,10 @@ test('Profile CV lifecycle integration', async (t) => {
     assert.equal(internal.firstUsedAt, USED_AT_B1);
     assert.equal(internal.fileId, row.fileId);
     assert.equal('mediaReferenceId' in internal, false);
+    assert.equal(
+      await prisma.cvEventOutbox.count({ where: { cvId: CV_B1 } }),
+      1,
+    );
   });
 
   await t.test('non-default, last, and repeated deletes preserve revisions without extra lookups', async () => {
@@ -766,6 +778,13 @@ test('Profile CV lifecycle integration', async (t) => {
         },
       }),
       3,
+    );
+    assert.equal(
+      await prisma.cvEventOutbox.count({
+        where: { cvId: { in: [CV_D1, CV_D2, CV_D3] } },
+      }),
+      0,
+      'PENDING_FENCE must not publish a premature terminal decision',
     );
     assert.equal(
       (

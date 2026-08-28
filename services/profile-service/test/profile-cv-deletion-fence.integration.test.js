@@ -280,7 +280,9 @@ const closeServer = (server) =>
 before(async () => {
   await assertSafeTestDatabase(prisma);
   canResetSchema = true;
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "profile"."profiles" CASCADE');
+  await prisma.$executeRawUnsafe(
+    'TRUNCATE TABLE "profile"."cv_event_outbox", "profile"."profiles" CASCADE',
+  );
 
   applicationServer = await startServer(handleApplication);
   mediaServer = await startServer(handleMedia);
@@ -313,7 +315,9 @@ before(async () => {
 after(async () => {
   try {
     if (canResetSchema) {
-      await prisma.$executeRawUnsafe('TRUNCATE TABLE "profile"."profiles" CASCADE');
+      await prisma.$executeRawUnsafe(
+        'TRUNCATE TABLE "profile"."cv_event_outbox", "profile"."profiles" CASCADE',
+      );
     }
     if (app) await app.close();
     if (applicationServer) await closeServer(applicationServer);
@@ -357,6 +361,15 @@ test('unused CV hard-delete is fenced, audited, cleanup-safe, idempotent, and re
   assert.equal(workflow.fileId, FILE_HARD);
   assert.equal(workflow.mediaReferenceId, REF_HARD);
   assert.equal(workflow.cleanup.status, CvMediaCleanupStatus.SUCCEEDED);
+  const hardEvents = await prisma.cvEventOutbox.findMany({
+    where: { cvId: CV_HARD },
+  });
+  assert.deepEqual(
+    hardEvents.map((event) => [event.action, event.aggregateVersion]),
+    [['DELETED', 2]],
+  );
+  assert.equal(hardEvents[0].payload.file_id, FILE_HARD);
+  assert.equal(hardEvents[0].payload.cv_type, 'UPLOAD');
   assert.equal(applicationCalls.length, appCallsBefore + 1);
 
   const retry = await api('DELETE', `/cvs/${CV_HARD}`, token(USER_HARD), {
@@ -366,6 +379,10 @@ test('unused CV hard-delete is fenced, audited, cleanup-safe, idempotent, and re
   assert.equal(retry.body.data.deletionMode, 'HARD');
   assert.equal(retry.body.data.cleanupPending, false);
   assert.equal(applicationCalls.length, appCallsBefore + 1);
+  assert.equal(
+    await prisma.cvEventOutbox.count({ where: { cvId: CV_HARD } }),
+    1,
+  );
 
   const bindCallsBefore = mediaCalls.filter(
     (call) => call.method === 'POST' && call.url === '/internal/references',
@@ -445,6 +462,10 @@ test('pending fence survives Application outage and direct SQL cannot forge auth
   const row = await prisma.cv.findUniqueOrThrow({ where: { id: CV_PENDING } });
   assert.equal(row.isDeleted, true);
   assert.equal(row.aggregateVersion, 2);
+  assert.equal(
+    await prisma.cvEventOutbox.count({ where: { cvId: CV_PENDING } }),
+    0,
+  );
   const initialFenceCalls = applicationCalls.filter(
     (call) => call.body?.cvId === CV_PENDING,
   );
@@ -555,6 +576,14 @@ test('pending fence survives Application outage and direct SQL cannot forge auth
   assert.equal(completed.deletionRequestId, workflow.deletionRequestId);
   assert.equal(completed.cleanup.status, CvMediaCleanupStatus.SUCCEEDED);
   assert.equal(await prisma.cv.findUnique({ where: { id: CV_PENDING } }), null);
+  const recoveredEvents = await prisma.cvEventOutbox.findMany({
+    where: { cvId: CV_PENDING },
+  });
+  assert.deepEqual(
+    recoveredEvents.map((event) => [event.action, event.aggregateVersion]),
+    [['DELETED', 2]],
+  );
+  assert.equal(recoveredEvents[0].payload.file_id, FILE_PENDING);
   const recoveredCalls = applicationCalls.filter(
     (call) => call.body?.cvId === CV_PENDING,
   );
@@ -578,5 +607,9 @@ test('pending fence survives Application outage and direct SQL cannot forge auth
   assert.equal(
     applicationCalls.filter((call) => call.body?.cvId === CV_PENDING).length,
     2,
+  );
+  assert.equal(
+    await prisma.cvEventOutbox.count({ where: { cvId: CV_PENDING } }),
+    1,
   );
 });

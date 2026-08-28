@@ -1,5 +1,10 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
-import { Cv, CvType, Prisma } from '@prisma/client';
+import {
+  Cv,
+  CvEventAction,
+  CvType,
+  Prisma,
+} from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { ApiException } from '../common/http/api-exception';
 import {
@@ -20,6 +25,7 @@ import {
   ACTIVE_CV_LIMIT,
   RETAINED_CV_SNAPSHOT_LIMIT,
 } from './cv-limits';
+import { CvEventPublisherService } from './cv-event-publisher.service';
 
 const CV_REFERENCE_TYPE = 'PROFILE_CV';
 const ONLINE_MEDIA_BACKED_CV = {
@@ -38,6 +44,7 @@ interface LockedProfile {
 interface BuilderMutation {
   cv: Cv;
   mediaReferenceAccepted: boolean;
+  eventAppended: boolean;
 }
 
 @Injectable()
@@ -48,6 +55,7 @@ export class CvBuilderService {
     private readonly prisma: PrismaService,
     private readonly profiles: ProfileService,
     private readonly media: ProfileMediaClient,
+    private readonly events: CvEventPublisherService,
   ) {}
 
   async createOnlineCv(
@@ -90,6 +98,7 @@ export class CvBuilderService {
           return {
             cv: concurrent,
             mediaReferenceAccepted: false,
+            eventAppended: false,
           };
         }
 
@@ -123,11 +132,20 @@ export class CvBuilderService {
             isDefault: activeCount === 0,
           },
         });
+        await this.events.append(
+          transaction,
+          created,
+          CvEventAction.UPSERTED,
+        );
         if (!locked.created) {
           await this.bumpProfileVersion(transaction, locked.id);
         }
         await this.assertDeferredInvariants(transaction);
-        return { cv: created, mediaReferenceAccepted: true };
+        return {
+          cv: created,
+          mediaReferenceAccepted: true,
+          eventAppended: true,
+        };
       });
     } catch (error) {
       await this.compensateBinding(reference);
@@ -139,6 +157,7 @@ export class CvBuilderService {
         'unused concurrent Online CV binding',
       );
     }
+    if (mutation.eventAppended) this.events.wake();
     return this.toBuilderResponse(mutation.cv);
   }
 
@@ -221,6 +240,7 @@ export class CvBuilderService {
           return {
             cv: concurrent,
             mediaReferenceAccepted: false,
+            eventAppended: false,
           };
         }
 
@@ -260,7 +280,7 @@ export class CvBuilderService {
           });
         }
 
-        await transaction.cv.update({
+        const deactivated = await transaction.cv.update({
           where: { id: current.id },
           data: {
             isDefault: false,
@@ -287,9 +307,23 @@ export class CvBuilderService {
             isDefault: makeDefault,
           },
         });
+        await this.events.append(
+          transaction,
+          deactivated,
+          CvEventAction.DEACTIVATED,
+        );
+        await this.events.append(
+          transaction,
+          created,
+          CvEventAction.UPSERTED,
+        );
         await this.bumpProfileVersion(transaction, profileId);
         await this.assertDeferredInvariants(transaction);
-        return { cv: created, mediaReferenceAccepted: true };
+        return {
+          cv: created,
+          mediaReferenceAccepted: true,
+          eventAppended: true,
+        };
       });
     } catch (error) {
       await this.compensateBinding(reference);
@@ -301,6 +335,7 @@ export class CvBuilderService {
         'unused concurrent Online CV revision binding',
       );
     }
+    if (mutation.eventAppended) this.events.wake();
     return this.toBuilderResponse(mutation.cv);
   }
 
