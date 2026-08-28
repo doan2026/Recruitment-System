@@ -17,6 +17,7 @@ This NestJS service owns company profiles and company membership data.
 | `DELETE /:id/members/:userId` | `DELETE /companies/:id/members/:userId` | Company OWNER |
 | `PATCH /:id/members/:userId/transfer-ownership` | `PATCH /companies/:id/members/:userId/transfer-ownership` | Company OWNER |
 | `GET /by-user/:userId` | `GET /companies/by-user/:userId` | Self recruiter / ADMIN |
+| `GET /search?q=&cursor=&limit=` | `GET /companies/search?q=&cursor=&limit=` | Public, VERIFIED companies only |
 | `GET /:id` | `GET /companies/:id` | Public, VERIFIED companies only |
 | `PUT /:id` | `PUT /companies/:id` | Company OWNER |
 | `POST /:id/media/signature` | `POST /companies/:id/media/signature` | Company OWNER |
@@ -41,6 +42,42 @@ PENDING.
 
 Public responses omit workflow fields and raw Media Service file identifiers.
 Owner responses include review status and rejection reason.
+
+## Public company search
+
+`GET /search` is a separate public collection contract; the existing root
+`GET /` remains the ADMIN review queue. Search always fixes visibility to
+`VERIFIED` and accepts only `q`, `limit` (default 20, maximum 50), and the
+opaque cursor returned by the previous page. It does not accept a workflow
+status, page number, offset, sort, or total-count request.
+
+The response is `{data, meta}`. Every `data` item is a bounded card projection:
+`id`, `name`, `slug`, `industry`, `size`, `address`, and `logoUrl`. It does not
+load the media gallery or expose description, tax code, workflow state,
+rejection reason, aggregate version, membership, invitation, audit, file, or
+Media-reference identifiers. An unbound legacy logo is returned as `null`.
+Call `GET /:id` for the full verified profile and call Job & Search separately
+with its `companyId` filter for open jobs.
+
+Names are searched with one to eight ANDed token prefixes. Query text is NFKC
+normalized, case-folded, and Vietnamese accents plus `đ` are folded for search;
+this is not fuzzy, infix-within-a-word, semantic, or relevance-ranked search.
+Pages use the stable `(normalizedName ASC, id ASC)` keyset and fetch one extra
+row to derive `hasMore`; there is no deep `OFFSET` or `COUNT(*)`. The HMAC-signed
+cursor is versioned and bound to the canonical query and limit, so a malformed,
+tampered, or cross-query cursor is rejected with HTTP 400. Pagination is a live
+view, not an MVCC snapshot: refresh from page one when Company names or review
+states can change during a long traversal.
+
+Configure a distinct random secret of at least 32 UTF-8 bytes. Placeholder
+values fail startup:
+
+```dotenv
+COMPANY_PUBLIC_CURSOR_HMAC_KEY=<distinct random key of at least 32 bytes>
+```
+
+Company request logs record only the path and never the query/cursor. Gateway
+access-log policy remains an infrastructure concern outside this service.
 
 ## Company domain audit ledger
 
@@ -184,11 +221,12 @@ Checks:
 npm test
 npm run build
 ./scripts/verify-postgres-migration.sh
+./scripts/verify-public-search-load.sh
 ```
 
 The migration verifier creates only disposable PostgreSQL 16 resources and
 checks a clean two-migration baseline, Media and audit upgrade idempotency,
-schema drift, append-only/transaction/OWNER constraints, custom-format backup
+public-search function/indexes, schema drift, append-only/transaction/OWNER constraints, custom-format backup
 integrity, separate-database restore and the restore-based rollback candidate.
 See
 [`scripts/README.md`](scripts/README.md) for its safety guards and the

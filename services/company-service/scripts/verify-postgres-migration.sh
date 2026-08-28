@@ -8,6 +8,7 @@ BASELINE_ONE='20260822000000_company_profile'
 BASELINE_TWO='20260824000000_company_members'
 MEDIA_MIGRATION='20260828000000_company_media_ownership'
 AUDIT_MIGRATION='20260829000000_company_audit_log'
+PUBLIC_SEARCH_MIGRATION='20260829100000_company_public_search'
 SENTINEL_PREFIX='recruitment-company-migration-harness:'
 STEP='preflight'
 TASK_TMP=''
@@ -105,18 +106,20 @@ for path in "$SCRIPT_DIR/migration-verify.Dockerfile" \
   "$MIGRATIONS/$BASELINE_ONE/migration.sql" \
   "$MIGRATIONS/$BASELINE_TWO/migration.sql" \
   "$MIGRATIONS/$MEDIA_MIGRATION/migration.sql" \
-  "$MIGRATIONS/$AUDIT_MIGRATION/migration.sql"; do
+  "$MIGRATIONS/$AUDIT_MIGRATION/migration.sql" \
+  "$MIGRATIONS/$PUBLIC_SEARCH_MIGRATION/migration.sql"; do
   [[ -f "$path" ]] || fail "required input is missing: $path"
 done
 mapfile -t ALL_MIGRATIONS < <(
   find "$MIGRATIONS" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | LC_ALL=C sort
 )
-(( ${#ALL_MIGRATIONS[@]} >= 4 )) || fail 'at least four Company migrations are required'
+(( ${#ALL_MIGRATIONS[@]} >= 5 )) || fail 'at least five Company migrations are required'
 [[ ${ALL_MIGRATIONS[0]} == "$BASELINE_ONE" \
   && ${ALL_MIGRATIONS[1]} == "$BASELINE_TWO" \
   && ${ALL_MIGRATIONS[2]} == "$MEDIA_MIGRATION" \
-  && ${ALL_MIGRATIONS[3]} == "$AUDIT_MIGRATION" ]] \
-  || fail 'the expected first-four migration order changed'
+  && ${ALL_MIGRATIONS[3]} == "$AUDIT_MIGRATION" \
+  && ${ALL_MIGRATIONS[4]} == "$PUBLIC_SEARCH_MIGRATION" ]] \
+  || fail 'the expected first-five migration order changed'
 for migration in "${ALL_MIGRATIONS[@]}"; do
   [[ "$migration" =~ ^[0-9]{14}_[a-z0-9_]+$ \
     && -f "$MIGRATIONS/$migration/migration.sql" ]] \
@@ -265,6 +268,8 @@ pending_status() {
     || fail 'pending status did not name the media migration'
   grep -Fq "$AUDIT_MIGRATION" "$log_file" \
     || fail 'pending status did not name the audit migration'
+  grep -Fq "$PUBLIC_SEARCH_MIGRATION" "$log_file" \
+    || fail 'pending status did not name the public search migration'
 }
 
 current_status() {
@@ -332,8 +337,8 @@ fixture_ok() {
 pre_schema_ok() {
   local value
   value="$(scalar "$1" \
-    "SELECT (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='company' AND table_name='companies' AND column_name='aggregate_version'))::integer::text || '|' || (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='company' AND table_name='company_media' AND column_name='media_reference_id'))::integer::text || '|' || (to_regclass('company.company_media_operations') IS NOT NULL)::integer::text || '|' || (to_regclass('company.company_media_upload_intents') IS NOT NULL)::integer::text || '|' || (to_regclass('company.company_audit_logs') IS NOT NULL)::integer::text || '|' || (to_regtype('company.\"CompanyAuditAction\"') IS NOT NULL)::integer::text || '|' || (to_regprocedure('company.reject_company_audit_log_mutation()') IS NOT NULL)::integer::text;")"
-  [[ "$value" == '0|0|0|0|0|0|0' ]] || fail 'pre-upgrade schema contains upgraded objects'
+    "SELECT (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='company' AND table_name='companies' AND column_name='aggregate_version'))::integer::text || '|' || (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='company' AND table_name='company_media' AND column_name='media_reference_id'))::integer::text || '|' || (to_regclass('company.company_media_operations') IS NOT NULL)::integer::text || '|' || (to_regclass('company.company_media_upload_intents') IS NOT NULL)::integer::text || '|' || (to_regclass('company.company_audit_logs') IS NOT NULL)::integer::text || '|' || (to_regtype('company.\"CompanyAuditAction\"') IS NOT NULL)::integer::text || '|' || (to_regprocedure('company.reject_company_audit_log_mutation()') IS NOT NULL)::integer::text || '|' || (to_regprocedure('company.fold_public_company_search(text)') IS NOT NULL)::integer::text || '|' || (to_regclass('company.companies_public_verified_normalized_name_id_idx') IS NOT NULL)::integer::text || '|' || (to_regclass('company.companies_public_verified_search_tsv_idx') IS NOT NULL)::integer::text;")"
+  [[ "$value" == '0|0|0|0|0|0|0|0|0|0' ]] || fail 'pre-upgrade schema contains upgraded objects'
 }
 
 constraint_failures_ok() {
