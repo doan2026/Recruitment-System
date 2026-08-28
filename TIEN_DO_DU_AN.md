@@ -2,7 +2,7 @@
 
 > Ngày cập nhật: 29/08/2026
 > Nhánh đối chiếu chính: `develop`
-> Pull Request lần cập nhật: PR #57 từ `feature/company-service/public-search-load` vào `develop`
+> Pull Request lần cập nhật: PR #58 từ `feature/job-search-service/search-load-vietnamese` vào `develop`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -291,7 +291,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Baseline Elasticsearch hiện dùng cặp marker bền vững `mappings._meta.baselineVersion=4` và `baselineIndexUuid=<UUID>`, tự resume sau restart cho cả index tương thích đã tồn tại nhưng thiếu/sai marker. Trước khi hoàn tất, search bắt buộc fallback PostgreSQL và health ở `DEGRADED`; sau khi mọi intent hoàn tất, service refresh concrete index, ghi marker kèm UUID rồi revalidate tên index, UUID vật lý và marker. Chỉ khi lần kiểm tra sau ghi này khớp mới bật Elasticsearch search và trả `UP`; index thay thế mang UUID khác không thể dùng marker gắn với UUID cũ.
 - Đã verify Job/Search **57/57 unit test + 13/13 integration test** với PostgreSQL 16, Kafka 3.8, Redis 7 có auth và Elasticsearch 8.14.3 thật; Application **173/173 unit test + 35/35 integration test** với PostgreSQL/Kafka/Testcontainers.
 
-### Deep Cursor, Vietnamese Mapping v4 và Search Load Gate — P05 hoàn thành
+### Deep Cursor, Vietnamese Mapping v4 và Search Load Gate — PR #58
 
 - Giữ `pagination=OFFSET` làm mặc định tương thích và thêm opt-in `pagination=CURSOR` dùng Elasticsearch PIT + `search_after`. Cursor HMAC-SHA256 bind toàn bộ filter/sort/limit, có hạn tuyệt đối năm phút, phân trang deterministic, fail closed khi tamper/stale/partial shard và không đổi nguồn giữa traversal; mỗi process giới hạn PIT bằng `JOB_SEARCH_MAX_OPEN_PITS`.
 - CURSOR first page trả exact total/facets; continuation giữ total đã ký nhưng không tính lại total/aggregation và trả facet map rỗng. Search relevance yêu cầu mọi term, dùng bounded fuzzy `AUTO` với prefix 1/max expansion 25; OFFSET vượt cửa sổ 10.000 bị chặn và hướng client sang CURSOR.
