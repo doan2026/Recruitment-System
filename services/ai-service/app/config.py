@@ -32,6 +32,12 @@ class Settings:
     chat_user_rate_limit: int = 10
     chat_global_rate_limit: int = 200
     chat_session_lock_seconds: int = 30
+    chat_max_concurrent_requests: int = 8
+    chat_recommendation_tool_enabled: bool = False
+    chat_job_recommendation_url: str = ""
+    chat_job_service_allowed_hosts: tuple[str, ...] = ()
+    chat_job_service_allow_insecure_http: bool = False
+    chat_job_request_timeout_seconds: int = 3
     jwt_issuer: str = ""
     jwt_audience: str = ""
     jwt_jwks_uri: str = ""
@@ -120,6 +126,31 @@ class Settings:
                 minimum=5,
                 maximum=60,
             ),
+            chat_max_concurrent_requests=_bounded_int(
+                "CHAT_MAX_CONCURRENT_REQUESTS",
+                default=8,
+                minimum=1,
+                maximum=32,
+            ),
+            chat_recommendation_tool_enabled=_boolean(
+                "CHAT_RECOMMENDATION_TOOL_ENABLED",
+                default=False,
+            ),
+            chat_job_recommendation_url=os.getenv(
+                "CHAT_JOB_RECOMMENDATION_URL",
+                "",
+            ).strip(),
+            chat_job_service_allowed_hosts=_csv("CHAT_JOB_SERVICE_ALLOWED_HOSTS"),
+            chat_job_service_allow_insecure_http=_boolean(
+                "CHAT_JOB_SERVICE_ALLOW_INSECURE_HTTP",
+                default=False,
+            ),
+            chat_job_request_timeout_seconds=_bounded_int(
+                "CHAT_JOB_REQUEST_TIMEOUT_SECONDS",
+                default=3,
+                minimum=1,
+                maximum=5,
+            ),
             jwt_issuer=os.getenv("JWT_ISSUER", "").strip(),
             jwt_audience=os.getenv("JWT_AUDIENCE", "").strip(),
             jwt_jwks_uri=os.getenv("JWT_JWKS_URI", "").strip(),
@@ -194,10 +225,55 @@ class Settings:
             raise RuntimeError(
                 "CHAT_GLOBAL_RATE_LIMIT must not be below CHAT_USER_RATE_LIMIT"
             )
-        if self.chat_session_lock_seconds < self.chat_provider_timeout_seconds + 5:
+        lock_budget = self.chat_provider_timeout_seconds + 5
+        if self.chat_recommendation_tool_enabled:
+            self._validate_chat_job_endpoint()
+            lock_budget += self.chat_job_request_timeout_seconds
+        if self.chat_session_lock_seconds < lock_budget:
             raise RuntimeError(
-                "CHAT_SESSION_LOCK_SECONDS must exceed provider timeout by 5 seconds"
+                "CHAT_SESSION_LOCK_SECONDS is below the external-call safety budget"
             )
+
+    def _validate_chat_job_endpoint(self) -> None:
+        endpoint = self.chat_job_recommendation_url
+        if (
+            not endpoint
+            or any(
+                ord(character) < 0x21 or ord(character) > 0x7E for character in endpoint
+            )
+            or "%" in endpoint
+            or "\\" in endpoint
+        ):
+            raise RuntimeError("CHAT_JOB_RECOMMENDATION_URL is invalid")
+        try:
+            parsed = urlsplit(endpoint)
+            port = parsed.port
+        except ValueError as error:
+            raise RuntimeError("CHAT_JOB_RECOMMENDATION_URL is invalid") from error
+        hostname = parsed.hostname
+        allowed_hosts = self.chat_job_service_allowed_hosts
+        if any(not _valid_hostname(host) for host in allowed_hosts):
+            raise RuntimeError("CHAT_JOB_SERVICE_ALLOWED_HOSTS is invalid")
+        if (
+            parsed.scheme not in {"http", "https"}
+            or (
+                parsed.scheme == "http"
+                and not self.chat_job_service_allow_insecure_http
+            )
+            or hostname is None
+            or hostname != hostname.lower()
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path != "/recommended"
+            or parsed.query
+            or parsed.fragment
+            or not allowed_hosts
+            or hostname not in allowed_hosts
+        ):
+            raise RuntimeError("CHAT_JOB_RECOMMENDATION_URL is invalid")
+        expected_netloc = hostname if port is None else f"{hostname}:{port}"
+        if parsed.netloc != expected_netloc:
+            raise RuntimeError("CHAT_JOB_RECOMMENDATION_URL is invalid")
 
     @staticmethod
     def _validate_secret(name: str, value: str) -> None:
@@ -272,3 +348,25 @@ def _csv(name: str) -> tuple[str, ...]:
     if len(values) != len(set(values)):
         raise RuntimeError(f"{name} contains duplicate values")
     return values
+
+
+def _valid_hostname(hostname: str) -> bool:
+    if (
+        not hostname
+        or len(hostname) > 253
+        or hostname.startswith((".", "-"))
+        or hostname.endswith((".", "-"))
+        or ".." in hostname
+    ):
+        return False
+    return all(
+        label
+        and len(label) <= 63
+        and not label.startswith("-")
+        and not label.endswith("-")
+        and all(
+            character.isascii() and (character.isalnum() or character == "-")
+            for character in label
+        )
+        for label in hostname.split(".")
+    )

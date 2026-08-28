@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from functools import partial
+from threading import BoundedSemaphore
 from typing import Annotated, cast
+from uuid import UUID
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.responses import Response
 
 from app.chat_provider import AnthropicChatProvider
-from app.chat_service import ChatService
+from app.chat_recommendation import HttpCandidateJobRecommendationClient
+from app.chat_service import ChatResult, ChatService
 from app.chat_store import RedisChatStore
 from app.config import Settings
 from app.database import (
@@ -55,7 +62,6 @@ from app.security import (
     require_job_search_recommendation_access,
 )
 from app.user_auth import (
-    AuthenticatedUser,
     AuthKeyUnavailable,
     InvalidAccessToken,
     JwksJwtAuthenticator,
@@ -64,13 +70,40 @@ from app.user_auth import (
 chat_bearer = HTTPBearer(auto_error=False, scheme_name="ChatBearerAuth")
 
 
+@dataclass(frozen=True, slots=True)
+class CandidateChatContext:
+    user_id: UUID
+    access_token: str = field(repr=False, compare=False)
+
+
+async def _shutdown_chat_executor(executor: ThreadPoolExecutor) -> None:
+    """Drain chat workers without blocking the ASGI event loop they depend on."""
+
+    await asyncio.to_thread(executor.shutdown, wait=True, cancel_futures=True)
+
+
+def _finish_chat_worker(
+    worker: asyncio.Future[ChatResult],
+    admission: BoundedSemaphore,
+) -> None:
+    """Consume detached failures and release exactly one admission permit."""
+
+    try:
+        if not worker.cancelled():
+            worker.exception()
+    except (asyncio.CancelledError, Exception):
+        pass
+    finally:
+        admission.release()
+
+
 def require_candidate_chat_user(
     request: Request,
     credentials: Annotated[
         HTTPAuthorizationCredentials | None,
         Depends(chat_bearer),
     ],
-) -> AuthenticatedUser:
+) -> CandidateChatContext:
     settings = cast(Settings, request.app.state.settings)
     if not settings.chat_enabled:
         raise ServiceError(
@@ -114,7 +147,10 @@ def require_candidate_chat_user(
             code="CHAT_ACCESS_FORBIDDEN",
             message="Candidate access is required",
         )
-    return user
+    return CandidateChatContext(
+        user_id=user.user_id,
+        access_token=credentials.credentials,
+    )
 
 
 def create_app(
@@ -154,10 +190,21 @@ def create_app(
         owned_authenticator: JwksJwtAuthenticator | None = None
         owned_store: RedisChatStore | None = None
         owned_provider: AnthropicChatProvider | None = None
+        owned_recommendation_client: HttpCandidateJobRecommendationClient | None = None
         owned_service: ChatService | None = None
+        owned_chat_executor: ThreadPoolExecutor | None = None
         try:
             runtime_settings.validate()
             if runtime_settings.chat_enabled:
+                if lifespan_app.state.chat_executor is None:
+                    owned_chat_executor = ThreadPoolExecutor(
+                        max_workers=runtime_settings.chat_max_concurrent_requests,
+                        thread_name_prefix="candidate-chat",
+                    )
+                    lifespan_app.state.chat_executor = owned_chat_executor
+                    lifespan_app.state.chat_admission = BoundedSemaphore(
+                        runtime_settings.chat_max_concurrent_requests
+                    )
                 if lifespan_app.state.chat_authenticator is None:
                     owned_authenticator = JwksJwtAuthenticator(
                         jwks_uri=runtime_settings.jwt_jwks_uri,
@@ -186,7 +233,31 @@ def create_app(
                         timeout_seconds=runtime_settings.chat_provider_timeout_seconds,
                         max_output_tokens=runtime_settings.chat_max_output_tokens,
                     )
-                    owned_service = ChatService(owned_store, owned_provider)
+                    if runtime_settings.chat_recommendation_tool_enabled:
+                        recommendation_client_type = (
+                            HttpCandidateJobRecommendationClient
+                        )
+                        owned_recommendation_client = recommendation_client_type(
+                            endpoint=(runtime_settings.chat_job_recommendation_url),
+                            allowed_hosts=(
+                                runtime_settings.chat_job_service_allowed_hosts
+                            ),
+                            allow_insecure_http=(
+                                runtime_settings.chat_job_service_allow_insecure_http
+                            ),
+                            timeout_seconds=(
+                                runtime_settings.chat_job_request_timeout_seconds
+                            ),
+                        )
+                    owned_service = ChatService(
+                        owned_store,
+                        owned_provider,
+                        owned_recommendation_client,
+                        session_lease_renewal_seconds=max(
+                            0.25,
+                            runtime_settings.chat_session_lock_seconds / 3,
+                        ),
+                    )
                     lifespan_app.state.chat_service = owned_service
             yield
         finally:
@@ -194,7 +265,17 @@ def create_app(
                 lifespan_app.state.chat_service = None
             if lifespan_app.state.chat_authenticator is owned_authenticator:
                 lifespan_app.state.chat_authenticator = None
-            for resource in (owned_provider, owned_store, owned_authenticator):
+            if lifespan_app.state.chat_executor is owned_chat_executor:
+                lifespan_app.state.chat_executor = None
+                lifespan_app.state.chat_admission = None
+            if owned_chat_executor is not None:
+                await _shutdown_chat_executor(owned_chat_executor)
+            for resource in (
+                owned_provider,
+                owned_recommendation_client,
+                owned_store,
+                owned_authenticator,
+            ):
                 if resource is not None:
                     try:
                         resource.close()
@@ -212,6 +293,8 @@ def create_app(
     application.state.recommendation_repository = selected_recommendation_repository
     application.state.chat_service = chat_service
     application.state.chat_authenticator = chat_authenticator
+    application.state.chat_executor = None
+    application.state.chat_admission = None
     register_exception_handlers(application)
 
     @application.middleware("http")
@@ -257,11 +340,11 @@ def create_app(
             503: {"model": ErrorResponse},
         },
     )
-    def chat(
+    async def chat(
         payload: ChatRequest,
         request: Request,
         user: Annotated[
-            AuthenticatedUser,
+            CandidateChatContext,
             Depends(require_candidate_chat_user),
         ],
     ) -> ChatResponse:
@@ -272,7 +355,48 @@ def create_app(
                 code="CHAT_NOT_CONFIGURED",
                 message="The recruitment assistant is not enabled",
             )
-        result = service.reply(user.user_id, payload.session_id, payload.message)
+        executor = cast(
+            ThreadPoolExecutor | None,
+            request.app.state.chat_executor,
+        )
+        admission = cast(
+            BoundedSemaphore | None,
+            request.app.state.chat_admission,
+        )
+        if executor is None or admission is None:
+            raise ServiceError(
+                status_code=503,
+                code="CHAT_NOT_CONFIGURED",
+                message="The recruitment assistant is not enabled",
+            )
+        if not admission.acquire(blocking=False):
+            raise ServiceError(
+                status_code=503,
+                code="CHAT_BUSY",
+                message="The recruitment assistant is busy; retry shortly",
+                details={"retryAfterSeconds": 1},
+                headers={"Retry-After": "1"},
+            )
+        try:
+            worker = asyncio.get_running_loop().run_in_executor(
+                executor,
+                partial(
+                    service.reply,
+                    user.user_id,
+                    payload.session_id,
+                    payload.message,
+                    access_token=user.access_token,
+                ),
+            )
+        except RuntimeError as error:
+            admission.release()
+            raise ServiceError(
+                status_code=503,
+                code="CHAT_BUSY",
+                message="The recruitment assistant is busy; retry shortly",
+            ) from error
+        worker.add_done_callback(partial(_finish_chat_worker, admission=admission))
+        result = await asyncio.shield(worker)
         return ChatResponse(
             data=ChatData(
                 session_id=payload.session_id,

@@ -162,6 +162,23 @@ def test_stale_append_is_rejected_and_stale_release_is_compare_delete(
     assert release_call[-1] == token
 
 
+def test_renewal_is_compare_expire_and_reports_fence_loss(
+    store: RedisChatStore,
+    redis_client: FakeRedis,
+) -> None:
+    token = "t" * 43
+    redis_client.eval_results.extend((1, 0))
+
+    assert store.renew_session(USER_ID, SESSION_ID, token) is None
+    renew_call = redis_client.calls[-1]
+    assert "redis.call('GET', KEYS[1]) == ARGV[1]" in renew_call[1]
+    assert "PEXPIRE" in renew_call[1]
+    assert renew_call[-2:] == (token, 30_000)
+
+    with pytest.raises(ChatSessionFenceLost, match="ownership was lost"):
+        store.renew_session(USER_ID, SESSION_ID, token)
+
+
 def test_load_history_accepts_only_exact_bounded_json(
     store: RedisChatStore,
     redis_client: FakeRedis,
@@ -227,6 +244,11 @@ def test_history_rejects_more_rows_than_configured_cap(
     [
         lambda store: store.consume_rate(USER_ID),
         lambda store: store.acquire_session(USER_ID, SESSION_ID),
+        lambda store: store.renew_session(
+            USER_ID,
+            SESSION_ID,
+            "t" * 43,
+        ),
         lambda store: store.load_history(USER_ID, SESSION_ID),
         lambda store: store.append_turn(
             USER_ID,
