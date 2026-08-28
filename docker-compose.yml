@@ -97,6 +97,8 @@ services:
 
   kafka-init:
     image: apache/kafka:3.8.0
+    environment:
+      KAFKA_INTERVIEW_TOPIC: ${KAFKA_INTERVIEW_TOPIC:-interview-events}
     depends_on:
       kafka:
         condition: service_healthy
@@ -104,7 +106,7 @@ services:
       - /bin/bash
       - -ec
       - |
-        for topic in job-events cv-events application-events interview-events chat-events; do
+        for topic in job-events cv-events application-events "$$KAFKA_INTERVIEW_TOPIC" chat-events; do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$$topic" --partitions 3 --replication-factor 1
         done
 
@@ -168,6 +170,9 @@ services:
       JWT_ISSUER: ${JWT_ISSUER:-https://auth.recruitment.local}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-recruitment-api}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_INTERVIEW_TOPIC: ${KAFKA_INTERVIEW_TOPIC:-interview-events}
+      INTERVIEW_EVENT_PUBLISHER_ENABLED: ${INTERVIEW_EVENT_PUBLISHER_ENABLED:-true}
     secrets:
       - source: jwt-public-key
         target: jwt-public.pem
@@ -177,6 +182,8 @@ services:
         condition: service_healthy
       application-service:
         condition: service_started
+      kafka-init:
+        condition: service_completed_successfully
     expose:
       - "8080"
 
@@ -305,9 +312,12 @@ services:
       KAFKA_BROKERS: kafka:9092
       KAFKA_APPLICATION_TOPIC: ${KAFKA_APPLICATION_TOPIC:-application-events}
       KAFKA_NOTIFICATION_GROUP_ID: ${KAFKA_NOTIFICATION_GROUP_ID:-notification-application-inbox-v1}
+      KAFKA_INTERVIEW_TOPIC: ${KAFKA_INTERVIEW_TOPIC:-interview-events}
+      KAFKA_NOTIFICATION_INTERVIEW_GROUP_ID: ${KAFKA_NOTIFICATION_INTERVIEW_GROUP_ID:-notification-interview-inbox-v1}
       NOTIFICATION_KAFKA_CONSUMER_ENABLED: "true"
       NOTIFICATION_EVENT_MAX_BYTES: ${NOTIFICATION_EVENT_MAX_BYTES:-65536}
       NOTIFICATION_APPLICATION_REPLAY_AFTER: ${NOTIFICATION_APPLICATION_REPLAY_AFTER:?NOTIFICATION_APPLICATION_REPLAY_AFTER is required}
+      NOTIFICATION_INTERVIEW_REPLAY_AFTER: ${NOTIFICATION_INTERVIEW_REPLAY_AFTER:?NOTIFICATION_INTERVIEW_REPLAY_AFTER is required}
       NOTIFICATION_CURSOR_HMAC_KEY: ${NOTIFICATION_CURSOR_HMAC_KEY:?NOTIFICATION_CURSOR_HMAC_KEY is required}
       JWT_JWKS_URI: ""
       JWT_ALLOW_INSECURE_JWKS: "false"
