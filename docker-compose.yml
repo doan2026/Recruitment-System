@@ -261,6 +261,8 @@ services:
     env_file:
       - ./services/company-service/.env
     environment:
+      JWT_ISSUER: ${JWT_ISSUER:-https://auth.recruitment.local}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-recruitment-api}
       MEDIA_SERVICE_URL: http://media-service:3000
       MEDIA_INTERNAL_API_KEY: ${MEDIA_INTERNAL_API_KEY_COMPANY:?MEDIA_INTERNAL_API_KEY_COMPANY is required}
       MEDIA_REQUEST_TIMEOUT_MS: ${COMPANY_MEDIA_REQUEST_TIMEOUT_MS:-3000}

@@ -1,6 +1,7 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import {
   Company,
+  CompanyAuditAction,
   CompanyMediaAssetType as PrismaCompanyMediaAssetType,
   CompanyMediaOperationKind,
   CompanyMedia,
@@ -212,6 +213,7 @@ export class CompanyService {
   }
 
   async verify(
+    adminId: string,
     companyId: string,
     dto: VerifyCompanyDto,
   ): Promise<CompanyProfileDto> {
@@ -285,7 +287,7 @@ export class CompanyService {
             );
           }
 
-          return transaction.company.update({
+          const updated = await transaction.company.update({
             where: { id: companyId },
             data: {
               verifiedStatus: targetStatus,
@@ -297,6 +299,27 @@ export class CompanyService {
             },
             ...COMPANY_WITH_MEDIA,
           });
+
+          await transaction.companyAuditLog.create({
+            data: {
+              companyId,
+              action:
+                targetStatus === CompanyVerificationStatus.VERIFIED
+                  ? CompanyAuditAction.VERIFICATION_APPROVED
+                  : CompanyAuditAction.VERIFICATION_REJECTED,
+              actorId: adminId,
+              targetUserId: null,
+              resultingAggregateVersion: updated.aggregateVersion,
+              fromVerificationStatus: current.verifiedStatus,
+              toVerificationStatus: targetStatus,
+              reason:
+                targetStatus === CompanyVerificationStatus.REJECTED
+                  ? reason
+                  : null,
+            },
+          });
+
+          return updated;
         },
         {
           isolationLevel: Prisma.TransactionIsolationLevel.Serializable,

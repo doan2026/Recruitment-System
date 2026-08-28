@@ -193,10 +193,11 @@ export class CompanyController {
     description: 'The company is not PENDING and the decision is not a retry',
   })
   verify(
+    @CurrentUser() user: AuthUser,
     @Param('id', COMPANY_ID_PIPE) companyId: string,
     @Body() dto: VerifyCompanyDto,
   ): Promise<CompanyProfileDto> {
-    return this.companyService.verify(companyId, dto);
+    return this.companyService.verify(user.id, companyId, dto);
   }
 
   @Get('me')

@@ -1,5 +1,6 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import {
+  CompanyAuditAction,
   CompanyInvitation,
   CompanyInvitationStatus,
   CompanyMember,
@@ -303,6 +304,24 @@ export class CompanyMemberService {
           await transaction.companyMember.update({
             where: { userId: targetUserId },
             data: { role: CompanyMemberRole.OWNER },
+          });
+
+          const company = await transaction.company.update({
+            where: { id: companyId },
+            data: { aggregateVersion: { increment: 1 } },
+            select: { aggregateVersion: true },
+          });
+          await transaction.companyAuditLog.create({
+            data: {
+              companyId,
+              action: CompanyAuditAction.OWNERSHIP_TRANSFERRED,
+              actorId: ownerId,
+              targetUserId,
+              resultingAggregateVersion: company.aggregateVersion,
+              fromVerificationStatus: null,
+              toVerificationStatus: null,
+              reason: null,
+            },
           });
 
           return transaction.companyMember.findMany({
