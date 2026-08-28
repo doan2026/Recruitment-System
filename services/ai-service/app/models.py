@@ -22,8 +22,49 @@ class StrictModel(BaseModel):
 
 
 class ChatRequest(StrictModel):
-    session_id: str
-    message: str
+    session_id: UUID
+    message: str = Field(min_length=1, max_length=2_000, strict=True)
+
+    @field_validator("session_id", mode="before")
+    @classmethod
+    def require_canonical_uuid_v4(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        try:
+            parsed = UUID(value)
+        except ValueError:
+            return value
+        if parsed.version != 4 or str(parsed) != value:
+            raise ValueError("session_id must be a canonical UUID v4")
+        return value
+
+    @field_validator("message", mode="before")
+    @classmethod
+    def normalize_message(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = unicodedata.normalize("NFC", value).strip()
+        if not normalized:
+            raise ValueError("message must not be blank")
+        if len(normalized.encode("utf-8")) > 8_000:
+            raise ValueError("message must contain at most 8000 UTF-8 bytes")
+        if any(
+            (ord(character) < 32 and character not in {"\n", "\t"})
+            or 127 <= ord(character) <= 159
+            for character in normalized
+        ):
+            raise ValueError("message must not contain control characters")
+        return normalized
+
+
+class ChatData(StrictModel):
+    session_id: UUID
+    answer: str = Field(min_length=1, max_length=8_000)
+
+
+class ChatResponse(StrictModel):
+    data: ChatData
+    meta: None = None
 
 
 class MatchRequest(StrictModel):

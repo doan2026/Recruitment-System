@@ -16,6 +16,7 @@ class ServiceError(Exception):
     code: str
     message: str
     details: dict[str, Any] | None = None
+    headers: dict[str, str] | None = None
 
 
 def register_exception_handlers(app: FastAPI) -> None:
@@ -26,6 +27,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     ) -> JSONResponse:
         return JSONResponse(
             status_code=error.status_code,
+            headers=error.headers,
             content={
                 "code": error.code,
                 "message": error.message,

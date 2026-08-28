@@ -8,7 +8,11 @@ COPY migrations migrations
 COPY app app
 RUN groupadd --system app && useradd --system --gid app --home /app app
 
-FROM base AS test
+FROM base AS chat-dependencies
+COPY requirements-chat.txt .
+RUN pip install --no-cache-dir -r requirements-chat.txt
+
+FROM chat-dependencies AS test
 COPY requirements-dev.txt .
 RUN pip install --no-cache-dir -r requirements-dev.txt
 COPY pyproject.toml .
@@ -16,7 +20,7 @@ COPY tests tests
 COPY scripts scripts
 CMD ["sh", "-c", "ruff check app tests migrations scripts && ruff format --check app tests migrations scripts && python -m pytest -q"]
 
-FROM base AS runtime
+FROM chat-dependencies AS runtime
 USER app
 EXPOSE 8000
 CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
