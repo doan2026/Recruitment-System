@@ -65,33 +65,50 @@ export const validateEnvironment = (
   environment.NOTIFICATION_KAFKA_CONSUMER_ENABLED = String(consumerEnabled);
   if (consumerEnabled) {
     environment.KAFKA_BROKERS = required(environment, 'KAFKA_BROKERS');
+    if (
+      String(environment.KAFKA_BROKERS)
+        .split(',')
+        .map((value) => value.trim())
+        .some((value) => !value)
+    ) {
+      throw new Error('KAFKA_BROKERS is invalid');
+    }
     environment.KAFKA_APPLICATION_TOPIC =
       String(environment.KAFKA_APPLICATION_TOPIC ?? 'application-events').trim();
-    if (!/^[a-z0-9._-]{1,100}$/.test(
-      String(environment.KAFKA_APPLICATION_TOPIC),
-    )) {
-      throw new Error('KAFKA_APPLICATION_TOPIC is invalid');
+    environment.KAFKA_INTERVIEW_TOPIC =
+      String(environment.KAFKA_INTERVIEW_TOPIC ?? 'interview-events').trim();
+    environment.KAFKA_NOTIFICATION_GROUP_ID = String(
+      environment.KAFKA_NOTIFICATION_GROUP_ID ??
+        'notification-application-inbox-v1',
+    ).trim();
+    environment.KAFKA_NOTIFICATION_INTERVIEW_GROUP_ID = String(
+      environment.KAFKA_NOTIFICATION_INTERVIEW_GROUP_ID ??
+        'notification-interview-inbox-v1',
+    ).trim();
+    kafkaName(environment, 'KAFKA_APPLICATION_TOPIC', 100);
+    kafkaName(environment, 'KAFKA_INTERVIEW_TOPIC', 100);
+    kafkaName(environment, 'KAFKA_NOTIFICATION_GROUP_ID', 249);
+    kafkaName(environment, 'KAFKA_NOTIFICATION_INTERVIEW_GROUP_ID', 249);
+    if (
+      environment.KAFKA_APPLICATION_TOPIC ===
+      environment.KAFKA_INTERVIEW_TOPIC
+    ) {
+      throw new Error('Kafka Application and Interview topics must be distinct');
     }
-    const replayAfter = required(
+    if (
+      environment.KAFKA_NOTIFICATION_GROUP_ID ===
+      environment.KAFKA_NOTIFICATION_INTERVIEW_GROUP_ID
+    ) {
+      throw new Error('Kafka Application and Interview groups must be distinct');
+    }
+    environment.NOTIFICATION_APPLICATION_REPLAY_AFTER = replayCutoff(
       environment,
       'NOTIFICATION_APPLICATION_REPLAY_AFTER',
     );
-    if (!UTC_INSTANT.test(replayAfter)) {
-      throw new Error(
-        'NOTIFICATION_APPLICATION_REPLAY_AFTER must be an exact UTC instant',
-      );
-    }
-    const replayAfterDate = new Date(replayAfter);
-    if (
-      Number.isNaN(replayAfterDate.valueOf()) ||
-      replayAfterDate.toISOString().slice(0, 19) !== replayAfter.slice(0, 19)
-    ) {
-      throw new Error(
-        'NOTIFICATION_APPLICATION_REPLAY_AFTER must be a valid UTC instant',
-      );
-    }
-    environment.NOTIFICATION_APPLICATION_REPLAY_AFTER =
-      replayAfterDate.toISOString();
+    environment.NOTIFICATION_INTERVIEW_REPLAY_AFTER = replayCutoff(
+      environment,
+      'NOTIFICATION_INTERVIEW_REPLAY_AFTER',
+    );
   }
   const maxPayload = Number(
     environment.NOTIFICATION_EVENT_MAX_BYTES ?? '65536',
@@ -103,4 +120,32 @@ export const validateEnvironment = (
   }
   environment.NOTIFICATION_EVENT_MAX_BYTES = String(maxPayload);
   return environment;
+};
+
+const kafkaName = (
+  environment: Record<string, unknown>,
+  name: string,
+  maxLength: number,
+): void => {
+  if (!new RegExp(`^[a-z0-9._-]{1,${maxLength}}$`).test(String(environment[name]))) {
+    throw new Error(`${name} is invalid`);
+  }
+};
+
+const replayCutoff = (
+  environment: Record<string, unknown>,
+  name: string,
+): string => {
+  const replayAfter = required(environment, name);
+  if (!UTC_INSTANT.test(replayAfter)) {
+    throw new Error(`${name} must be an exact UTC instant`);
+  }
+  const replayAfterDate = new Date(replayAfter);
+  if (
+    Number.isNaN(replayAfterDate.valueOf()) ||
+    replayAfterDate.toISOString().slice(0, 19) !== replayAfter.slice(0, 19)
+  ) {
+    throw new Error(`${name} must be a valid UTC instant`);
+  }
+  return replayAfterDate.toISOString();
 };

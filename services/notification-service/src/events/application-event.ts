@@ -1,4 +1,7 @@
 import { isCanonicalUuid } from '../auth/jwt-verifier.service';
+import { EventValidationError } from './event-processing';
+
+export { EventValidationError } from './event-processing';
 
 export const APPLICATION_STATUSES = [
   'APPLIED',
@@ -30,12 +33,6 @@ export interface ApplicationEvent {
   offerId: string | null;
   offerStatus: 'SENT' | 'ACCEPTED' | 'DECLINED' | null;
   offerVersion: number | null;
-}
-
-export class EventValidationError extends Error {
-  constructor(readonly code: string) {
-    super(code);
-  }
 }
 
 const ALLOWED_KEYS = new Set([

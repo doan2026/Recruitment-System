@@ -1,18 +1,21 @@
 # Notification Service
 
 NestJS/Prisma service that owns the private notification inbox in the
-PostgreSQL `notification` schema. The current vertical slice consumes the
-canonical `application-events` v1 topic and projects safe in-app notifications.
+PostgreSQL `notification` schema. The current vertical slices consume the
+canonical `application-events` v1 topic and the `SCHEDULED` foundation of
+`interview-events` v1, then project safe in-app notifications.
 
 ## Implemented scope
 
 - Canonical Application event v1 parser with a bounded legacy dual-read path.
-- Kafka consumer group `notification-application-inbox-v1` with manual offset
-  commit, bounded first-join backlog replay, durable idempotency and poison
-  quarantine.
+- Dedicated Application and Interview Kafka consumer groups with manual offset
+  commit, independent first-join backlog cutoffs, durable idempotency and
+  poison quarantine.
 - Atomic `ProcessedEvent` + `Notification` + `IN_APP` delivery-log writes.
 - Candidate/Recruiter recipient mapping for application submission, pipeline,
   withdrawal, Offer sent, accepted and declined events.
+- Candidate-only `INTERVIEW_SCHEDULED` projection with a generic message and a
+  minimal private deep-link payload.
 - JWT-owner-scoped inbox list, unread count, idempotent read and cutoff-based
   read-all APIs.
 - HMAC-signed keyset cursors bound to the authenticated user and type filter.
@@ -21,8 +24,8 @@ canonical `application-events` v1 topic and projects safe in-app notifications.
 
 The Prisma migration also reserves `DeviceToken`, `NotificationSetting`, and
 PUSH/EMAIL `NotificationLog` persistence for later delivery slices. Device
-registration, BullMQ workers, FCM, SMTP, interview/chat consumers and reminder
-scheduling are not implemented yet.
+registration, BullMQ workers, FCM, SMTP, the remaining Interview lifecycle,
+the Chat consumer and reminder scheduling are not implemented yet.
 
 ## Application event contract
 
@@ -57,6 +60,32 @@ committed. Transient database/broker errors do not commit the offset. Inbox
 `created_at` is trusted database receive time, never the producer clock, so a
 skewed event cannot corrupt pagination or read-all cutoffs.
 
+## Interview event contract
+
+The `interview-events` Kafka key is the lowercase canonical UUID in
+`interview_id`. Foundation v1 accepts exactly `schema_version=1`,
+`action=SCHEDULED` and `status=SCHEDULED`, with these fields and no others:
+
+```text
+schema_version, event_id, action, interview_id, application_id,
+candidate_id, interviewer_id, actor_id, round_number, schedule_revision,
+scheduled_start_at, scheduled_end_at, status, aggregate_version, occurred_at
+```
+
+The actor must equal the interviewer; round is 1–20; revision is positive;
+aggregate version is a non-negative JSON-safe integer; all timestamps are UTC
+and the end must be after the start. Unknown fields are rejected, including
+`room_url`, join tokens, location, notes and feedback. Those details belong
+behind the authorized Interview API and must never enter retained Kafka data,
+poison rows or Notification payloads.
+
+The in-app projection is owned only by `candidate_id`. It stores interview and
+application IDs, action, start/end, round, revision and the local deep link.
+It does not copy location, notes, room credentials or participant contact data.
+The dedicated group `notification-interview-inbox-v1` starts at retained
+beginning; `NOTIFICATION_INTERVIEW_REPLAY_AFTER` prevents reviewed historical
+records from becoming fresh unread items while still ledgering them.
+
 ## HTTP API
 
 All inbox routes derive ownership only from the JWT subject. They never accept
@@ -69,7 +98,7 @@ All inbox routes derive ownership only from the JWT subject. They never accept
 | `PATCH /notifications/:id/read` | Idempotently mark one owned row read | Authenticated owner |
 | `PATCH /notifications/read-all` | Mark rows at/before a DB-clock cutoff | Authenticated owner |
 | `GET /health/live` | Process liveness | Public |
-| `GET /health/ready` | PostgreSQL + Kafka group readiness | Public |
+| `GET /health/ready` | PostgreSQL + both Kafka group readiness | Public |
 
 The list limit defaults to 20 and is bounded to 1–50. The cursor is opaque,
 limited to 1024 characters and HMAC-bound to user, filter, timestamp and UUID.
@@ -102,8 +131,11 @@ Required settings:
 | `KAFKA_BROKERS` | Comma-separated brokers when the consumer is enabled |
 | `KAFKA_APPLICATION_TOPIC` | Defaults to `application-events` |
 | `KAFKA_NOTIFICATION_GROUP_ID` | Dedicated v1 projection group |
+| `KAFKA_INTERVIEW_TOPIC` | Defaults to `interview-events` |
+| `KAFKA_NOTIFICATION_INTERVIEW_GROUP_ID` | Dedicated Interview v1 projection group |
 | `NOTIFICATION_EVENT_MAX_BYTES` | Event cap, 1024–262144 bytes |
 | `NOTIFICATION_APPLICATION_REPLAY_AFTER` | Required first-rollout UTC cutoff for retained Kafka record timestamps |
+| `NOTIFICATION_INTERVIEW_REPLAY_AFTER` | Required stable Interview first-rollout UTC cutoff |
 | `NOTIFICATION_CURSOR_HMAC_KEY` | Distinct non-placeholder secret, at least 32 bytes |
 | `JWT_PUBLIC_KEY_PATH` or `JWT_PUBLIC_KEY` | Static Auth public key |
 | `JWT_JWKS_URI` | Optional HTTPS JWKS alternative |
@@ -138,10 +170,11 @@ docker compose -f compose.test.yml up \
 docker compose -f compose.test.yml down -v --remove-orphans
 ```
 
-The verified suite passes 27 unit tests and 6 PostgreSQL/Kafka integration
-tests. Coverage includes bounded pre-start backlog delivery, old-record
-cutoff/ledgering, duplicate/collision, poison continuation, legacy withdrawal
-routing, DB receive-time ordering, strict JWT/JWKS behavior, owner isolation,
-HMAC pagination and cutoff read-all.
+The verified suite passes 51 unit tests and 7 PostgreSQL/Kafka integration
+tests. Coverage includes bounded pre-start backlog delivery for both topics,
+independent old-record cutoff/ledgering, duplicate/collision, poison
+continuation, Interview payload privacy, legacy Application routing, DB
+receive-time ordering, strict JWT/JWKS behavior, owner isolation, HMAC
+pagination and cutoff read-all.
 KafkaJS 2.2.4 can emit a Node 24 `TimeoutNegativeWarning`; it is an upstream
 timer warning and does not change the passing delivery assertions.

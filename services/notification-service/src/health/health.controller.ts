@@ -6,6 +6,7 @@ import {
 import { ApiException } from '../common/api-exception';
 import { Public } from '../auth/public.decorator';
 import { ApplicationEventConsumer } from '../events/application-event.consumer';
+import { InterviewEventConsumer } from '../events/interview-event.consumer';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Controller('health')
@@ -13,7 +14,8 @@ import { PrismaService } from '../prisma/prisma.service';
 export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly consumer: ApplicationEventConsumer,
+    private readonly applicationConsumer: ApplicationEventConsumer,
+    private readonly interviewConsumer: InterviewEventConsumer,
   ) {}
 
   @Get()
@@ -33,14 +35,18 @@ export class HealthController {
     } catch {
       throw unavailable('DATABASE_UNAVAILABLE');
     }
-    if (!this.consumer.isReady()) {
+    if (!this.applicationConsumer.isReady()) {
       throw unavailable('APPLICATION_EVENT_CONSUMER_NOT_READY');
+    }
+    if (!this.interviewConsumer.isReady()) {
+      throw unavailable('INTERVIEW_EVENT_CONSUMER_NOT_READY');
     }
     return {
       service: 'notification-service',
       status: 'UP',
       database: 'UP',
       applicationEventConsumer: 'UP',
+      interviewEventConsumer: 'UP',
     };
   }
 }

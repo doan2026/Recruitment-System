@@ -31,7 +31,16 @@ const LEGACY_EVENT_ID = '51000000-0000-4000-8000-000000000003';
 const LEGACY_WITHDRAWN_EVENT_ID =
   '51000000-0000-4000-8000-000000000004';
 const HISTORICAL_EVENT_ID = '51000000-0000-4000-8000-000000000005';
+const INTERVIEW_ID = '61000000-0000-4000-8000-000000000001';
+const SECOND_INTERVIEW_ID = '61000000-0000-4000-8000-000000000002';
+const INTERVIEW_EVENT_ID = '71000000-0000-4000-8000-000000000001';
+const SECOND_INTERVIEW_EVENT_ID =
+  '71000000-0000-4000-8000-000000000002';
+const HISTORICAL_INTERVIEW_EVENT_ID =
+  '71000000-0000-4000-8000-000000000003';
 const TOPIC = process.env.KAFKA_APPLICATION_TOPIC ?? 'application-events';
+const INTERVIEW_TOPIC =
+  process.env.KAFKA_INTERVIEW_TOPIC ?? 'interview-events';
 
 const { privateKey, publicKey } = generateKeyPairSync('rsa', {
   modulusLength: 2048,
@@ -55,9 +64,13 @@ process.env.NOTIFICATION_CURSOR_HMAC_KEY =
 process.env.NOTIFICATION_EVENT_MAX_BYTES = '65536';
 process.env.NOTIFICATION_APPLICATION_REPLAY_AFTER =
   '2026-08-27T00:00:00.000Z';
+process.env.NOTIFICATION_INTERVIEW_REPLAY_AFTER =
+  '2026-08-27T00:00:00.000Z';
 process.env.NOTIFICATION_KAFKA_CONSUMER_ENABLED = 'true';
 process.env.KAFKA_NOTIFICATION_GROUP_ID =
   `notification-integration-${randomUUID()}`;
+process.env.KAFKA_NOTIFICATION_INTERVIEW_GROUP_ID =
+  `notification-interview-integration-${randomUUID()}`;
 process.env.SWAGGER_ENABLED = 'false';
 
 const { AppModule } = require('../dist/app.module');
@@ -106,9 +119,46 @@ const event = (overrides = {}) => ({
   ...overrides,
 });
 
+const interviewEvent = (overrides = {}) => ({
+  schema_version: 1,
+  event_id: INTERVIEW_EVENT_ID,
+  action: 'SCHEDULED',
+  interview_id: INTERVIEW_ID,
+  application_id: APPLICATION_ID,
+  candidate_id: CANDIDATE_ID,
+  interviewer_id: RECRUITER_ID,
+  actor_id: RECRUITER_ID,
+  round_number: 1,
+  schedule_revision: 1,
+  scheduled_start_at: '2040-09-10T02:00:00.000Z',
+  scheduled_end_at: '2040-09-10T02:45:00.000Z',
+  status: 'SCHEDULED',
+  aggregate_version: 0,
+  occurred_at: '2040-08-28T13:00:00.000Z',
+  ...overrides,
+});
+
 const publish = async (payload, key = APPLICATION_ID, timestamp) => {
   await producer.send({
     topic: TOPIC,
+    messages: [
+      {
+        key,
+        ...(timestamp ? { timestamp: String(timestamp) } : {}),
+        value:
+          typeof payload === 'string' ? payload : JSON.stringify(payload),
+      },
+    ],
+  });
+};
+
+const publishInterview = async (
+  payload,
+  key = INTERVIEW_ID,
+  timestamp,
+) => {
+  await producer.send({
+    topic: INTERVIEW_TOPIC,
     messages: [
       {
         key,
@@ -166,6 +216,11 @@ before(async () => {
         numPartitions: 1,
         replicationFactor: 1,
       },
+      {
+        topic: INTERVIEW_TOPIC,
+        numPartitions: 1,
+        replicationFactor: 1,
+      },
     ],
   });
   await admin.disconnect();
@@ -181,6 +236,14 @@ before(async () => {
   // Publish before the new group joins. A v1 projection must not lose this
   // backlog even when Application Service starts before Notification Service.
   await publish(event());
+  await publishInterview(
+    interviewEvent({ event_id: HISTORICAL_INTERVIEW_EVENT_ID }),
+    INTERVIEW_ID,
+    Date.parse('2026-08-26T23:59:59.999Z'),
+  );
+  // The dedicated Interview group must also recover retained events produced
+  // before Notification Service joins.
+  await publishInterview(interviewEvent());
   app = await NestFactory.create(AppModule, { logger: false });
   configureApplication(app);
   await app.listen(0, '0.0.0');
@@ -189,6 +252,10 @@ before(async () => {
     const response = await fetch(baseUrl + '/health/ready');
     return response.status === 200;
   }, 'Notification consumer did not become ready');
+  const readiness = await fetch(baseUrl + '/health/ready').then((response) =>
+    response.json(),
+  );
+  assert.equal(readiness.interviewEventConsumer, 'UP');
 });
 
 after(async () => {
@@ -216,7 +283,7 @@ test('Kafka duplicate is idempotent and event-id collision is quarantined', asyn
   await waitFor(
     async () =>
       (await prisma.poisonEvent.count({
-        where: { errorCode: 'EVENT_ID_COLLISION' },
+        where: { topic: TOPIC, errorCode: 'EVENT_ID_COLLISION' },
       })) === 1,
     'event id collision was not quarantined',
   );
@@ -264,7 +331,7 @@ test('poison does not block the partition and no raw payload is stored', async (
   await waitFor(
     async () =>
       (await prisma.poisonEvent.count({
-        where: { errorCode: 'EVENT_JSON_INVALID' },
+        where: { topic: TOPIC, errorCode: 'EVENT_JSON_INVALID' },
       })) === 1 &&
       (await prisma.notification.count({
         where: { sourceEventId: PIPELINE_EVENT_ID },
@@ -272,7 +339,7 @@ test('poison does not block the partition and no raw payload is stored', async (
     'consumer did not continue after poison',
   );
   const poison = await prisma.poisonEvent.findFirst({
-    where: { errorCode: 'EVENT_JSON_INVALID' },
+    where: { topic: TOPIC, errorCode: 'EVENT_JSON_INVALID' },
   });
   assert.deepEqual(Object.keys(poison).sort(), [
     'errorCode',
@@ -285,6 +352,120 @@ test('poison does not block the partition and no raw payload is stored', async (
     'topic',
   ]);
   assert.match(poison.payloadSha256, /^[0-9a-f]{64}$/);
+});
+
+test('Interview backlog is private, idempotent and poison-safe', async () => {
+  const payload = interviewEvent();
+  await publishInterview(payload);
+  await publishInterview(payload);
+  await waitFor(
+    async () =>
+      (await prisma.processedEvent.count({
+        where: { topic: INTERVIEW_TOPIC, eventId: INTERVIEW_EVENT_ID },
+      })) === 1 &&
+      (await prisma.notification.count({
+        where: {
+          sourceTopic: INTERVIEW_TOPIC,
+          sourceEventId: INTERVIEW_EVENT_ID,
+        },
+      })) === 1,
+    'interview event was not projected exactly once',
+  );
+
+  const notification = await prisma.notification.findFirstOrThrow({
+    where: {
+      sourceTopic: INTERVIEW_TOPIC,
+      sourceEventId: INTERVIEW_EVENT_ID,
+    },
+    include: { logs: true },
+  });
+  assert.equal(notification.userId, CANDIDATE_ID);
+  assert.equal(notification.type, NotificationType.INTERVIEW_SCHEDULED);
+  assert.deepEqual(Object.keys(notification.payloadJson).sort(), [
+    'action',
+    'applicationId',
+    'deepLink',
+    'interviewId',
+    'roundNumber',
+    'scheduleRevision',
+    'scheduledEnd',
+    'scheduledStart',
+  ]);
+  assert.equal(notification.logs.length, 1);
+  assert.equal(notification.logs[0].channel, 'IN_APP');
+  assert.equal(notification.logs[0].status, 'SENT');
+  assert.equal(
+    await prisma.processedEvent.count({
+      where: {
+        topic: INTERVIEW_TOPIC,
+        eventId: HISTORICAL_INTERVIEW_EVENT_ID,
+      },
+    }),
+    1,
+    'historical interview event must be durably ledgered',
+  );
+  assert.equal(
+    await prisma.notification.count({
+      where: {
+        sourceTopic: INTERVIEW_TOPIC,
+        sourceEventId: HISTORICAL_INTERVIEW_EVENT_ID,
+      },
+    }),
+    0,
+    'historical interview event must not create a fresh unread item',
+  );
+
+  await publishInterview({ ...payload, schedule_revision: 2 });
+  await waitFor(
+    async () =>
+      (await prisma.poisonEvent.count({
+        where: {
+          topic: INTERVIEW_TOPIC,
+          errorCode: 'EVENT_ID_COLLISION',
+        },
+      })) === 1,
+    'interview event-id collision was not quarantined',
+  );
+
+  await publishInterview('{"event_id":');
+  await publishInterview(
+    interviewEvent({
+      event_id: SECOND_INTERVIEW_EVENT_ID,
+      interview_id: SECOND_INTERVIEW_ID,
+      schedule_revision: 1,
+      aggregate_version: 0,
+    }),
+    SECOND_INTERVIEW_ID,
+  );
+  await waitFor(
+    async () =>
+      (await prisma.poisonEvent.count({
+        where: {
+          topic: INTERVIEW_TOPIC,
+          errorCode: 'EVENT_JSON_INVALID',
+        },
+      })) === 1 &&
+      (await prisma.notification.count({
+        where: {
+          sourceTopic: INTERVIEW_TOPIC,
+          sourceEventId: SECOND_INTERVIEW_EVENT_ID,
+        },
+      })) === 1,
+    'interview poison blocked the next valid record',
+  );
+  const poison = await prisma.poisonEvent.findFirstOrThrow({
+    where: { topic: INTERVIEW_TOPIC, errorCode: 'EVENT_JSON_INVALID' },
+  });
+  assert.deepEqual(Object.keys(poison).sort(), [
+    'errorCode',
+    'eventKeySha256',
+    'id',
+    'offset',
+    'partition',
+    'payloadSha256',
+    'recordedAt',
+    'topic',
+  ]);
 });
 
 test('legacy rollout event is accepted and creates one safe projection', async () => {
