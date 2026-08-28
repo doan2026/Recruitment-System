@@ -35,6 +35,7 @@ def clean_embedding_tables(database_url: str) -> None:
                 ai.embedding_dead_letters,
                 ai.embedding_event_ledger,
                 ai.embedding_aggregate_cursors,
+                ai.cv_aggregate_owners,
                 ai.cv_embeddings,
                 ai.job_embeddings
             RESTART IDENTITY

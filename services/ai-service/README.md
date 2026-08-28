@@ -2,9 +2,9 @@
 
 FastAPI service for CV-to-job semantic matching. This vertical slice owns the
 pgvector schema and the internal `POST /match` provider used by Application
-Service. A dedicated non-root worker now consumes `job-events`, generates pinned
-384-dimensional CPU embeddings and persists only vectors, hashes and filtering
-metadata. CV ingestion, recommendation and chatbot implementation remain
+Service. Dedicated non-root workers consume `job-events` and `cv-events`,
+generate pinned 384-dimensional CPU embeddings and persist only vectors,
+hashes and filtering metadata. Recommendation and chatbot implementation remain
 separate P11 tasks.
 
 ## Internal match API
@@ -137,6 +137,91 @@ warms it before joining the consumer group and stores Hugging Face caches in
 the `ai-model-cache` volume. The API image remains lightweight and never loads
 the model during `/match`.
 
+## CV embedding worker
+
+The dedicated `ai-cv-embedding-worker` consumes one pre-created `cv-events`
+topic. The Kafka key is UUID text for `cv_id` and must parse to the same UUID as
+the payload. Version 1 is an exact nine-field flat snake_case contract: missing
+fields, extra fields, duplicate JSON keys and the old camelCase envelope are
+rejected.
+
+```json
+{
+  "event_id": "11111111-1111-4111-8111-111111111111",
+  "action": "UPSERTED",
+  "cv_id": "22222222-2222-4222-8222-222222222222",
+  "candidate_id": "33333333-3333-4333-8333-333333333333",
+  "file_id": "44444444-4444-4444-8444-444444444444",
+  "cv_type": "UPLOAD",
+  "occurred_at": "2026-08-28T01:02:03.000Z",
+  "schema_version": 1,
+  "aggregate_version": 7
+}
+```
+
+`action` is exactly `UPSERTED`, `DEACTIVATED` or `DELETED`; `cv_type` is
+exactly `UPLOAD` or `ONLINE`. All IDs are UUID strings, `occurred_at` is exactly
+UTC millisecond `YYYY-MM-DDTHH:mm:ss.SSSZ`, and `aggregate_version` is a
+positive PostgreSQL `BIGINT`. `cv_id` ownership is immutable: later events
+cannot reassign an existing CV to another `candidate_id`. The minimal
+`ai.cv_aggregate_owners` registry binds that UUID pair in the same transaction
+as every upsert, terminal lifecycle event or parsed-source DLQ result and keeps
+the binding after vector deletion; it stores no CV content or file metadata.
+
+`UPSERTED` verifies `file_id` with Media using expected owner type `USER`, the
+event's `candidate_id` and file type `CV`, then requests a short-lived signed
+download URL. The internal key is sent only to Media's `/internal/verify` and
+`/internal/download-url`; it is never forwarded to the signed host. Downloads
+are HTTPS-only, redirect-free, restricted to the configured exact-host
+allowlist, limited by expiry, declared/observed bytes, MIME and PDF magic, and
+never use proxy environment variables. After Media has verified PDF metadata,
+the download response MIME must be exactly `application/pdf` or Cloudinary's
+private-download `application/octet-stream`, with exact byte count and `%PDF-`
+magic. Only PDF is supported; DOC and DOCX are terminally rejected until a
+separately bounded parser is designed.
+
+PDF extraction runs in a disposable child process with wall-clock, page, text,
+file-descriptor, CPU and best-effort memory limits. Parent/child IPC is bounded
+UTF-8 JSON over `send_bytes`/`recv_bytes` and never unpickles child data. These
+controls isolate parser failures and resource consumption; they are not a
+malware sandbox. CV bytes and normalized text live only long enough to create
+the embedding. Raw Kafka payloads, signed URLs, file bytes and CV text are never
+stored or intentionally logged.
+
+Lifecycle handling is atomic with the event ledger and aggregate cursor:
+
+- `UPSERTED` writes or refreshes the vector and marks it active.
+- `DEACTIVATED` retains the historical vector with `is_active = false` and is
+  terminal for the immutable CV snapshot. Explicit Application `/match` calls
+  by stored `cv_id` still use the retained vector.
+- `DELETED` removes the vector and writes a permanent aggregate tombstone.
+
+Neither delayed nor higher-version `UPSERTED` can reactivate a deactivated or
+deleted CV. The worker checks the event ledger before any Media call, parse or
+inference. Media 401/403/429/5xx responses, timeouts, malformed internal
+envelopes and genuine parser process startup/IPC infrastructure failures are
+retryable and do not advance the Kafka offset. Verified source
+missing/inactive, PDF integrity failure and
+corrupt/encrypted/blank/resource-killed/over-limit PDFs are terminal: the
+repository atomically writes a hash-only DLQ row plus ledger result without
+advancing the aggregate cursor, then the worker commits the offset. A later
+`DELETED` can therefore progress. Unparseable events use the generic hash-only
+transport DLQ. Automatic offset commit/store remains disabled.
+
+After `alembic upgrade head`, run the worker directly with:
+
+```bash
+python -m app.cv_worker_main
+```
+
+For root Compose, configure the distinct `MEDIA_INTERNAL_API_KEY_AI` secret and
+start `ai-cv-embedding-worker`; it waits for AI, Media and Kafka health. Roll
+out the AI migration/API first, provision the topic and matching Media AI
+credential, deploy the Profile producer/outbox, then start the worker. Events
+may safely accumulate before it joins. Existing CV embedding rows migrate as
+active, but no historical Profile event is synthesized; any baseline replay
+must be explicitly reviewed before enabling the producer.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and set at least:
@@ -145,13 +230,22 @@ Copy `.env.example` to `.env` and set at least:
 - `INTERNAL_API_KEY` — exactly the same secret as Application Service
 - `DATABASE_CONNECT_TIMEOUT_SECONDS` (default 2)
 - `DATABASE_STATEMENT_TIMEOUT_MS` (default 2000)
-- `KAFKA_BROKERS`, `KAFKA_JOB_TOPIC`, consumer group and client ID
+- `KAFKA_BROKERS`, the Job/CV topics, consumer groups and client IDs
 - `KAFKA_MAX_ATTEMPTS` plus poll/retry/reconnect timing
 - `EMBEDDING_MODEL_NAME`
 - `EMBEDDING_MODEL_REVISION` — immutable model commit SHA
 - `EMBEDDING_MODEL_CACHE` (default `/models`)
 - `EMBEDDING_MODEL_LOCAL_FILES_ONLY`
 - `EMBEDDING_DIMENSION` — must remain 384
+- `MEDIA_SERVICE_URL`
+- `MEDIA_INTERNAL_API_KEY` — distinct AI-to-Media key, at least 32 bytes
+- `MEDIA_DOWNLOAD_ALLOWED_HOSTS` — comma-separated exact signed-host allowlist
+- `MEDIA_REQUEST_TIMEOUT_SECONDS`, `MEDIA_DOWNLOAD_TIMEOUT_SECONDS`
+- `MEDIA_MAXIMUM_FILE_BYTES` — hard maximum 5 MiB
+- `MEDIA_MAXIMUM_URL_TTL_SECONDS` — hard maximum 600 seconds
+- `CV_PDF_PARSER_TIMEOUT_SECONDS` — hard maximum 30 seconds
+- `CV_PDF_MAXIMUM_PAGES` — hard maximum 100
+- `CV_PDF_MAXIMUM_TEXT_CHARACTERS` — hard maximum 500,000
 
 The API fails at startup if `DATABASE_URL` or `INTERNAL_API_KEY` is empty. The
 worker independently validates its database, Kafka, retry and pinned-model
@@ -185,18 +279,17 @@ docker compose -f compose.test.yml down -v
 
 The full suite verifies migration-at-head behavior, privacy, vector dimensions,
 inactive/missing/model-mismatch results, cosine boundaries, event ordering,
-idempotency, retry/DLQ behavior and the HTTP contract. A real Kafka broker test
-covers publish → consume → pgvector, duplicate delivery, hash-only malformed
-DLQ and committed offsets. The current suite contains 159 unit tests and 29
-PostgreSQL/Kafka integration tests (188 total). The production worker image also
-successfully generated a normalized 384-dimensional vector with the pinned
-model revision.
+idempotency, retry/DLQ behavior, strict CV/Media/parser contracts and the HTTP
+contract. Real Kafka tests cover publish → consume → pgvector, duplicate
+delivery, source rejection followed by delete, hash-only malformed DLQ and
+committed offsets. The current suite collects 223 unit tests and 34
+PostgreSQL/Kafka integration tests (257 total). The production worker image
+also successfully generated a normalized 384-dimensional vector with the
+pinned model revision.
 
 ## Current boundary
 
 `/match` intentionally reads precomputed vectors and never loads the embedding
-model in a request. Job embeddings are now populated automatically from
-`job-events`. CV ingestion remains pending because Profile Service does not yet
-provide the canonical CV event/file contract, so end-to-end matching still
-normally returns a missing-CV reason. Recommendation and chatbot APIs are also
-outside this task.
+model in a request. Job and CV embeddings are populated asynchronously by their
+dedicated workers. Full producer-to-Media-to-AI staging E2E, recommendation and
+chatbot APIs remain outside this service task.
