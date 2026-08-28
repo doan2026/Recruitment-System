@@ -2,7 +2,7 @@
 
 > Ngày cập nhật: 29/08/2026
 > Nhánh đối chiếu chính: `develop`
-> Pull Request lần cập nhật: PR #58 từ `feature/job-search-service/search-load-vietnamese` vào `develop`
+> Pull Request lần cập nhật: PR #59 từ `feature/ai-service/candidate-ann-benchmark` vào `develop`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -699,9 +699,9 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ---
 
-## 2.34 AI CV HNSW, Exact Allowlist Plan & Controlled Benchmark — hoàn thành trên nhánh `feature/ai-service/candidate-ann-benchmark`, chờ PR
+## 2.34 AI CV HNSW, Exact Allowlist Plan & Controlled Benchmark — hoàn thành qua PR #59
 
-> Phạm vi chỉ thuộc Người 2 và hoàn thành đúng checkbox CV nearest-neighbor index/index-filter benchmark của P11. Đây không phải bằng chứng relevance tiếng Việt/model thật, HTTP/deployed E2E, distributed rate limit hay chatbot.
+> Implementation được bàn giao từ `feature/ai-service/candidate-ann-benchmark` vào `develop` qua PR #59 ngày 29/08/2026. Phạm vi chỉ thuộc Người 2 và hoàn thành đúng checkbox CV nearest-neighbor index/index-filter benchmark của P11; đây không phải bằng chứng relevance tiếng Việt/model thật, HTTP/deployed E2E, distributed rate limit hay chatbot.
 
 - Alembic `20260829_06` tạo partial active-row HNSW cosine cho `ai.cv_embeddings` bằng `CREATE INDEX CONCURRENTLY`, dọn same-name index invalid/leftover trước khi retry và downgrade bằng concurrent drop. Integration test xác nhận method/opclass/options/predicate cùng `indisvalid/indisready`, kể cả trường hợp thay một B-tree cùng tên rồi upgrade lại.
 - Candidate production query bỏ việc tắt toàn bộ index scan, materialize trước exact allowlist tối đa 500 cặp `(candidate_id,cv_id)`, lookup bằng PK/B-tree rồi mới tính cosine/sắp xếp exact. HNSW không được đẩy vào đường này vì global ANN post-filter có thể bỏ sót Candidate đã được authorize và phá tính đầy đủ của HMAC keyset cursor.
