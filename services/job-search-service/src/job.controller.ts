@@ -227,7 +227,7 @@ export class JobController {
   @Roles(SystemRole.CANDIDATE)
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Get AI-ranked jobs with a deterministic latest fallback',
+    summary: 'Get AI-ranked jobs with explicit-preference/latest fallback',
   })
   @ApiQuery({
     name: 'limit',

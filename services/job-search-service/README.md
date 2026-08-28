@@ -75,12 +75,14 @@ characters plus `%`, `_`, and `\\` are rejected so the PostgreSQL
 case-insensitive filter remains literal rather than treating user input as an
 ILIKE pattern or escape sequence.
 
-The service forwards the Candidate bearer token only to Profile
+The service forwards the Candidate bearer token only to Profile. It first calls
 `GET /cvs`, selects the active default Media-backed CV (or the deterministic
 newest legacy CV), and calls AI `POST /recommend/jobs` with only the scoped
-`AI_INTERNAL_API_KEY`. Both outbound clients reject redirects, use bounded
-timeouts and response bodies, and never retry. The configured URL must have a
-root path and its normalized hostname must appear in the corresponding
+`AI_INTERNAL_API_KEY`. Profile `GET /job-preferences` is read only when a first
+page must fall back; a successful AI page and every continuation page never
+read preferences. All outbound calls reject redirects, use bounded timeouts
+and response bodies, and never retry. The configured URL must have a root path
+and its normalized hostname must appear in the corresponding
 `*_SERVICE_ALLOWED_HOSTS` list. Deployments using custom DNS names must add
 those names explicitly; this allowlist prevents a bad URL from sending the
 Candidate JWT or scoped AI credential to an untrusted host.
@@ -88,14 +90,30 @@ Candidate JWT or scoped AI credential to an untrusted host.
 PostgreSQL remains authoritative. One query revalidates AI identifiers against
 `PUBLISHED` status, the UTC deadline, location, salary, and job type, selecting
 only public job-card columns and restoring AI order. On the first page only,
-Profile/AI unavailability, AI not-ready states, or fully stale results return a
-deterministic `LATEST` list with a stable `fallbackReason`. The response
-always includes `source`, `fallbackReason`, and `nextCursor`, and is marked
-`private, no-store` with `Vary: Authorization`.
+Profile/AI unavailability, AI not-ready states, or fully stale results resolve
+the Candidate's explicit Profile preferences before using latest jobs. Only an
+`ENABLED` consent projection is usable; `UNSET`, `DISABLED`, malformed,
+unavailable, contradictory, or empty projections fail closed to `LATEST`.
+Profile headline, skills, CV metadata, and CV content are never inferred as
+preferences.
 
-A continuation request never mixes an AI page with page one of the latest
-fallback. A missing CV, an AI cursor-stale response, empty AI page, or a page
-whose identifiers are all stale returns HTTP 409
+Request `location`, `salaryMin`, and `jobType` values remain hard filters and
+override the same stored preference dimension. Target roles always remain an
+active preference. Remaining criteria use ANY semantics: target role and
+location are exact case-insensitive matches, job type is exact, and minimum
+salary matches either a negotiable job or a VND job whose maximum salary meets
+the canonical decimal threshold. Matching jobs are ordered by
+`publishedAt DESC NULLS LAST, id ASC`; the page is filled with latest eligible
+jobs excluding IDs already selected. Both reads share one Repeatable Read
+snapshot. At least one preference match yields `source=PREFERENCES`; no match
+yields `source=LATEST`. Non-AI items have `score=null`, every fallback has
+`nextCursor=null`, and the original AI/Profile `fallbackReason` is preserved.
+The response is marked `private, no-store` with `Vary: Authorization`.
+
+A continuation request never mixes an AI page with a preference/latest
+fallback and does not read Profile preferences. A missing CV, an AI
+cursor-stale response, empty AI page, or a page whose identifiers are all stale
+returns HTTP 409
 `RECOMMENDATION_CURSOR_STALE`. Profile/AI timeout, malformed response, or 5xx
 returns HTTP 503 `RECOMMENDATION_UNAVAILABLE`.
 
@@ -289,12 +307,12 @@ npm test
 npm run build
 ```
 
-The verified local suite contains 189 unit tests. The isolated Docker gate
+The verified local suite contains 226 unit tests. The isolated Docker gate
 applies migrations to disposable PostgreSQL 16 and starts Kafka 3.8, authenticated
 Redis 7, and Elasticsearch 8.14.3 with index auto-creation disabled. It runs
-18 integration tests: three historical event baseline/resume/concurrency tests,
+19 integration tests: three historical event baseline/resume/concurrency tests,
 one transaction/order/delivery outbox test, one PostgreSQL bulk-detail contract
-test, two recommendation revalidation/fallback tests, and 11 indexing, search,
+test, three recommendation revalidation/fallback tests, and 11 indexing, search,
 ordering, reindex, retry/dead-letter, outage, recovery, and restart tests:
 
 ```bash

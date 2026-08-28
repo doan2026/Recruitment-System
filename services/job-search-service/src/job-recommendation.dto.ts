@@ -25,6 +25,7 @@ export const JOB_RECOMMENDATION_MAX_SALARY = 9_999_999_999_999.99;
 
 export enum JobRecommendationSource {
   AI = 'AI',
+  PREFERENCES = 'PREFERENCES',
   LATEST = 'LATEST',
 }
 

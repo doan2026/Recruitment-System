@@ -187,6 +187,15 @@ describe('Job recommendation HTTP contract', () => {
         '409',
         '503',
       ]);
+      expect(
+        document.components?.schemas?.JobRecommendationResultDto,
+      ).toMatchObject({
+        properties: {
+          source: {
+            enum: ['AI', 'PREFERENCES', 'LATEST'],
+          },
+        },
+      });
     } finally {
       await app.close();
     }

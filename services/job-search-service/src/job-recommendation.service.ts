@@ -15,6 +15,8 @@ import {
 } from './job-recommendation.dto';
 import { JobSearchItemDto } from './job-search.dto';
 import {
+  JobPreferenceState,
+  JobRecommendationPreferences,
   ProfileRecommendationClientService,
   ProfileRecommendationUnavailableError,
 } from './profile-recommendation-client.service';
@@ -40,6 +42,11 @@ const RECOMMENDATION_JOB_SELECT = {
 type RecommendationJob = Prisma.JobGetPayload<{
   select: typeof RECOMMENDATION_JOB_SELECT;
 }>;
+
+const LATEST_JOB_ORDER = [
+  { publishedAt: { sort: 'desc' as const, nulls: 'last' as const } },
+  { id: 'asc' as const },
+] satisfies Prisma.JobOrderByWithRelationInput[];
 
 @Injectable()
 export class JobRecommendationService {
@@ -68,7 +75,9 @@ export class JobRecommendationService {
       );
       if (!cv) {
         if (isContinuation) this.throwCursorStale();
-        return this.latest(
+        return this.preferenceThenLatest(
+          candidateId,
+          authorization,
           query,
           JobRecommendationFallbackReason.NO_ACTIVE_CV,
           now,
@@ -80,7 +89,9 @@ export class JobRecommendationService {
         throw error;
       }
       if (isContinuation) this.throwUnavailable();
-      return this.latest(
+      return this.preferenceThenLatest(
+        candidateId,
+        authorization,
         query,
         JobRecommendationFallbackReason.PROFILE_UNAVAILABLE,
         now,
@@ -93,7 +104,9 @@ export class JobRecommendationService {
     } catch (error) {
       if (error instanceof AiRecommendationCursorStaleError) {
         if (isContinuation) this.throwCursorStale();
-        return this.latest(
+        return this.preferenceThenLatest(
+          candidateId,
+          authorization,
           query,
           JobRecommendationFallbackReason.AI_RESPONSE_INVALID,
           now,
@@ -101,7 +114,9 @@ export class JobRecommendationService {
       }
       if (error instanceof AiRecommendationInvalidResponseError) {
         if (isContinuation) this.throwUnavailable();
-        return this.latest(
+        return this.preferenceThenLatest(
+          candidateId,
+          authorization,
           query,
           JobRecommendationFallbackReason.AI_RESPONSE_INVALID,
           now,
@@ -109,7 +124,9 @@ export class JobRecommendationService {
       }
       if (error instanceof AiRecommendationUnavailableError) {
         if (isContinuation) this.throwUnavailable();
-        return this.latest(
+        return this.preferenceThenLatest(
+          candidateId,
+          authorization,
           query,
           JobRecommendationFallbackReason.AI_UNAVAILABLE,
           now,
@@ -120,14 +137,18 @@ export class JobRecommendationService {
     if (recommendation.items.length === 0) {
       if (recommendation.reason === null) {
         if (isContinuation) this.throwUnavailable();
-        return this.latest(
+        return this.preferenceThenLatest(
+          candidateId,
+          authorization,
           query,
           JobRecommendationFallbackReason.AI_RESPONSE_INVALID,
           now,
         );
       }
       if (isContinuation) this.throwCursorStale();
-      return this.latest(
+      return this.preferenceThenLatest(
+        candidateId,
+        authorization,
         query,
         JobRecommendationFallbackReason.AI_NOT_READY,
         now,
@@ -148,7 +169,9 @@ export class JobRecommendationService {
     });
     if (items.length === 0) {
       if (isContinuation) this.throwCursorStale();
-      return this.latest(
+      return this.preferenceThenLatest(
+        candidateId,
+        authorization,
         query,
         JobRecommendationFallbackReason.AI_RESULTS_STALE,
         now,
@@ -186,10 +209,7 @@ export class JobRecommendationService {
     const jobs = await this.prisma.job.findMany({
       select: RECOMMENDATION_JOB_SELECT,
       where: this.activeFilters(query, now),
-      orderBy: [
-        { publishedAt: { sort: 'desc', nulls: 'last' } },
-        { id: 'asc' },
-      ],
+      orderBy: LATEST_JOB_ORDER,
       take: query.limit,
     });
     return {
@@ -198,6 +218,125 @@ export class JobRecommendationService {
       source: JobRecommendationSource.LATEST,
       fallbackReason,
     };
+  }
+
+  private async preferenceThenLatest(
+    candidateId: string,
+    authorization: string,
+    query: JobRecommendationQueryDto,
+    fallbackReason: JobRecommendationFallbackReason,
+    now: Date,
+  ): Promise<JobRecommendationResultDto> {
+    let preferences: JobRecommendationPreferences;
+    try {
+      preferences = await this.profiles.getJobPreferences(
+        candidateId,
+        authorization,
+      );
+    } catch (error) {
+      if (!(error instanceof ProfileRecommendationUnavailableError)) {
+        throw error;
+      }
+      return this.latest(query, fallbackReason, now);
+    }
+
+    if (preferences.state !== JobPreferenceState.ENABLED) {
+      return this.latest(query, fallbackReason, now);
+    }
+    const preferenceFilters = this.preferenceFilters(preferences, query);
+    if (preferenceFilters.length === 0) {
+      return this.latest(query, fallbackReason, now);
+    }
+
+    const baseFilters = this.activeFilters(query, now);
+    const result = await this.prisma.$transaction(async (transaction) => {
+      const matching = await transaction.job.findMany({
+        select: RECOMMENDATION_JOB_SELECT,
+        where: {
+          AND: [baseFilters, { OR: preferenceFilters }],
+        },
+        orderBy: LATEST_JOB_ORDER,
+        take: query.limit,
+      });
+      if (matching.length === query.limit) {
+        return { jobs: matching, hasPreferenceMatch: true };
+      }
+
+      const matchingIds = matching.map(({ id }) => id);
+      const latest = await transaction.job.findMany({
+        select: RECOMMENDATION_JOB_SELECT,
+        where: matchingIds.length === 0
+          ? baseFilters
+          : {
+            AND: [baseFilters, { id: { notIn: matchingIds } }],
+          },
+        orderBy: LATEST_JOB_ORDER,
+        take: query.limit - matching.length,
+      });
+      return {
+        jobs: [...matching, ...latest],
+        hasPreferenceMatch: matching.length > 0,
+      };
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    });
+
+    return {
+      items: result.jobs.map((job) => this.toItem(job, null)),
+      nextCursor: null,
+      source: result.hasPreferenceMatch
+        ? JobRecommendationSource.PREFERENCES
+        : JobRecommendationSource.LATEST,
+      fallbackReason,
+    };
+  }
+
+  private preferenceFilters(
+    preferences: JobRecommendationPreferences,
+    query: JobRecommendationQueryDto,
+  ): Prisma.JobWhereInput[] {
+    const filters: Prisma.JobWhereInput[] = preferences.targetRoles.map(
+      (role) => ({
+        title: {
+          equals: role,
+          mode: Prisma.QueryMode.insensitive,
+        },
+      }),
+    );
+
+    if (query.location === undefined) {
+      filters.push(...preferences.preferredLocations.map((location) => ({
+        location: {
+          equals: location,
+          mode: Prisma.QueryMode.insensitive,
+        },
+      })));
+    }
+    if (
+      query.jobType === undefined &&
+      preferences.preferredJobTypes.length > 0
+    ) {
+      filters.push({
+        jobType: { in: [...preferences.preferredJobTypes] },
+      });
+    }
+    if (
+      query.salaryMin === undefined &&
+      preferences.minimumSalary !== null
+    ) {
+      filters.push({
+        OR: [
+          { isNegotiable: true },
+          {
+            currency: 'VND',
+            salaryMax: {
+              gte: new Prisma.Decimal(preferences.minimumSalary),
+            },
+          },
+        ],
+      });
+    }
+    return filters;
   }
 
   private activeFilters(
