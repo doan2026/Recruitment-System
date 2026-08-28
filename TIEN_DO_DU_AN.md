@@ -80,7 +80,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** tạo hồ sơ công ty; OWNER xin chữ ký/confirm upload và gắn media đã xác minh; cập nhật; gửi duyệt và Admin xác minh; hiển thị trang công khai; mời, chấp nhận, xóa và chuyển quyền thành viên.
 - **Chức năng chính:** profile CRUD, logo/ảnh/video Media-backed, trạng thái `PENDING/VERIFIED/REJECTED`, ownership, invitation token, public company page và endpoint tra cứu membership cho service khác.
 - **Phụ thuộc:** Auth, File/Media và Admin.
-- **Trạng thái:** nghiệp vụ chính và Company–Media ownership đã merge vào `develop` qua PR #54; migration backup/restore đã verify qua PR #TBD. Real multi-service E2E, audit và load public search vẫn pending.
+- **Trạng thái:** nghiệp vụ chính và Company–Media ownership đã merge vào `develop` qua PR #54; migration backup/restore đã verify qua PR #55. Real multi-service E2E, audit và load public search vẫn pending.
 
 ## T06 — Job & Search Service
 
@@ -201,7 +201,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Client fail closed với origin/key/timeout, redirect deny, response 64 KiB, exact envelope/field/echo validation và status mapping không tin error body. Full Company đạt **139/139 unit test**, build PASS; migration đã được áp dụng lặp trên PostgreSQL 16 sạch, schema drift bằng 0 và legacy fixture không mất dữ liệu. Real Auth/Admin/Media deployed E2E và live Cloudinary preset vẫn thuộc các gate pending riêng.
 - Media quota hiện là 1 logo, 10 ảnh, 1 video ACTIVE mỗi Company. Upload confirm bị bỏ dở được reconciler thu hồi tự động sau intent expiry + grace 900 giây. Khi slot đang được profile sử dụng, thay thế vẫn dùng remove → cleanup/delete → upload → attach và có display gap; atomic replacement cần contract Media mới nên không được tuyên bố hoàn thành trong task này.
 
-### Company Prisma Backup/Restore & Restore-based Rollback — PR #TBD
+### Company Prisma Backup/Restore & Restore-based Rollback — PR #55
 
 - Bổ sung verifier fail-closed chỉ dùng Docker local Unix socket, PostgreSQL **16.15** theo image digest bất biến, internal network không publish port và database/container/network/image tạm gắn exact run sentinel. Cleanup chỉ xóa resource do chính run tạo khi exact ID, name và label cùng khớp; build context chỉ chứa Prisma input, không gửi `.env`, `node_modules`, `dist` hoặc artifact cục bộ vào Docker daemon.
 - Tạo pre-media baseline bằng `prisma migrate deploy` từ migration tree chỉ chứa đúng hai migration đầu, nạp fixture legacy deterministic và kiểm migration ledger/checksum. Sau đó deploy migration Media hai lần, kiểm lần hai no-op, `migrate status`, drift bằng 0, catalog/ledger không đổi, dữ liệu cũ nguyên checksum, default/reference mới đúng và constraint unique/FK/enum hoạt động.
