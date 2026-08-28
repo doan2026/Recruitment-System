@@ -5,12 +5,21 @@ from __future__ import annotations
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 from uuid import UUID, uuid4
 
 import pytest
 from redis import Redis
 
+from app.chat_provider import ChatText, MyJobRecommendationIntent
+from app.chat_recommendation import (
+    JobRecommendationCard,
+    JobRecommendationSnapshot,
+    JobRecommendationSource,
+)
+from app.chat_service import ChatService
 from app.chat_store import ChatSessionFenceLost, ChatTurn, RedisChatStore
+from app.job_events import JobType
 
 pytestmark = pytest.mark.integration
 
@@ -224,5 +233,176 @@ def test_concurrent_lock_fences_old_owner_and_release_cannot_delete_new_lock(
         )
         store.release_session(user_id, session_id, new_token)
         assert store.acquire_session(user_id, session_id) is not None
+    finally:
+        _delete_store_keys(redis_client, store, (user_id,), (session_id,))
+
+
+def test_session_renewal_extends_only_the_current_fenced_owner(
+    redis_url: str,
+    redis_client: Redis,
+) -> None:
+    user_id, session_id = uuid4(), uuid4()
+    store = _store(
+        redis_url,
+        key_secret="session-renew-integration-secret-key-001",
+        lock_ttl_seconds=1,
+    )
+    _delete_store_keys(redis_client, store, (user_id,), (session_id,))
+    try:
+        old_token = store.acquire_session(user_id, session_id)
+        assert old_token is not None
+        time.sleep(0.6)
+        assert store.renew_session(user_id, session_id, old_token) is None
+        time.sleep(0.6)
+        assert store.acquire_session(user_id, session_id) is None
+
+        store.release_session(user_id, session_id, old_token)
+        new_token = store.acquire_session(user_id, session_id)
+        assert new_token is not None
+        assert new_token != old_token
+        with pytest.raises(ChatSessionFenceLost):
+            store.renew_session(user_id, session_id, old_token)
+        assert store.acquire_session(user_id, session_id) is None
+    finally:
+        _delete_store_keys(redis_client, store, (user_id,), (session_id,))
+
+
+def test_service_heartbeat_prevents_a_second_owner_during_slow_provider(
+    redis_url: str,
+    redis_client: Redis,
+) -> None:
+    user_id, session_id = uuid4(), uuid4()
+    store = _store(
+        redis_url,
+        key_secret="service-heartbeat-integration-secret-001",
+        lock_ttl_seconds=1,
+    )
+    started = Event()
+    finish = Event()
+
+    class SlowProvider:
+        def decide(
+            self,
+            history: tuple[ChatTurn, ...],
+            current_message: str,
+            *,
+            recommendation_tool_enabled: bool,
+        ) -> ChatText:
+            assert history == ()
+            assert current_message == "question"
+            assert recommendation_tool_enabled is False
+            started.set()
+            assert finish.wait(timeout=3)
+            return ChatText(answer="safe answer")
+
+    service = ChatService(
+        store,
+        SlowProvider(),
+        session_lease_renewal_seconds=0.2,
+    )
+    _delete_store_keys(redis_client, store, (user_id,), (session_id,))
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            reply = executor.submit(
+                service.reply,
+                user_id,
+                session_id,
+                "question",
+            )
+            assert started.wait(timeout=1)
+            time.sleep(1.2)
+            lock_key = store._session_keys(user_id, session_id)[1]
+            assert redis_client.pttl(lock_key) > 0
+            assert store.acquire_session(user_id, session_id) is None
+            finish.set()
+            assert reply.result(timeout=2).answer == "safe answer"
+
+        assert store.load_history(user_id, session_id) == (
+            ChatTurn("question", "safe answer"),
+        )
+        replacement = store.acquire_session(user_id, session_id)
+        assert replacement is not None
+        store.release_session(user_id, session_id, replacement)
+    finally:
+        finish.set()
+        _delete_store_keys(redis_client, store, (user_id,), (session_id,))
+
+
+def test_recommendation_intent_persists_only_neutral_marker_without_job_or_token(
+    redis_url: str,
+    redis_client: Redis,
+) -> None:
+    user_id, session_id = uuid4(), uuid4()
+    access_token = "secret.header.payload.signature"
+    store = _store(
+        redis_url,
+        key_secret="tool-history-integration-secret-key-001",
+        user_rate_limit=10,
+    )
+    _delete_store_keys(redis_client, store, (user_id,), (session_id,))
+
+    class IntentProvider:
+        def decide(
+            self,
+            history: tuple[ChatTurn, ...],
+            current_message: str,
+            *,
+            recommendation_tool_enabled: bool,
+        ) -> MyJobRecommendationIntent:
+            assert history == ()
+            assert current_message == "Gợi ý việc làm cho tôi"
+            assert recommendation_tool_enabled is True
+            return MyJobRecommendationIntent()
+
+    class RecommendationClient:
+        def recommend(self, token: str) -> JobRecommendationSnapshot:
+            assert token == access_token
+            return JobRecommendationSnapshot(
+                items=(
+                    JobRecommendationCard(
+                        job_id="30000000-0000-4000-8000-000000000001",
+                        title="Backend Engineer",
+                        company_name=None,
+                        location="Hà Nội",
+                        job_type=JobType.FULL_TIME,
+                        salary_min=None,
+                        salary_max=None,
+                        is_negotiable=True,
+                        currency="VND",
+                        score=0.9,
+                    ),
+                ),
+                source=JobRecommendationSource.AI,
+                fallback_reason=None,
+            )
+
+    try:
+        result = ChatService(
+            store,
+            IntentProvider(),
+            RecommendationClient(),
+        ).reply(
+            user_id,
+            session_id,
+            "Gợi ý việc làm cho tôi",
+            access_token=access_token,
+        )
+
+        history = store.load_history(user_id, session_id)
+        assert len(history) == 1
+        assert history[0].user_message == "Gợi ý việc làm cho tôi"
+        assert history[0].assistant_message != result.answer
+        assert "You requested personalized job suggestions" in (
+            history[0].assistant_message
+        )
+        history_key = store._session_keys(user_id, session_id)[0]
+        stored_items = redis_client.lrange(history_key, 0, -1)
+        assert stored_items
+        stored = "\n".join(stored_items)
+        assert access_token not in stored
+        assert "get_my_job_recommendations" not in stored
+        assert "toolu_" not in stored
+        assert "cv_id" not in stored
+        assert "Backend Engineer" not in stored
     finally:
         _delete_store_keys(redis_client, store, (user_id,), (session_id,))

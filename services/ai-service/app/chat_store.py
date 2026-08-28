@@ -59,6 +59,13 @@ class ChatStore(Protocol):
 
     def acquire_session(self, user_id: UUID, session_id: UUID) -> str | None: ...
 
+    def renew_session(
+        self,
+        user_id: UUID,
+        session_id: UUID,
+        lock_token: str,
+    ) -> None: ...
+
     def load_history(
         self,
         user_id: UUID,
@@ -132,6 +139,13 @@ return {1, redis.call('LLEN', KEYS[1])}
 _RELEASE_SCRIPT = """
 if redis.call('GET', KEYS[1]) == ARGV[1] then
   return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+
+_RENEW_SCRIPT = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('PEXPIRE', KEYS[1], tonumber(ARGV[2]))
 end
 return 0
 """
@@ -328,6 +342,31 @@ class RedisChatStore:
                 raise ChatStoreUnavailable("Chat state is unavailable")
             turns.append(_decode_turn(serialized))
         return tuple(turns)
+
+    def renew_session(
+        self,
+        user_id: UUID,
+        session_id: UUID,
+        lock_token: str,
+    ) -> None:
+        token = _validate_lock_token(lock_token)
+        _, lock_key = self._session_keys(user_id, session_id)
+        result = _redis_operation(
+            lambda: self._redis.eval(
+                _RENEW_SCRIPT,
+                1,
+                lock_key,
+                token,
+                self._lock_ttl_seconds * 1000,
+            )
+        )
+        if result is _REDIS_FAILURE:
+            raise ChatStoreUnavailable("Chat state is unavailable")
+        if result == 1:
+            return
+        if result == 0:
+            raise ChatSessionFenceLost("Chat session ownership was lost")
+        raise ChatStoreUnavailable("Chat state is unavailable")
 
     def append_turn(
         self,

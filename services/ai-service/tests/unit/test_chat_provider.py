@@ -6,10 +6,20 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 
-from app.chat_prompt import SYSTEM_PROMPT
-from app.chat_provider import AnthropicChatProvider, ChatProviderUnavailable
+import app.chat_provider as chat_provider_module
+from app.chat_prompt import SYSTEM_PROMPT, SYSTEM_PROMPT_WITH_RECOMMENDATIONS
+from app.chat_provider import (
+    MY_JOB_RECOMMENDATION_TOOL,
+    MY_JOB_RECOMMENDATION_TOOL_CHOICE,
+    AnthropicChatProvider,
+    ChatProviderUnavailable,
+    ChatText,
+    MyJobRecommendationIntent,
+    _TotalDeadlineTransport,
+)
 from app.chat_store import ChatTurn
 
 
@@ -47,12 +57,13 @@ def test_provider_uses_fixed_system_prompt_bounded_model_and_history() -> None:
     )
     provider = make_provider(messages)
 
-    answer = provider.generate(
+    decision = provider.decide(
         (ChatTurn("Câu hỏi trước", "Trả lời trước"),),
         "Câu hỏi hiện tại",
+        recommendation_tool_enabled=False,
     )
 
-    assert answer == "Hướng dẫn an toàn."
+    assert decision == ChatText(answer="Hướng dẫn an toàn.")
     assert messages.request == {
         "model": "claude-haiku-4-5-20251001",
         "max_tokens": 512,
@@ -90,7 +101,7 @@ def test_provider_rejects_empty_non_text_control_and_oversized_output(
     provider = make_provider(FakeMessages(response=response))
 
     with pytest.raises(ChatProviderUnavailable):
-        provider.generate((), "question")
+        provider.decide((), "question", recommendation_tool_enabled=False)
 
 
 def test_provider_sanitizes_unexpected_client_failure() -> None:
@@ -109,14 +120,134 @@ def test_provider_sanitizes_unexpected_client_failure() -> None:
             )
         )
         with pytest.raises(ChatProviderUnavailable, match="invalid response"):
-            truncated.generate((), "question")
+            truncated.decide(
+                (),
+                "question",
+                recommendation_tool_enabled=False,
+            )
 
     provider = make_provider(FakeMessages(error=RuntimeError("secret response body")))
 
     with pytest.raises(ChatProviderUnavailable, match="invalid response") as caught:
-        provider.generate((), "question")
+        provider.decide((), "question", recommendation_tool_enabled=False)
 
     assert "secret response body" not in str(caught.value)
+
+
+def test_provider_exposes_only_the_parameter_free_recommendation_tool() -> None:
+    messages = FakeMessages(
+        response=SimpleNamespace(
+            content=[
+                SimpleNamespace(
+                    type="tool_use",
+                    id="toolu_safe-id_01",
+                    name="get_my_job_recommendations",
+                    input={},
+                )
+            ],
+            stop_reason="tool_use",
+        )
+    )
+
+    decision = make_provider(messages).decide(
+        (),
+        "Gợi ý việc làm cho tôi",
+        recommendation_tool_enabled=True,
+    )
+
+    assert decision == MyJobRecommendationIntent()
+    assert messages.request == {
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 512,
+        "system": SYSTEM_PROMPT_WITH_RECOMMENDATIONS,
+        "messages": [{"role": "user", "content": "Gợi ý việc làm cho tôi"}],
+        "tools": [MY_JOB_RECOMMENDATION_TOOL],
+        "tool_choice": MY_JOB_RECOMMENDATION_TOOL_CHOICE,
+    }
+    assert MY_JOB_RECOMMENDATION_TOOL["input_schema"] == {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": False,
+    }
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        [
+            SimpleNamespace(
+                type="tool_use",
+                id="toolu_1",
+                name="unknown_tool",
+                input={},
+            )
+        ],
+        [
+            SimpleNamespace(
+                type="tool_use",
+                id="toolu_1",
+                name="get_my_job_recommendations",
+                input={"cv_id": "attacker-selected"},
+            )
+        ],
+        [
+            SimpleNamespace(
+                type="tool_use",
+                id="toolu_1",
+                name="get_my_job_recommendations",
+                input={"url": "https://attacker.invalid"},
+            )
+        ],
+        [
+            SimpleNamespace(
+                type="text",
+                text="I will call the tool.",
+            ),
+            SimpleNamespace(
+                type="tool_use",
+                id="toolu_1",
+                name="get_my_job_recommendations",
+                input={},
+            ),
+        ],
+        [
+            SimpleNamespace(
+                type="tool_use",
+                id="toolu_1",
+                name="get_my_job_recommendations",
+                input={},
+            ),
+            SimpleNamespace(
+                type="tool_use",
+                id="toolu_2",
+                name="get_my_job_recommendations",
+                input={},
+            ),
+        ],
+        [
+            SimpleNamespace(
+                type="tool_use",
+                id="unsafe id",
+                name="get_my_job_recommendations",
+                input={},
+            )
+        ],
+    ],
+)
+def test_provider_rejects_unknown_parameterized_mixed_and_multiple_tools(
+    content: list[object],
+) -> None:
+    provider = make_provider(
+        FakeMessages(response=SimpleNamespace(content=content, stop_reason="tool_use"))
+    )
+
+    with pytest.raises(ChatProviderUnavailable, match="invalid response"):
+        provider.decide(
+            (),
+            "malicious tool request",
+            recommendation_tool_enabled=True,
+        )
 
 
 def test_offline_sdk_client_constructs_and_closes_without_provider_call() -> None:
@@ -128,3 +259,37 @@ def test_offline_sdk_client_constructs_and_closes_without_provider_call() -> Non
     )
 
     provider.close()
+
+
+def test_provider_transport_enforces_total_deadline_across_response_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ticks = iter((100.0, 100.1, 100.5, 101.0))
+    monkeypatch.setattr(chat_provider_module, "monotonic", lambda: next(ticks))
+
+    class TwoChunkStream(httpx.SyncByteStream):
+        def __iter__(self):
+            yield b'{"content":'
+            yield b'"slow"}'
+
+    class FakeTransport(httpx.BaseTransport):
+        closed = False
+
+        def handle_request(self, request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, stream=TwoChunkStream(), request=request)
+
+        def close(self) -> None:
+            self.closed = True
+
+    inner = FakeTransport()
+    with httpx.Client(
+        transport=_TotalDeadlineTransport(1.0, transport=inner)
+    ) as client:
+        with pytest.raises(httpx.ReadTimeout):
+            with client.stream(
+                "GET",
+                "https://api.anthropic.com/v1/messages",
+            ) as response:
+                tuple(response.iter_raw())
+
+    assert inner.closed is True

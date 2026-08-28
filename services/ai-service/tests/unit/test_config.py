@@ -308,3 +308,142 @@ def test_chat_configuration_fails_closed(
 
     with pytest.raises(RuntimeError, match=message):
         Settings(**values).validate()  # type: ignore[arg-type]
+
+
+def test_chat_recommendation_tool_configuration_is_conditional_and_valid() -> None:
+    disabled = valid_chat_settings()
+    disabled.validate()
+
+    enabled = valid_chat_settings(
+        chat_recommendation_tool_enabled=True,
+        chat_job_recommendation_url=("http://job-search-service:3000/recommended"),
+        chat_job_service_allowed_hosts=("job-search-service",),
+        chat_job_service_allow_insecure_http=True,
+        chat_job_request_timeout_seconds=3,
+    )
+
+    enabled.validate()
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        (
+            {"chat_job_recommendation_url": ""},
+            "CHAT_JOB_RECOMMENDATION_URL",
+        ),
+        (
+            {
+                "chat_job_recommendation_url": (
+                    "http://job-search-service:3000/recommended"
+                ),
+                "chat_job_service_allow_insecure_http": False,
+            },
+            "CHAT_JOB_RECOMMENDATION_URL",
+        ),
+        (
+            {
+                "chat_job_recommendation_url": ("https://evil.invalid/recommended"),
+            },
+            "CHAT_JOB_RECOMMENDATION_URL",
+        ),
+        (
+            {
+                "chat_job_recommendation_url": ("https://job-search-service/other"),
+            },
+            "CHAT_JOB_RECOMMENDATION_URL",
+        ),
+        (
+            {
+                "chat_job_recommendation_url": (
+                    "https://job-search-service/recommended?limit=50"
+                ),
+            },
+            "CHAT_JOB_RECOMMENDATION_URL",
+        ),
+        (
+            {
+                "chat_job_recommendation_url": (
+                    "https://job-search-service/%72ecommended"
+                ),
+            },
+            "CHAT_JOB_RECOMMENDATION_URL",
+        ),
+        (
+            {"chat_job_service_allowed_hosts": ("bad/host",)},
+            "CHAT_JOB_SERVICE_ALLOWED_HOSTS",
+        ),
+        (
+            {"chat_session_lock_seconds": 22},
+            "CHAT_SESSION_LOCK_SECONDS",
+        ),
+    ],
+)
+def test_chat_recommendation_tool_configuration_fails_closed(
+    changes: dict[str, object],
+    message: str,
+) -> None:
+    values: dict[str, object] = {
+        "chat_recommendation_tool_enabled": True,
+        "chat_job_recommendation_url": ("https://job-search-service/recommended"),
+        "chat_job_service_allowed_hosts": ("job-search-service",),
+        "chat_job_service_allow_insecure_http": False,
+        "chat_job_request_timeout_seconds": 3,
+    }
+    values.update(changes)
+
+    with pytest.raises(RuntimeError, match=message):
+        valid_chat_settings(**values).validate()
+
+
+def test_settings_reads_chat_recommendation_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
+    monkeypatch.setenv("INTERNAL_API_KEY", "shared-secret")
+    monkeypatch.setenv("INTERNAL_API_KEY_JOB_SEARCH", SCOPED_KEY)
+    monkeypatch.setenv(
+        "INTERNAL_API_KEY_JOB_SEARCH_CANDIDATES",
+        CANDIDATE_SCOPED_KEY,
+    )
+    monkeypatch.setenv("CHAT_RECOMMENDATION_TOOL_ENABLED", "true")
+    monkeypatch.setenv(
+        "CHAT_JOB_RECOMMENDATION_URL",
+        "https://job-search.internal/recommended",
+    )
+    monkeypatch.setenv(
+        "CHAT_JOB_SERVICE_ALLOWED_HOSTS",
+        "job-search.internal",
+    )
+    monkeypatch.setenv("CHAT_JOB_REQUEST_TIMEOUT_SECONDS", "4")
+    monkeypatch.setenv("CHAT_MAX_CONCURRENT_REQUESTS", "7")
+
+    settings = Settings.from_environment()
+
+    assert settings.chat_recommendation_tool_enabled is True
+    assert settings.chat_job_recommendation_url == (
+        "https://job-search.internal/recommended"
+    )
+    assert settings.chat_job_service_allowed_hosts == ("job-search.internal",)
+    assert settings.chat_job_request_timeout_seconds == 4
+    assert settings.chat_max_concurrent_requests == 7
+
+
+def valid_chat_settings(**changes: object) -> Settings:
+    values: dict[str, object] = {
+        "database_url": DATABASE_URL,
+        "internal_api_key": "shared-secret",
+        "internal_api_key_job_search": SCOPED_KEY,
+        "internal_api_key_job_search_candidates": CANDIDATE_SCOPED_KEY,
+        "chat_enabled": True,
+        "redis_url": "redis://:secret@redis:6379/15",
+        "chat_redis_key_secret": "chat-redis-key-secret-000000000001",
+        "anthropic_api_key": "anthropic-api-key-00000000000000001",
+        "jwt_issuer": "https://auth.recruitment.local",
+        "jwt_audience": "recruitment-api",
+        "jwt_jwks_uri": "http://auth-service:8080/auth/.well-known/jwks.json",
+        "jwt_jwks_allowed_hosts": ("auth-service",),
+        "jwt_allow_insecure_jwks": True,
+    }
+    values.update(changes)
+    return Settings(**values)  # type: ignore[arg-type]

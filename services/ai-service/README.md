@@ -1,9 +1,10 @@
 # AI Service
 
 FastAPI service for CV-to-job semantic matching and consent-scoped
-recommendations, plus a bounded Candidate-facing recruitment chatbot. This
-vertical slice owns the pgvector schema, the internal `POST /match` provider
-used by Application Service, the scoped
+recommendations, plus a bounded Candidate-facing recruitment chatbot with an
+optional personalized Job-suggestion intent. This vertical slice owns the
+pgvector schema, the internal `POST /match` provider used by Application
+Service, the scoped
 `POST /recommend/jobs` and `POST /recommend/candidates` providers used by Job
 Search Service, and the authenticated `POST /chat` API. Dedicated non-root
 workers consume `job-events` and `cv-events`, generate pinned 384-dimensional
@@ -28,28 +29,81 @@ sets `Cache-Control: no-store`, `Pragma: no-cache` and an appropriate
 
 The provider is Anthropic Claude Haiku, default model
 `claude-haiku-4-5-20251001`, with a 15-second request timeout, at most 512
-output tokens and no SDK retries. `ANTHROPIC_API_KEY` is loaded only from the
-service environment; it is never accepted from a request, saved in chat
-history or intentionally logged. A fixed system prompt treats both the user
-message and prior history as untrusted, answers only recruitment questions,
-does not disclose prompts or secrets, does not request passwords, OTPs or
-tokens, and does not claim access to live account/application state. Chatbot v1
-has no tool that accepts an arbitrary `cv_id` and cannot invoke
-`/recommend/jobs`, `/recommend/candidates` or `/match` on a Candidate's behalf.
+output tokens and no SDK retries. A transport-level monotonic deadline also
+stops a response that keeps yielding below the per-read timeout from holding a
+worker indefinitely. `ANTHROPIC_API_KEY` is loaded only from the service
+environment; it is never accepted from a request, saved in chat history or
+intentionally logged. A fixed system prompt treats both the user message and
+prior history as untrusted, answers only recruitment questions, does not
+disclose prompts or secrets, does not request passwords, OTPs or tokens, and
+does not claim access to live account/application state.
+
+Personalized Job suggestions are a separate rolling opt-in. When
+`CHAT_RECOMMENDATION_TOOL_ENABLED=true`, Claude sees exactly one strict,
+parameter-free `get_my_job_recommendations` intent tool. Its schema forbids
+additional properties, parallel calls are disabled, and AI accepts only one
+complete matching `tool_use` block. The model cannot supply a `user_id`,
+`candidate_id`, `cv_id`, filters, cursor or endpoint. AI does not let Claude
+call `/recommend/jobs`, `/recommend/candidates` or `/match`; instead it treats
+the tool call only as an intent decision and makes one server-controlled GET to
+the fixed Job Search `/recommended?limit=3` endpoint.
+
+That direct endpoint must have the exact `/recommended` path on an allowlisted
+host, with no userinfo, redirect, query configuration or fragment; AI adds only
+the fixed `limit=3` query itself. Production requires HTTPS. The HTTP client
+does not follow redirects or trust proxy environment variables and applies a
+bounded 1–5 second network timeout plus a monotonic deadline across the
+response stream. Job Search remains the authorization and fallback owner: it
+derives the Candidate, active CV and saved preferences from the already
+verified Candidate bearer rather than trusting model input.
+
+The original Candidate bearer exists only for this in-flight server-to-server
+request. It is never sent to Anthropic, written to Redis/chat history, included
+in a Job card or intentionally logged. AI requests identity transfer encoding,
+rejects compressed responses and caps the raw Job body at 256 KiB before JSON
+parsing. The response must be no-store JSON with an exact envelope, rejects
+duplicate keys and extra fields, and may contain at most three unique canonical
+Job cards. AI projects each accepted card down to Job ID, title, company name,
+location, type, salary, currency and optional reference score; descriptions,
+skills, Company IDs, cursor and other wire fields are discarded.
+
+Claude never formats the returned cards. A deterministic Vietnamese/English
+formatter escapes Markdown and neutralizes URL-like text, labels any score as
+reference similarity, caps its output and directs the Candidate to the
+“Suitable Jobs” screen for current details. An empty snapshot has a stable
+message. Job timeout, non-200 response or invalid envelope is fail-soft: chat
+returns a deterministic temporary-unavailable answer instead of leaking the
+downstream failure or failing the whole chat request. For both success and
+fail-soft paths, Redis stores only a fixed neutral recommendation marker; Job
+titles, companies, locations, scores and display answers never re-enter the
+Claude conversation history.
 
 Redis stores only bounded conversational state. HMAC-derived keys avoid raw
 user/session identifiers in Redis key names, and every history, rate and lock
 key is scoped to the authenticated owner. A session retains at most 10 turns
 for 24 hours. Fenced locks serialize one request per owner/session; appending a
 turn and refreshing its TTL is atomic, and an expired/replaced lock cannot
-commit a stale answer. The service enforces an atomic sliding-window limit of
-10 requests per user and 200 requests globally per 60 seconds. A 429 response
+commit a stale answer. While a blocking provider/Job chain is in flight, a
+dedicated bounded heartbeat renews only the exact current lock token; renewal
+loss fails closed before the Job call or append, and the atomic append remains
+the final fence. The service enforces an atomic sliding-window limit of 10
+requests per user and 200 requests globally per 60 seconds. A 429 response
 includes `Retry-After`; Redis failure fails closed rather than silently
 bypassing rate limits or isolation.
 
 The Redis client and Anthropic client are closed during application shutdown.
-Session locks use exact-token release in `finally` and also have a bounded TTL,
-so provider errors and cancelled requests do not leave an unbounded resource.
+Session locks use exact-token renewal and release, plus a bounded TTL, so
+provider errors, process loss and cancelled HTTP waiters do not leave an
+unbounded resource.
+After Candidate authentication, the blocking Redis, Claude and optional Job
+orchestration runs in a dedicated bounded executor. A matching non-blocking
+admission gate rejects excess work with sanitized `CHAT_BUSY`/503 and
+`Retry-After` instead of building an unbounded queue. This keeps the long-lived
+chat chain off FastAPI's normal worker capacity so an internal recommendation
+request can complete when Job Search calls back into AI, preventing the
+AI → Job → AI path from starving itself. Shutdown cancels queued work, drains
+running chat workers without blocking the ASGI event loop, then closes the Job
+client together with the other owned resources.
 
 ## Internal match API
 
@@ -392,6 +446,17 @@ Copy `.env.example` to `.env` and set at least:
 - `CHAT_USER_RATE_LIMIT` (default 10)
 - `CHAT_GLOBAL_RATE_LIMIT` (default 200)
 - `CHAT_SESSION_LOCK_SECONDS` (default 30)
+- `CHAT_MAX_CONCURRENT_REQUESTS` — dedicated chat executor/admission capacity;
+  default 8, bounded to 1–32
+- `CHAT_RECOMMENDATION_TOOL_ENABLED` — defaults to `false`; controls whether
+  the parameter-free personalized recommendation intent is exposed to Claude
+- `CHAT_JOB_RECOMMENDATION_URL` — fixed direct Job Search URL whose path must be
+  exactly `/recommended`; AI supplies the fixed `limit=3` query
+- `CHAT_JOB_SERVICE_ALLOWED_HOSTS` — exact hostname allowlist for that direct
+  Job call
+- `CHAT_JOB_SERVICE_ALLOW_INSECURE_HTTP` — development Compose only; production
+  service-to-service traffic must remain HTTPS
+- `CHAT_JOB_REQUEST_TIMEOUT_SECONDS` — default 3, bounded to 1–5 seconds
 - `JWT_ISSUER`, `JWT_AUDIENCE` and `JWT_JWKS_URI` — Auth access-token
   verification settings
 - `JWT_JWKS_ALLOWED_HOSTS` — exact allowlist for JWKS retrieval
@@ -403,12 +468,24 @@ Copy `.env.example` to `.env` and set at least:
 The API fails at startup if `DATABASE_URL`, `INTERNAL_API_KEY` or the distinct
 `INTERNAL_API_KEY_JOB_SEARCH` is invalid. When chat is enabled, it additionally
 validates the Redis URL, HMAC secret, Anthropic key/model, rate/retention bounds
-and JWT/JWKS trust settings before serving requests. The worker independently
-validates its database, Kafka, retry and pinned-model configuration before
-loading the model or consuming events. Define
+and JWT/JWKS trust settings before serving requests. Enabling the recommendation
+tool additionally requires its exact endpoint and host allowlist. The session
+lock TTL must cover the Claude timeout, a five-second safety margin and, while
+the tool is enabled, the Job timeout. The worker independently validates its
+database, Kafka, retry and pinned-model configuration before loading the model
+or consuming events. Define
 `INTERNAL_API_KEY` once in the repository root `.env`; the Application, Job and
 AI service environment files reference that same value so callers and the
 provider cannot silently drift to different credentials.
+
+Roll out the personalized tool independently from chat: deploy with
+`CHAT_RECOMMENDATION_TOOL_ENABLED=false`, provision the production HTTPS URL
+and exact Job hostname, verify the fixed endpoint and callback capacity in
+staging, then enable the flag on a small AI canary before widening it. Watch
+chat admission rejections, Job timeouts/fail-soft answers and AI recommendation
+capacity. Rolling back only this feature requires setting the recommendation
+flag to `false`; ordinary recruitment chat remains available while Claude no
+longer receives the tool definition.
 
 `GET /health` is a process liveness probe. `GET /ready` also verifies the
 pgvector extension, both embedding tables, recommendation generation rows and
@@ -442,15 +519,21 @@ signed/stale cursors, exact filtered pagination and transactional generation
 triggers. Chat tests cover strict request parsing, Candidate-only RS256/JWKS
 authentication, fixed-prompt construction, sanitized provider failures,
 owner/session isolation, HMAC PII-free Redis keys, atomic rate limiting,
-history trimming/expiry, lock fencing and shutdown/error-path cleanup. Real
-Redis integration tests exercise the state scripts; provider tests use a
-deterministic fake and do not claim live Claude answer quality. Real Kafka
-tests cover publish → consume → pgvector, duplicate delivery, source rejection
-followed by delete, hash-only malformed DLQ and committed offsets. The current
-suite passes **445 unit/non-integration tests and 59 PostgreSQL/Kafka/Redis
-integration tests (504/504 total)**. The production worker
-image also successfully generated a normalized 384-dimensional vector with the
-pinned model revision.
+history trimming/expiry, lock fencing and shutdown/error-path cleanup. The
+personalized-tool tests cover the strict parameter-free intent, fixed-origin
+Job request, transient bearer handling, bounded three-card projection,
+deterministic formatting, neutral provider-history marker, fail-soft behavior,
+raw-body/total-deadline bounds, renewable fencing and dedicated executor
+admission/lifecycle.
+Real Redis integration tests exercise the state scripts; provider tests use a
+deterministic fake and do not claim live Claude answer quality. Real Kafka tests
+cover publish → consume → pgvector, duplicate delivery, source rejection
+followed by delete, hash-only malformed DLQ and committed offsets. The final
+isolated Docker gate passed **529 unit/non-integration tests and 62
+PostgreSQL/Kafka/Redis integration tests (591 total)**. This count is not a
+live-Claude or deployed AI → Job → AI E2E claim.
+The production worker image also successfully generated a normalized
+384-dimensional vector with the pinned model revision.
 
 Run the isolated Candidate index/filter/repository load gate separately:
 
@@ -477,11 +560,16 @@ not measure a simultaneous writer.
 `/match`, `/recommend/jobs` and `/recommend/candidates` read precomputed vectors
 and never load the embedding model in a request. Job and CV embeddings are
 populated asynchronously by their dedicated workers. `/chat` is a separate,
-Candidate-only Claude request path and cannot call those vector APIs. Its
-contract, authorization, Redis isolation/rate/retention controls and provider
-failure handling are covered deterministically, but the guarded live-Claude
-10-FAQ quality smoke remains pending until a staging Anthropic credential is
-available; deterministic fake-provider results are not a live quality claim.
+Candidate-only Claude request path and does not expose those vector APIs as
+model tools. With its independent feature flag enabled, a strict intent may
+call only Job Search's fixed `/recommended` endpoint; Job Search owns Candidate
+authorization, CV/preference resolution and any existing call back to AI's
+internal recommendation provider. The contract, authorization, bounded
+executor, Redis controls, strict projection, deterministic formatter and
+fail-soft paths are covered deterministically. A guarded live-Claude 10-FAQ
+quality smoke and deployed AI → Job → AI staging E2E remain pending until the
+required staging credentials and environment are available; fake-provider and
+mock-downstream results are not live quality or E2E claims.
 Full producer-to-Media-to-AI staging E2E, HTTP/deployed recommendation load,
 real-model Vietnamese relevance, concurrent-writer rollout observation and
 distributed recommendation rate limiting also remain outside the completed
