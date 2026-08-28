@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   HttpStatus,
   Param,
   ParseUUIDPipe,
@@ -20,10 +21,14 @@ import {
   ApiOperation,
   ApiParam,
   ApiTags,
+  ApiUnauthorizedResponse,
   getSchemaPath,
 } from '@nestjs/swagger';
 import { AuthUser } from '../common/auth/auth-user.interface';
-import { CurrentUser } from '../common/auth/current-user.decorator';
+import {
+  CurrentAccessToken,
+  CurrentUser,
+} from '../common/auth/current-user.decorator';
 import { Roles } from '../common/auth/roles.decorator';
 import { SystemRole } from '../common/auth/system-role.enum';
 import { ApiException } from '../common/errors/api-exception';
@@ -89,18 +94,28 @@ export class CompanyMemberController {
   ) {}
 
   @Post('invitations/accept')
+  @HttpCode(HttpStatus.OK)
   @Roles(SystemRole.RECRUITER)
   @ApiOperation({ summary: 'Accept a company invitation as a recruiter' })
   @ApiOkResponse({ schema: RECRUITER_COMPANY_ENVELOPE })
   @ApiNotFoundResponse({ description: 'Invitation token was not found' })
+  @ApiUnauthorizedResponse({
+    description: 'The durable Auth account no longer exists',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'The durable account is inactive or its email does not match the invitation',
+  })
   @ApiConflictResponse({
-    description: 'Invitation is inactive or recruiter already has a company',
+    description:
+      'Invitation is inactive, requires reissue, or recruiter already has a company',
   })
   acceptInvitation(
     @CurrentUser() user: AuthUser,
+    @CurrentAccessToken() accessToken: string,
     @Body() dto: AcceptCompanyInvitationDto,
   ): Promise<RecruiterCompanyDto> {
-    return this.companyMemberService.accept(user.id, dto);
+    return this.companyMemberService.accept(user.id, accessToken, dto);
   }
 
   @Get('by-user/:userId')

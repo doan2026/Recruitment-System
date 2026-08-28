@@ -1,4 +1,65 @@
 DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'company'
+      AND table_name = 'company_invitations'
+      AND column_name = 'email_normalization_version'
+      AND data_type = 'smallint'
+      AND is_nullable = 'YES'
+      AND column_default IS NULL
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint con
+    WHERE con.conrelid = 'company.company_invitations'::regclass
+      AND con.conname =
+        'company_invitations_email_normalization_version_check'
+      AND con.contype = 'c'
+      AND con.convalidated
+      AND pg_get_constraintdef(con.oid, true)
+        LIKE '%email_normalization_version%'
+      AND pg_get_constraintdef(con.oid, true) LIKE '%0%'
+      AND pg_get_constraintdef(con.oid, true) LIKE '%1%'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint con
+    WHERE con.conrelid = 'company.company_invitations'::regclass
+      AND con.conname =
+        'company_invitations_accept_requires_normalized_email_check'
+      AND con.contype = 'c'
+      AND con.convalidated
+      AND pg_get_constraintdef(con.oid, true) LIKE '%ACCEPTED%'
+      AND pg_get_constraintdef(con.oid, true)
+        LIKE '%email_normalization_version IS NOT NULL%'
+  ) THEN
+    RAISE EXCEPTION 'invitation email normalization marker is incomplete';
+  END IF;
+
+  IF (
+    SELECT count(*)
+    FROM company.company_invitations
+    WHERE id = '77777777-7777-4777-8777-777777777771'
+      AND status = 'PENDING'
+      AND email_normalization_version IS NULL
+  ) <> 1 THEN
+    RAISE EXCEPTION 'legacy pending invitation was not preserved as blocked';
+  END IF;
+
+  IF (
+    SELECT count(*)
+    FROM company.company_invitations
+    WHERE id = '77777777-7777-4777-8777-777777777772'
+      AND status = 'ACCEPTED'
+      AND email_normalization_version = 0
+      AND accepted_by = '66666666-6666-4666-8666-666666666662'
+      AND accepted_at = '2026-08-20T03:30:00Z'::timestamptz
+  ) <> 1 THEN
+    RAISE EXCEPTION 'accepted legacy invitation marker backfill is invalid';
+  END IF;
+END $$;
+
+DO $$
 DECLARE
   kinds text[];
   assets text[];
@@ -393,7 +454,8 @@ BEGIN
     '20260824000000_company_members',
     '20260828000000_company_media_ownership',
     '20260829000000_company_audit_log',
-    '20260829100000_company_public_search'
+    '20260829100000_company_public_search',
+    '20260829200000_company_invitation_auth_binding'
   ] OR EXISTS (
     SELECT 1
     FROM company."_prisma_migrations"

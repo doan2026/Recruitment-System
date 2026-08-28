@@ -7,3 +7,10 @@ export const CurrentUser = createParamDecorator(
     return request.user;
   },
 );
+
+export const CurrentAccessToken = createParamDecorator(
+  (_data: unknown, context: ExecutionContext): string => {
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
+    return request.accessToken;
+  },
+);

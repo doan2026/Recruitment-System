@@ -37,6 +37,7 @@ export class JwtAuthGuard implements CanActivate {
 
     try {
       request.user = await this.verifier.verify(match[1]);
+      request.accessToken = match[1];
       return true;
     } catch (error) {
       if (error instanceof ApiException) {

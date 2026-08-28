@@ -8,6 +8,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { createHash, randomBytes } from 'crypto';
+import { CurrentAuthAccountClient } from '../common/auth/current-auth-account.client';
 import { SystemRole } from '../common/auth/system-role.enum';
 import { ApiException } from '../common/errors/api-exception';
 import { PrismaService } from '../prisma/prisma.service';
@@ -21,17 +22,21 @@ import {
 import { InviteCompanyMemberDto } from './dto/invite-company-member.dto';
 
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const AUTH_EMAIL_NORMALIZATION_VERSION = 1;
 
 @Injectable()
 export class CompanyMemberService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly currentAuthAccount: CurrentAuthAccountClient,
+  ) {}
 
   async invite(
     ownerId: string,
     companyId: string,
     dto: InviteCompanyMemberDto,
   ): Promise<CreatedCompanyInvitationDto> {
-    const email = dto.email.normalize('NFKC').trim().toLowerCase();
+    const email = dto.email.normalize('NFC').trim().toLowerCase();
     const token = randomBytes(32).toString('base64url');
     const tokenHash = this.hashToken(token);
     const expiresAt = new Date(Date.now() + INVITATION_TTL_MS);
@@ -52,12 +57,17 @@ export class CompanyMemberService {
               companyId,
               email,
               normalizedEmail: email,
+              emailNormalizationVersion:
+                AUTH_EMAIL_NORMALIZATION_VERSION,
               tokenHash,
               invitedBy: ownerId,
               expiresAt,
             },
             update: {
               email,
+              normalizedEmail: email,
+              emailNormalizationVersion:
+                AUTH_EMAIL_NORMALIZATION_VERSION,
               status: CompanyInvitationStatus.PENDING,
               tokenHash,
               invitedBy: ownerId,
@@ -101,8 +111,13 @@ export class CompanyMemberService {
 
   async accept(
     userId: string,
+    accessToken: string,
     dto: AcceptCompanyInvitationDto,
   ): Promise<RecruiterCompanyDto> {
+    const identity = await this.currentAuthAccount.getCurrentRecruiter(
+      accessToken,
+      userId,
+    );
     const tokenHash = this.hashToken(dto.token);
 
     try {
@@ -126,6 +141,37 @@ export class CompanyMemberService {
               'INVITATION_NOT_FOUND',
               'Company invitation was not found',
               HttpStatus.NOT_FOUND,
+            );
+          }
+
+          if (
+            invitation.status === CompanyInvitationStatus.PENDING &&
+            invitation.expiresAt.getTime() <= Date.now()
+          ) {
+            await transaction.companyInvitation.update({
+              where: { id: invitation.id },
+              data: { status: CompanyInvitationStatus.EXPIRED },
+            });
+            return { expired: true as const };
+          }
+
+          if (
+            invitation.status === CompanyInvitationStatus.PENDING &&
+            invitation.emailNormalizationVersion !==
+              AUTH_EMAIL_NORMALIZATION_VERSION
+          ) {
+            throw new ApiException(
+              'INVITATION_REISSUE_REQUIRED',
+              'This invitation must be reissued before acceptance',
+              HttpStatus.CONFLICT,
+            );
+          }
+
+          if (invitation.normalizedEmail !== identity.normalizedEmail) {
+            throw new ApiException(
+              'INVITATION_EMAIL_MISMATCH',
+              'This invitation belongs to another account',
+              HttpStatus.FORBIDDEN,
             );
           }
 
@@ -154,14 +200,6 @@ export class CompanyMemberService {
               HttpStatus.CONFLICT,
               { status: invitation.status },
             );
-          }
-
-          if (invitation.expiresAt.getTime() <= Date.now()) {
-            await transaction.companyInvitation.update({
-              where: { id: invitation.id },
-              data: { status: CompanyInvitationStatus.EXPIRED },
-            });
-            return { expired: true as const };
           }
 
           const existingMembership =
