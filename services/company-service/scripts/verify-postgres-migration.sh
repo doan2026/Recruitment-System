@@ -9,6 +9,7 @@ BASELINE_TWO='20260824000000_company_members'
 MEDIA_MIGRATION='20260828000000_company_media_ownership'
 AUDIT_MIGRATION='20260829000000_company_audit_log'
 PUBLIC_SEARCH_MIGRATION='20260829100000_company_public_search'
+INVITATION_AUTH_MIGRATION='20260829200000_company_invitation_auth_binding'
 SENTINEL_PREFIX='recruitment-company-migration-harness:'
 STEP='preflight'
 TASK_TMP=''
@@ -107,19 +108,21 @@ for path in "$SCRIPT_DIR/migration-verify.Dockerfile" \
   "$MIGRATIONS/$BASELINE_TWO/migration.sql" \
   "$MIGRATIONS/$MEDIA_MIGRATION/migration.sql" \
   "$MIGRATIONS/$AUDIT_MIGRATION/migration.sql" \
-  "$MIGRATIONS/$PUBLIC_SEARCH_MIGRATION/migration.sql"; do
+  "$MIGRATIONS/$PUBLIC_SEARCH_MIGRATION/migration.sql" \
+  "$MIGRATIONS/$INVITATION_AUTH_MIGRATION/migration.sql"; do
   [[ -f "$path" ]] || fail "required input is missing: $path"
 done
 mapfile -t ALL_MIGRATIONS < <(
   find "$MIGRATIONS" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | LC_ALL=C sort
 )
-(( ${#ALL_MIGRATIONS[@]} >= 5 )) || fail 'at least five Company migrations are required'
+(( ${#ALL_MIGRATIONS[@]} >= 6 )) || fail 'at least six Company migrations are required'
 [[ ${ALL_MIGRATIONS[0]} == "$BASELINE_ONE" \
   && ${ALL_MIGRATIONS[1]} == "$BASELINE_TWO" \
   && ${ALL_MIGRATIONS[2]} == "$MEDIA_MIGRATION" \
   && ${ALL_MIGRATIONS[3]} == "$AUDIT_MIGRATION" \
-  && ${ALL_MIGRATIONS[4]} == "$PUBLIC_SEARCH_MIGRATION" ]] \
-  || fail 'the expected first-five migration order changed'
+  && ${ALL_MIGRATIONS[4]} == "$PUBLIC_SEARCH_MIGRATION" \
+  && ${ALL_MIGRATIONS[5]} == "$INVITATION_AUTH_MIGRATION" ]] \
+  || fail 'the expected first-six migration order changed'
 for migration in "${ALL_MIGRATIONS[@]}"; do
   [[ "$migration" =~ ^[0-9]{14}_[a-z0-9_]+$ \
     && -f "$MIGRATIONS/$migration/migration.sql" ]] \
@@ -270,6 +273,8 @@ pending_status() {
     || fail 'pending status did not name the audit migration'
   grep -Fq "$PUBLIC_SEARCH_MIGRATION" "$log_file" \
     || fail 'pending status did not name the public search migration'
+  grep -Fq "$INVITATION_AUTH_MIGRATION" "$log_file" \
+    || fail 'pending status did not name the invitation Auth migration'
 }
 
 current_status() {
@@ -330,19 +335,33 @@ catalog_fingerprint() {
 }
 
 fixture_ok() {
-  [[ "$(counts "$1")" == '2|3|2|1' ]] || fail 'fixture row counts changed'
+  [[ "$(counts "$1")" == '2|3|2|2' ]] || fail 'fixture row counts changed'
   [[ "$(data_fingerprint "$1")" == "$2" ]] || fail 'fixture checksum changed'
 }
 
 pre_schema_ok() {
   local value
   value="$(scalar "$1" \
-    "SELECT (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='company' AND table_name='companies' AND column_name='aggregate_version'))::integer::text || '|' || (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='company' AND table_name='company_media' AND column_name='media_reference_id'))::integer::text || '|' || (to_regclass('company.company_media_operations') IS NOT NULL)::integer::text || '|' || (to_regclass('company.company_media_upload_intents') IS NOT NULL)::integer::text || '|' || (to_regclass('company.company_audit_logs') IS NOT NULL)::integer::text || '|' || (to_regtype('company.\"CompanyAuditAction\"') IS NOT NULL)::integer::text || '|' || (to_regprocedure('company.reject_company_audit_log_mutation()') IS NOT NULL)::integer::text || '|' || (to_regprocedure('company.fold_public_company_search(text)') IS NOT NULL)::integer::text || '|' || (to_regclass('company.companies_public_verified_normalized_name_id_idx') IS NOT NULL)::integer::text || '|' || (to_regclass('company.companies_public_verified_search_tsv_idx') IS NOT NULL)::integer::text;")"
-  [[ "$value" == '0|0|0|0|0|0|0|0|0|0' ]] || fail 'pre-upgrade schema contains upgraded objects'
+    "SELECT (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='company' AND table_name='companies' AND column_name='aggregate_version'))::integer::text || '|' || (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='company' AND table_name='company_media' AND column_name='media_reference_id'))::integer::text || '|' || (to_regclass('company.company_media_operations') IS NOT NULL)::integer::text || '|' || (to_regclass('company.company_media_upload_intents') IS NOT NULL)::integer::text || '|' || (to_regclass('company.company_audit_logs') IS NOT NULL)::integer::text || '|' || (to_regtype('company.\"CompanyAuditAction\"') IS NOT NULL)::integer::text || '|' || (to_regprocedure('company.reject_company_audit_log_mutation()') IS NOT NULL)::integer::text || '|' || (to_regprocedure('company.fold_public_company_search(text)') IS NOT NULL)::integer::text || '|' || (to_regclass('company.companies_public_verified_normalized_name_id_idx') IS NOT NULL)::integer::text || '|' || (to_regclass('company.companies_public_verified_search_tsv_idx') IS NOT NULL)::integer::text || '|' || (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='company' AND table_name='company_invitations' AND column_name='email_normalization_version'))::integer::text;")"
+  [[ "$value" == '0|0|0|0|0|0|0|0|0|0|0' ]] || fail 'pre-upgrade schema contains upgraded objects'
 }
 
 constraint_failures_ok() {
   local db=$1 log_file="$TASK_TMP/constraint-negative-$1.log"
+  if sql_in "$db" "$log_file" <<'SQL'
+UPDATE company.company_invitations
+SET email_normalization_version = 2
+WHERE id = '77777777-7777-4777-8777-777777777771';
+SQL
+  then fail 'invalid invitation email normalization version unexpectedly succeeded'; fi
+  if sql_in "$db" "$log_file" <<'SQL'
+UPDATE company.company_invitations
+SET status = 'ACCEPTED',
+    accepted_by = '66666666-6666-4666-8666-666666666662',
+    accepted_at = CURRENT_TIMESTAMP
+WHERE id = '77777777-7777-4777-8777-777777777771';
+SQL
+  then fail 'legacy pending invitation was accepted without reissue'; fi
   if sql_in "$db" "$log_file" <<'SQL'
 BEGIN;
 UPDATE company.companies SET logo_media_reference_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' WHERE id='11111111-1111-4111-8111-111111111111';
@@ -478,8 +497,8 @@ ledger "$SOURCE_DB" "$BASELINE_ONE" "$BASELINE_TWO"
 pending_status "$SOURCE_DB"
 BASELINE_HASH="$(data_fingerprint "$SOURCE_DB")"
 PRE_LEDGER_HASH="$(ledger_fingerprint "$SOURCE_DB")"
-[[ "$(counts "$SOURCE_DB")" == '2|3|2|1' ]] || fail 'baseline counts mismatch'
-say "Baseline counts companies=2 members=3 media=2 invitations=1 checksum=$BASELINE_HASH"
+[[ "$(counts "$SOURCE_DB")" == '2|3|2|2' ]] || fail 'baseline counts mismatch'
+say "Baseline counts companies=2 members=3 media=2 invitations=2 checksum=$BASELINE_HASH"
 
 STEP='pre-upgrade archive'
 PRE_ARCHIVE="$TASK_TMP/company-pre-upgrade.backup"
@@ -489,15 +508,24 @@ say "Pre-upgrade custom archive mode=0600 list=valid sha256=$PRE_SHA"
 
 STEP='upgrade and second deploy'
 say 'Deploying pending migrations, then verifying status and drift'
-prisma "$SOURCE_DB" "$TASK_TMP/deploy-first.log" migrate deploy \
-  --schema /verify/prisma/schema.prisma
+if ! prisma "$SOURCE_DB" "$TASK_TMP/deploy-first.log" migrate deploy \
+  --schema /verify/prisma/schema.prisma; then
+  tail -n 20 "$TASK_TMP/deploy-first.log" >&2
+  fail 'upgraded Prisma deployment failed'
+fi
 current_status "$SOURCE_DB"
 ledger "$SOURCE_DB" "${ALL_MIGRATIONS[@]}"
 no_drift "$SOURCE_DB"
-sql_file "$SOURCE_DB" "$SCRIPT_DIR/migration-verification-assert-upgraded.psql" \
-  "$TASK_TMP/assert-upgraded.log"
-sql_file "$SOURCE_DB" "$SCRIPT_DIR/migration-verification-audit-log.psql" \
-  "$TASK_TMP/audit-log-invariants.log"
+if ! sql_file "$SOURCE_DB" "$SCRIPT_DIR/migration-verification-assert-upgraded.psql" \
+  "$TASK_TMP/assert-upgraded.log"; then
+  tail -n 30 "$TASK_TMP/assert-upgraded.log" >&2
+  fail 'upgraded schema assertion failed'
+fi
+if ! sql_file "$SOURCE_DB" "$SCRIPT_DIR/migration-verification-audit-log.psql" \
+  "$TASK_TMP/audit-log-invariants.log"; then
+  tail -n 30 "$TASK_TMP/audit-log-invariants.log" >&2
+  fail 'audit log invariant assertion failed'
+fi
 fixture_ok "$SOURCE_DB" "$BASELINE_HASH"
 constraint_failures_ok "$SOURCE_DB"
 CATALOG_HASH="$(catalog_fingerprint "$SOURCE_DB")"

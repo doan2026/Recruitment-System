@@ -117,10 +117,47 @@ required read/insert privileges on `company_audit_logs`.
 An OWNER invites a recruiter by email. Company Service returns the invitation
 token once and stores only its SHA-256 hash. The caller must hand that token to
 the email/notification flow; the raw token must not be logged or persisted.
-Invitations expire after seven days. Acceptance creates a MEMBER atomically,
-and the unique `CompanyMember.userId` constraint ensures one recruiter belongs
-to at most one company. Removing the OWNER is blocked until ownership has been
+Invitations expire after seven days. Before acceptance, Company forwards the
+already-verified access token to Auth `GET /auth/me` and requires the durable
+account, at recheck time, to be verified, unlocked, present, `RECRUITER`, and
+to have the exact NFC-normalized invited email. The Auth call is completed
+before the Serializable Company transaction; the invitation is then read
+again and its current email is compared inside that transaction before every
+mutation and idempotent return. A mismatch returns a redacted `403` without
+disclosing either email or changing invitation/member rows. A lock, role or
+email change after this point-in-time Auth response but before the Company
+commit is an unavoidable distributed TOCTOU until Auth provides a versioned
+introspection/fencing contract.
+
+New invitations use Auth-compatible NFC + trim + lowercase canonicalization.
+Migration `20260829200000_company_invitation_auth_binding` leaves legacy
+`PENDING` rows with a null normalization marker, and Company returns
+`409 INVITATION_REISSUE_REQUIRED` before any email comparison or write.
+Reissuing through the OWNER API replaces/creates a token with marker version 1.
+A database constraint also prevents an old rolling-deploy writer from changing
+a marker-null invitation to `ACCEPTED`; already accepted legacy rows receive
+terminal marker 0 without changing their workflow state. Company deliberately
+does not NFKC-fold Auth identities because that could merge two addresses Auth
+treats as distinct. This is only a fence for legacy marker-null rows, not full
+old/new application compatibility: drain old Company writers before migration
+and do not run mixed versions against the upgraded schema.
+
+Acceptance creates a MEMBER atomically, and the unique
+`CompanyMember.userId` constraint ensures one recruiter belongs to at most
+one company. Removing the OWNER is blocked until ownership has been
 transferred to an existing MEMBER.
+
+The Auth client uses the fixed `/auth/me` path, exact host allowlist, no
+redirect/cache, a bounded timeout/body, and strict response validation. It
+fails closed for an unavailable or malformed upstream. Defaults match the
+canonical internal Compose DNS and can be overridden with:
+
+```dotenv
+AUTH_SERVICE_URL=http://auth-service:8080
+AUTH_SERVICE_ALLOWED_HOSTS=auth-service
+AUTH_REQUEST_TIMEOUT_MS=3000
+```
+
 ## Authentication
 
 `JWT_ISSUER` and `JWT_AUDIENCE` are mandatory. Set `JWT_JWKS_URI` to the Auth
@@ -221,13 +258,17 @@ Checks:
 npm test
 npm run build
 ./scripts/verify-postgres-migration.sh
+./scripts/verify-auth-company-invitation-guards.sh
+COMPANY_AUTH_INTEGRATION_CONFIRM=run-disposable-auth-company-integration \
+  ./scripts/verify-auth-company-invitation.sh
 ./scripts/verify-public-search-load.sh
 ```
 
 The migration verifier creates only disposable PostgreSQL 16 resources and
 checks a clean two-migration baseline, Media and audit upgrade idempotency,
-public-search function/indexes, schema drift, append-only/transaction/OWNER constraints, custom-format backup
-integrity, separate-database restore and the restore-based rollback candidate.
+public-search function/indexes, invitation normalization marker/old-writer
+fence, schema drift, append-only/transaction/OWNER constraints, custom-format
+backup integrity, separate-database restore and the restore-based rollback candidate.
 See
 [`scripts/README.md`](scripts/README.md) for its safety guards and the
 production rollback runbook. It does not certify mixed old/new writers on an

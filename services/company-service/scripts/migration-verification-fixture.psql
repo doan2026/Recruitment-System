@@ -37,4 +37,12 @@ INSERT INTO company.company_invitations (
   'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   '66666666-6666-4666-8666-666666666661', NULL, '2026-09-20T00:00:00Z', NULL,
   '2026-08-20T03:00:00Z', '2026-08-20T03:00:00Z'
+), (
+  '77777777-7777-4777-8777-777777777772', '11111111-1111-4111-8111-111111111111',
+  'accepted@example.invalid', 'accepted@example.invalid', 'ACCEPTED',
+  'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  '66666666-6666-4666-8666-666666666661',
+  '66666666-6666-4666-8666-666666666662', '2026-09-20T00:00:00Z',
+  '2026-08-20T03:30:00Z', '2026-08-20T03:00:00Z',
+  '2026-08-20T03:30:00Z'
 );

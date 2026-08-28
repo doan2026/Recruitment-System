@@ -39,9 +39,12 @@ The gate does all of the following:
 2. Records table counts and a data checksum, creates a custom-format mode-0600
    pre-upgrade archive, calculates SHA-256 and validates `pg_restore --list`.
 3. Runs `prisma migrate deploy` twice against the original database and checks
-   status, each migration-file checksum, no schema drift, Media, audit and
-   public-search contracts, unchanged legacy data, and unchanged catalog/ledger
-   on the second deploy. The audit probe covers valid decisions/OWNER transfer,
+   status, each migration-file checksum, no schema drift, Media, audit,
+   public-search and invitation-normalization contracts, unchanged legacy
+   business data, and unchanged catalog/ledger on the second deploy. Legacy
+   PENDING invitations retain a null marker and are therefore blocked until an
+   OWNER reissues them; negative SQL proves an old writer cannot mark such a
+   row ACCEPTED. The audit probe covers valid decisions/OWNER transfer,
    invalid action shapes, duplicate aggregate evidence, FK restriction,
    append-only `UPDATE`/`DELETE`/`TRUNCATE`, failed-audit transaction rollback
    and the partial unique OWNER index, then rolls the whole probe back.
@@ -59,6 +62,42 @@ old application can safely write to the upgraded schema. An old writer can
 create media rows without the new reference binding, which the new application
 intentionally hides. Never run old and new Company writers against the upgraded
 database, and never attempt an in-place down migration.
+
+## Auth–Company invitation integration gate
+
+Run the offline safety checks first:
+
+```bash
+./scripts/verify-auth-company-invitation-guards.sh
+```
+
+Then explicitly opt in to the real two-service gate:
+
+```bash
+COMPANY_AUTH_INTEGRATION_CONFIRM=run-disposable-auth-company-integration \
+  ./scripts/verify-auth-company-invitation.sh
+```
+
+The runner refuses URL/database target variables and remote Docker contexts.
+It uses digest-pinned PostgreSQL 16, Redis 7, Node, Maven and JRE images; builds
+Auth and Company only from allow-listed temporary contexts; generates a
+disposable RSA key; and starts every component on one labelled internal
+network without host ports. Exact ID/name/label/database sentinels guard all
+operations and cleanup.
+
+The gate obtains nine JWTs through the real Auth login API, then creates one
+Company and seven invitations through the real Company API. It proves a stolen
+token with the wrong email cannot write, the intended account succeeds and
+replays idempotently, and still-valid JWTs fail closed after durable lock,
+delete, role or email changes. Eight concurrent accepts must converge to one
+membership, and stopping only the sentinel-verified Auth container must return
+a sanitized `503` without changing invitation/member rows. The final
+machine-readable PASS includes image IDs and exact aggregate counts but no
+password, JWT, invitation token, email response or database row.
+
+The gate tests current point-in-time Auth state, not atomic state shared across
+two databases. It does not include Admin or live File/Media/Cloudinary, so it
+does not by itself complete the broad P06 cross-service checkbox.
 
 ## Public Company search correctness and load gate
 

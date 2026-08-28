@@ -9,4 +9,5 @@ export interface AuthUser {
 
 export interface AuthenticatedRequest extends Request {
   user: AuthUser;
+  accessToken: string;
 }

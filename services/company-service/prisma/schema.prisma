@@ -170,6 +170,7 @@ model CompanyInvitation {
   companyId       String                  @map("company_id") @db.Uuid
   email           String                  @db.VarChar(320)
   normalizedEmail String                  @map("normalized_email") @db.VarChar(320)
+  emailNormalizationVersion Int?          @map("email_normalization_version") @db.SmallInt
   status          CompanyInvitationStatus @default(PENDING)
   tokenHash       String                  @unique @map("token_hash") @db.Char(64)
   invitedBy       String                  @map("invited_by") @db.Uuid
