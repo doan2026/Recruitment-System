@@ -752,7 +752,8 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
  Database                     PostgreSQL container riêng: application-db
  Vai trò trong hệ thống       Quản lý toàn bộ pipeline ứng tuyển. Dùng @Transactional + optimistic locking để
                               nhiều HR thao tác đồng thời không ghi đè nhau.
- Phụ thuộc                    Auth (JWT), Profile (danh sách CV), Job (kiểm tra tin còn mở), Notification (qua Kafka)
+ Phụ thuộc                    Auth (JWT), Profile (xác minh CV + snapshot kỹ năng v2 lúc nộp), Job (kiểm tra tin
+                              còn mở), Notification (qua Kafka)
 ```
 
 
@@ -760,11 +761,11 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 #### Luồng 1: Ứng viên nộp đơn ứng tuyển
 1. Ứng viên bấm "Ứng tuyển" trên trang chi tiết job.
 2. Hệ thống gọi Job & Search Service kiểm tra tin còn ở trạng thái PUBLISHED và chưa quá deadline.
-3. Gọi Profile Service lấy danh sách CV khả dụng của ứng viên; nếu chưa có CV nào → điều hướng sang trang tạo CV.
+3. UI lấy danh sách CV khả dụng từ Profile; khi Candidate gửi đơn, Application gọi nội bộ `POST /internal/v2/cvs/verify` bằng service key + Candidate JWT để xác minh CV và nhận snapshot kỹ năng schema 1.
 4. Ứng viên chọn CV và viết cover letter (tuỳ chọn, tối đa 2000 ký tự).
 5. Kiểm tra trùng: ứng viên này đã có đơn ACTIVE cho job này chưa → nếu có, chặn và báo "Bạn đã ứng tuyển vị trí này".
-6. Tạo Application(status = APPLIED, applied_at = now) trong transaction, đồng thời ghi ApplicationHistory dòng đầu tiên.
-7. Publish sự kiện lên topic application-events.
+6. Tạo Application(status = APPLIED, applied_at = now), metadata/danh sách tên kỹ năng immutable, CV usage, ApplicationHistory và outbox trong cùng transaction; lỗi ở bất kỳ bước nào thì rollback toàn bộ.
+7. Outbox publisher phát sự kiện lên topic application-events sau khi transaction commit.
 8. Hiển thị xác nhận cho ứng viên; đơn xuất hiện ở màn "Việc đã ứng tuyển".
 #### Luồng 2: Lưu việc yêu thích (Bookmark)
 1. Ứng viên bấm biểu tượng lưu trên tin tuyển dụng.
@@ -780,7 +781,7 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 6. Gọi nội bộ `POST /ai/match` bằng `X-Internal-Api-Key`; AI trả envelope có echoed IDs, score `0..1` hoặc `reason` khi embedding chưa sẵn sàng.
 7. Score hợp lệ được nhân 100, làm tròn 2 chữ số và lưu bằng atomic compare-and-set; version Application tăng 1.
 8. AI lỗi/payload sai/embedding chưa sẵn sàng giữ nguyên điểm cũ; refresh điểm không đổi status/`updated_at`, không ghi history hoặc outbox.
-9. Lọc theo trạng thái, khoảng thời gian nộp, kỹ năng; sắp xếp theo ngày nộp hoặc điểm phù hợp.
+9. Lọc kỹ năng theo snapshot tại lúc nộp: `skills` có thể lặp hoặc phân tách bằng dấu phẩy, tối đa 10; khớp ANY theo tên đầy đủ không phân biệt hoa/thường, không khớp chuỗi con; kết hợp được với job/status/thời gian và phân trang ổn định.
 10. HR mở CV xem trực tiếp (iframe PDF từ Cloudinary).
 11. HR ghi đánh giá nội bộ rồi chuyển trạng thái đơn theo state machine ở luồng 4.
 #### Luồng 4: State machine trạng thái đơn ứng tuyển
@@ -830,9 +831,13 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 - Application Service mới kiểm tra cấu trúc file reference; xác minh canonical file metadata, trạng thái confirm và ownership nội bộ vẫn chờ API File/Media ở P09.
 - Ứng viên chỉ xem được đơn của chính mình; HR chỉ xem được đơn thuộc job của công ty mình.
 - Trong Application Pipeline, cả MEMBER và OWNER được xem và xử lý đơn của mọi job thuộc công ty, kể cả job do recruiter khác tạo. Giới hạn MEMBER chỉ sửa/xoá job do mình tạo chỉ áp dụng cho Job Service.
+- Snapshot chỉ gồm tên kỹ năng Candidate tự khai tại thời điểm nộp. Sửa Profile sau đó không đổi Application cũ; pipeline đọc snapshot nội bộ và không gọi live Profile.
+- Snapshot không chứng minh kỹ năng có trong PDF và chỉ hỗ trợ Recruiter tìm kiếm, không được dùng làm tiêu chí tự động loại. Application legacy hoặc snapshot rỗng vẫn hiển thị khi không lọc, nhưng không khớp khi filter kỹ năng đang bật.
+- Filter kỹ năng dùng ANY, exact và không phân biệt hoa/thường; không hỗ trợ substring, alias, bỏ dấu hoặc semantic match. Response không echo skill names, dùng `Cache-Control: private, no-store` và `Vary: Authorization`; root Nginx không ghi query string cho `/applications/`, còn gateway/APM bên ngoài phải giữ redaction hoặc giới hạn quyền truy cập/thời gian lưu log.
 - Publish event là bước bắt buộc sau mỗi lần đổi trạng thái — Notification phụ thuộc hoàn toàn vào đây.
 ### 2.2. Mô hình dữ liệu
-- Application(id, job_id, company_id, candidate_id, cv_id, cover_letter, status, source, match_score, applied_at, updated_at, version)
+- Application(id, job_id, company_id, candidate_id, cv_id, cover_letter, status, source, match_score, profile_skill_snapshot_schema_version, profile_aggregate_version, profile_skill_snapshot_expected_count, applied_at, updated_at, version)
+- ApplicationProfileSkillSnapshot(application_id, skill_name, normalized_name generated; immutable, V8 không backfill Application lịch sử)
 - ApplicationHistory(id, application_id, from_status, to_status, changed_by, note, changed_at)
 - Evaluation(id, application_id, evaluator_id, score, criteria_json, note, created_at)
 - Offer(id, application_id, sent_by, salary, start_date, position, note, file_id, file_url, status[SENT|ACCEPTED|DECLINED], sent_at, expires_at, responded_at, response_note, version)
@@ -841,7 +846,8 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 ```text
  Endpoint                             Mô tả                                          Quyền truy cập
  POST /applications                   Nộp đơn ứng tuyển                              Candidate
- GET /applications?job_id=&status=    Danh sách đơn theo tin                         Recruiter
+ GET /applications?job_id=&status=&appliedFrom=&appliedTo=&skills=&sort=&page=&size=
+                                      Danh sách/lọc pipeline theo snapshot lúc nộp   Recruiter
 ```
 
 <!-- Page 24 -->
@@ -871,13 +877,15 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 - Consumer: Notification Service (Người 3) và Admin & Statistics Service (Người 1).
 - Đây là hợp đồng liên người quan trọng nhất của Người 2 — chốt schema với Người 3 trong tuần đầu.
 ### 2.5. Phụ thuộc giữa các service
-- Phụ thuộc REST: Profile Service lấy CV, Job Service kiểm tra tin, Company Service xác minh quyền recruiter và AI Service tính `match_score`; Offer sẽ gọi File/Media để xác minh file khi contract P09 hoàn thành.
+- Phụ thuộc REST: Profile Service xác minh CV và cấp snapshot kỹ năng qua internal v2, Job Service kiểm tra tin, Company Service xác minh quyền recruiter và AI Service tính `match_score`; Offer sẽ gọi File/Media để xác minh file khi contract P09 hoàn thành.
+- Rollout snapshot theo thứ tự Profile v2 → Flyway V8 → Application consumer/filter, sau đó drain replica Application còn gọi v1. Không backfill Application lịch sử bằng Profile hiện tại.
 - Được phụ thuộc bởi: Interview Service (Người 3) tham chiếu application_id, Notification Service (Người 3) qua Kafka.
 ### 2.6. Tiêu chí hoàn thành (Definition of Done)
 - Nộp đơn → HR đổi trạng thái → ứng viên thấy timeline cập nhật: chạy thông suốt.
 - State machine chặn đúng các bước chuyển không hợp lệ (có unit test).
 - application-events phát đúng schema đã chốt và Người 3 nhận được.
 - Dashboard recruiter hiển thị đủ 4 chỉ số.
+- Filter kỹ năng được kiểm chứng với ANY/exact/case-insensitive, company isolation, legacy/snapshot rỗng, filter kết hợp và phân trang deterministic; đây chưa thay thế P17 deployed cross-service E2E.
 
 <!-- Page 25 -->
 
