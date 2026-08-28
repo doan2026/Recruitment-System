@@ -10,8 +10,8 @@ export class UploadedCvResponseDto {
   @ApiProperty()
   title!: string;
 
-  @ApiProperty({ enum: ['UPLOAD'], example: 'UPLOAD' })
-  type!: 'UPLOAD';
+  @ApiProperty({ enum: ['UPLOAD', 'ONLINE'], example: 'UPLOAD' })
+  type!: 'UPLOAD' | 'ONLINE';
 
   @ApiProperty({ format: 'uuid' })
   fileId!: string;
@@ -21,9 +21,24 @@ export class UploadedCvResponseDto {
     nullable: true,
     example: null,
     description:
-      'Always null for private uploaded CVs; request a short-lived download URL from the download endpoint',
+      'Always null for private Media-backed CVs; request a short-lived download URL from the download endpoint',
   })
   fileUrl!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, example: null })
+  templateId!: string | null;
+
+  @ApiProperty({ type: Number, nullable: true, example: null })
+  contentSchemaVersion!: number | null;
+
+  @ApiProperty({ format: 'uuid' })
+  revisionSeriesId!: string;
+
+  @ApiProperty({ minimum: 1 })
+  revisionNumber!: number;
+
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  previousRevisionId!: string | null;
 
   @ApiProperty()
   isDefault!: boolean;
@@ -36,6 +51,20 @@ export class UploadedCvResponseDto {
 
   @ApiProperty({ format: 'date-time' })
   updatedAt!: string;
+}
+
+export class OnlineCvBuilderResponseDto extends UploadedCvResponseDto {
+  @ApiProperty({ enum: ['ONLINE'], example: 'ONLINE' })
+  declare type: 'ONLINE';
+
+  @ApiProperty({ type: String, nullable: false })
+  declare templateId: string;
+
+  @ApiProperty({ enum: [1], example: 1 })
+  declare contentSchemaVersion: number;
+
+  @ApiProperty({ type: 'object', additionalProperties: true })
+  contentJson!: Record<string, unknown>;
 }
 
 export class CvDownloadResponseDto {

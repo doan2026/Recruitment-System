@@ -142,6 +142,9 @@ model Cv {
   templateId           String?   @map("template_id") @db.VarChar(100)
   contentJson          Json?     @map("content_json") @db.JsonB
   contentSchemaVersion Int?      @map("content_schema_version")
+  revisionSeriesId     String?   @map("revision_series_id") @db.Uuid
+  revisionNumber       Int?      @map("revision_number")
+  previousRevisionId   String?   @unique(map: "cvs_previous_revision_id_key") @map("previous_revision_id") @db.Uuid
   aggregateVersion     Int       @default(1) @map("aggregate_version")
   isDefault            Boolean   @default(false) @map("is_default")
   isDeleted            Boolean   @default(false) @map("is_deleted")
@@ -150,7 +153,13 @@ model Cv {
   createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
   profile              Profile   @relation(fields: [userId], references: [userId], onDelete: Restrict, onUpdate: Restrict)
+  revisionSeriesRoot   Cv?       @relation("CvRevisionSeries", fields: [revisionSeriesId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  seriesRevisions      Cv[]      @relation("CvRevisionSeries")
+  previousRevision     Cv?       @relation("CvRevisionChain", fields: [previousRevisionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  nextRevision         Cv?       @relation("CvRevisionChain")
 
+  @@unique([revisionSeriesId, revisionNumber], map: "cvs_revision_series_number_key")
   @@index([userId, isDeleted, createdAt], map: "cvs_user_active_created_idx")
+  @@index([userId, revisionSeriesId, revisionNumber], map: "cvs_user_revision_series_idx")
   @@map("cvs")
 }
