@@ -1,0 +1,138 @@
+\set ON_ERROR_STOP on
+
+BEGIN;
+SET LOCAL synchronous_commit = off;
+
+INSERT INTO job.jobs (
+  id,
+  company_id,
+  created_by,
+  title,
+  description,
+  requirements,
+  benefits,
+  salary_min,
+  salary_max,
+  is_negotiable,
+  currency,
+  location,
+  job_type,
+  experience_years,
+  quantity,
+  skills,
+  deadline,
+  status,
+  aggregate_version,
+  published_at,
+  created_at,
+  updated_at
+)
+SELECT
+  ('10000000-0000-4000-8000-' || lpad(fixture.sequence::text, 12, '0'))::uuid,
+  ('20000000-0000-4000-8000-' ||
+    lpad((((fixture.sequence - 1) % 20) + 1)::text, 12, '0'))::uuid,
+  '30000000-0000-4000-8000-000000000001'::uuid,
+  CASE fixture.slot
+    WHEN 1 THEN 'Kỹ sư dữ liệu Đà Nẵng'
+    ELSE CASE
+      WHEN fixture.slot BETWEEN 1 AND 16 THEN
+        'Backend platform role ' || lpad(fixture.sequence::text, 6, '0')
+      ELSE
+        'HIDDEN-STATUS-ONLY-MARKER ' || lpad(fixture.sequence::text, 6, '0')
+    END
+  END,
+  CASE fixture.slot
+    WHEN 2 THEN 'Kỹ sư dữ liệu Đà Nẵng'
+    ELSE 'Scalable recruitment platform services'
+  END,
+  'PRIVATE-INTERNAL-MARKER requirement ' || lpad(fixture.sequence::text, 6, '0'),
+  'PRIVATE-INTERNAL-MARKER benefit ' || lpad(fixture.sequence::text, 6, '0'),
+  CASE WHEN fixture.sequence % 13 = 0 THEN NULL
+    ELSE (12000000 + (fixture.sequence % 100) * 100000)::numeric(15, 2)
+  END,
+  CASE WHEN fixture.sequence % 13 = 0 THEN NULL
+    ELSE (17000000 + (fixture.sequence % 100) * 100000)::numeric(15, 2)
+  END,
+  fixture.sequence % 13 = 0,
+  'VND',
+  CASE fixture.sequence % 4
+    WHEN 0 THEN 'Hà Nội'
+    WHEN 1 THEN 'Đà Nẵng'
+    WHEN 2 THEN 'Hồ Chí Minh'
+    ELSE 'Cần Thơ'
+  END,
+  (CASE fixture.sequence % 4
+    WHEN 0 THEN 'FULL_TIME'
+    WHEN 1 THEN 'PART_TIME'
+    WHEN 2 THEN 'REMOTE'
+    ELSE 'INTERNSHIP'
+  END)::job."JobType",
+  fixture.sequence % 8,
+  1 + fixture.sequence % 5,
+  CASE fixture.slot
+    WHEN 3 THEN ARRAY[
+      CASE fixture.sequence % 4
+        WHEN 0 THEN 'NestJS'
+        WHEN 1 THEN 'PostgreSQL'
+        WHEN 2 THEN 'Redis'
+        ELSE 'Elasticsearch'
+      END,
+      'Kỹ sư dữ liệu Đà Nẵng'
+    ]::text[]
+    ELSE ARRAY[
+      CASE fixture.sequence % 4
+        WHEN 0 THEN 'NestJS'
+        WHEN 1 THEN 'PostgreSQL'
+        WHEN 2 THEN 'Redis'
+        ELSE 'Elasticsearch'
+      END
+    ]::text[]
+  END,
+  CASE WHEN fixture.slot = 0 THEN DATE '2025-01-01' ELSE DATE '2099-12-31' END,
+  (CASE
+    WHEN fixture.slot BETWEEN 1 AND 16 THEN 'PUBLISHED'
+    WHEN fixture.slot = 17 THEN 'DRAFT'
+    WHEN fixture.slot = 18 THEN 'PENDING_APPROVAL'
+    WHEN fixture.slot = 19 THEN 'CLOSED'
+    ELSE 'EXPIRED'
+  END)::job."JobStatus",
+  1,
+  CASE WHEN fixture.slot BETWEEN 1 AND 16 THEN
+    TIMESTAMPTZ '2025-01-01 00:00:00+00' +
+      make_interval(secs => ((fixture.sequence - 1) / 5)::integer)
+    ELSE NULL
+  END,
+  TIMESTAMPTZ '2025-01-01 00:00:00+00',
+  TIMESTAMPTZ '2025-01-01 00:00:00+00'
+FROM (
+  SELECT sequence, sequence % 20 AS slot
+  FROM generate_series(1, :dataset_size::integer) AS sequence
+) AS fixture;
+
+INSERT INTO job.job_index_sync (
+  job_id,
+  aggregate_version,
+  generation,
+  dispatch_attempts,
+  processing_attempts,
+  next_attempt_at,
+  completed_at,
+  created_at,
+  updated_at
+)
+SELECT
+  id,
+  aggregate_version,
+  1,
+  0,
+  1,
+  TIMESTAMPTZ '2025-01-01 00:00:00+00',
+  TIMESTAMPTZ '2025-01-01 00:00:00+00',
+  TIMESTAMPTZ '2025-01-01 00:00:00+00',
+  TIMESTAMPTZ '2025-01-01 00:00:00+00'
+FROM job.jobs;
+
+COMMIT;
+
+VACUUM (ANALYZE) job.jobs;
+VACUUM (ANALYZE) job.job_index_sync;

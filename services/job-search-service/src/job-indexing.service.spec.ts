@@ -130,7 +130,14 @@ interface AnalyzerFixture {
       type: string;
       tokenizer: string;
       filter: string[];
-      char_filter?: string[];
+      char_filter: string[];
+    };
+  };
+  char_filter: {
+    vietnamese_combining_marks: {
+      type: string;
+      pattern: string;
+      replacement: string;
     };
   };
 }
@@ -227,7 +234,7 @@ describe('JobIndexingService index mapping validation', () => {
   it(
     'accepts an alias resolving to one fully compatible concrete index',
     async () => {
-      const concreteIndex = 'jobs-v3-000001';
+      const concreteIndex = 'jobs-v4-000001';
       const harness = mappingHarness({
         [concreteIndex]: { mappings: fullMapping() },
       });
@@ -245,7 +252,7 @@ describe('JobIndexingService index mapping validation', () => {
       });
 
       const completedMapping = fullMapping();
-      completedMapping._meta.baselineVersion = 3;
+      completedMapping._meta.baselineVersion = 4;
       completedMapping._meta.baselineIndexUuid = 'index-uuid-000001';
       await expect(validateMapping(mappingHarness({
         [concreteIndex]: { mappings: completedMapping },
@@ -260,8 +267,8 @@ describe('JobIndexingService index mapping validation', () => {
 
   it('rejects an alias resolving to multiple concrete indices', async () => {
     const harness = mappingHarness({
-      'jobs-v3-000001': { mappings: fullMapping() },
-      'jobs-v3-000002': { mappings: fullMapping() },
+      'jobs-v4-000001': { mappings: fullMapping() },
+      'jobs-v4-000002': { mappings: fullMapping() },
     });
 
     await expectIncompatibleMapping(harness);
@@ -272,7 +279,7 @@ describe('JobIndexingService index mapping validation', () => {
     const mapping = fullMapping();
     delete mapping.properties.title;
     const harness = mappingHarness({
-      'jobs-v3-000001': { mappings: mapping },
+      'jobs-v4-000001': { mappings: mapping },
     });
 
     await expectIncompatibleMapping(harness);
@@ -282,23 +289,41 @@ describe('JobIndexingService index mapping validation', () => {
     const analysis = fullAnalysis();
     analysis.analyzer.vietnamese_text.tokenizer = 'keyword';
     const harness = mappingHarness({
-      'jobs-v3-000001': { mappings: fullMapping() },
+      'jobs-v4-000001': { mappings: fullMapping() },
     }, analysis);
 
     await expectIncompatibleMapping(harness);
 
-    const extraCharFilter = fullAnalysis();
-    extraCharFilter.analyzer.vietnamese_text.char_filter = ['html_strip'];
+    const wrongAnalyzerCharFilter = fullAnalysis();
+    wrongAnalyzerCharFilter.analyzer.vietnamese_text.char_filter = [
+      'html_strip',
+    ];
     await expectIncompatibleMapping(mappingHarness({
-      'jobs-v3-000001': { mappings: fullMapping() },
-    }, extraCharFilter));
+      'jobs-v4-000001': { mappings: fullMapping() },
+    }, wrongAnalyzerCharFilter));
+
+    const wrongPattern = fullAnalysis();
+    wrongPattern.char_filter.vietnamese_combining_marks.pattern =
+      '[\\u0300-\\u036f]';
+    await expectIncompatibleMapping(mappingHarness({
+      'jobs-v4-000001': { mappings: fullMapping() },
+    }, wrongPattern));
+
+    const missingReplacement = fullAnalysis();
+    Reflect.deleteProperty(
+      missingReplacement.char_filter.vietnamese_combining_marks,
+      'replacement',
+    );
+    await expectIncompatibleMapping(mappingHarness({
+      'jobs-v4-000001': { mappings: fullMapping() },
+    }, missingReplacement));
   });
 
   it('rejects disabled search fields or a missing keyword subfield', async () => {
     const mapping = fullMapping();
     mapping.properties.skills.fields = {};
     const harness = mappingHarness({
-      'jobs-v3-000001': { mappings: mapping },
+      'jobs-v4-000001': { mappings: mapping },
     });
 
     await expectIncompatibleMapping(harness);
@@ -306,14 +331,14 @@ describe('JobIndexingService index mapping validation', () => {
     const disabledTitle = fullMapping();
     disabledTitle.properties.title.index = false;
     await expectIncompatibleMapping(mappingHarness({
-      'jobs-v3-000001': { mappings: disabledTitle },
+      'jobs-v4-000001': { mappings: disabledTitle },
     }));
 
     const disabledKeywordDocValues = fullMapping();
     disabledKeywordDocValues.properties.location.fields!
       .keyword.doc_values = false;
     await expectIncompatibleMapping(mappingHarness({
-      'jobs-v3-000001': { mappings: disabledKeywordDocValues },
+      'jobs-v4-000001': { mappings: disabledKeywordDocValues },
     }));
   });
 });
@@ -321,7 +346,7 @@ describe('JobIndexingService index mapping validation', () => {
 function fullMapping(): MappingFixture {
   return {
     dynamic: 'strict',
-    _meta: { projectionVersion: 3 },
+    _meta: { projectionVersion: 4 },
     properties: {
       jobId: { type: 'keyword' },
       aggregateVersion: { type: 'long' },
@@ -362,7 +387,15 @@ function fullAnalysis(): AnalyzerFixture {
       vietnamese_text: {
         type: 'custom',
         tokenizer: 'standard',
+        char_filter: ['vietnamese_combining_marks'],
         filter: ['lowercase', 'asciifolding'],
+      },
+    },
+    char_filter: {
+      vietnamese_combining_marks: {
+        type: 'pattern_replace',
+        pattern: '\\p{M}',
+        replacement: '',
       },
     },
   };

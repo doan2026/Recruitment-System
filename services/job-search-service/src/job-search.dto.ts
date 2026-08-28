@@ -29,6 +29,11 @@ export enum JobSearchSource {
   POSTGRESQL = 'POSTGRESQL',
 }
 
+export enum JobSearchPaginationMode {
+  OFFSET = 'OFFSET',
+  CURSOR = 'CURSOR',
+}
+
 const toSkills = ({ value }: { value: unknown }): unknown => {
   const values = Array.isArray(value) ? value : [value];
   return values.flatMap((item) =>
@@ -39,6 +44,8 @@ const toSkills = ({ value }: { value: unknown }): unknown => {
 };
 const normalizeText = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.normalize('NFKC').trim() : value;
+const normalizeUuid = ({ value }: { value: unknown }): unknown =>
+  typeof value === 'string' ? value.toLowerCase() : value;
 
 export class JobSearchQueryDto {
   @ApiPropertyOptional({ maxLength: 200 })
@@ -92,6 +99,7 @@ export class JobSearchQueryDto {
 
   @ApiPropertyOptional({ format: 'uuid' })
   @IsOptional()
+  @Transform(normalizeUuid)
   @IsUUID('4')
   companyId?: string;
 
@@ -103,12 +111,38 @@ export class JobSearchQueryDto {
   @IsEnum(JobSearchSort)
   sort: JobSearchSort = JobSearchSort.RELEVANCE;
 
-  @ApiPropertyOptional({ minimum: 1, default: 1 })
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: Number.MAX_SAFE_INTEGER,
+    default: 1,
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(Number.MAX_SAFE_INTEGER)
   page = 1;
+
+  @ApiPropertyOptional({
+    enum: JobSearchPaginationMode,
+    default: JobSearchPaginationMode.OFFSET,
+    description:
+      'OFFSET keeps page compatibility up to 10000 Elasticsearch results. CURSOR opts into a short-lived stable snapshot for deep traversal.',
+  })
+  @IsOptional()
+  @IsEnum(JobSearchPaginationMode)
+  pagination: JobSearchPaginationMode = JobSearchPaginationMode.OFFSET;
+
+  @ApiPropertyOptional({
+    minLength: 1,
+    maxLength: 4096,
+    description:
+      'Opaque continuation cursor for pagination=CURSOR. Keep pagination, filters, sort and limit unchanged while following it.',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, 4096)
+  cursor?: string;
 
   @ApiPropertyOptional({ minimum: 1, maximum: 50, default: 20 })
   @IsOptional()
@@ -158,8 +192,24 @@ export class JobSearchResultDto {
   @ApiProperty() total!: number;
   @ApiProperty() page!: number;
   @ApiProperty() limit!: number;
-  @ApiProperty({ type: JobSearchFacetsDto })
+  @ApiProperty({
+    type: JobSearchFacetsDto,
+    description:
+      'Snapshot-wide facets for OFFSET and the first CURSOR page. CURSOR continuation pages return empty facet maps and preserve the exact signed total.',
+  })
   facets!: JobSearchFacetsDto;
   @ApiProperty({ enum: JobSearchSource })
   source!: JobSearchSource;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description:
+      'Opaque cursor for the next stable CURSOR page. It is null for OFFSET pagination and at the end of a CURSOR traversal.',
+  })
+  nextCursor!: string | null;
+  @ApiProperty({
+    description:
+      'Whether more matching results exist. In OFFSET mode this may be true while nextCursor remains null.',
+  })
+  hasMore!: boolean;
 }

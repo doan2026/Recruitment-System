@@ -13,7 +13,8 @@
     "prisma:migrate:deploy": "prisma migrate deploy",
     "pretest": "prisma generate",
     "test": "jest --runInBand",
-    "test:integration": "JOB_INTEGRATION_TEST=1 jest --runInBand --testPathPattern=integration.spec.ts"
+    "test:integration": "JOB_INTEGRATION_TEST=1 jest --runInBand --testPathPattern=integration.spec.ts",
+    "test:search-load": "bash scripts/verify-job-search-load.sh"
   },
   "dependencies": {
     "@elastic/elasticsearch": "^8.15.0",

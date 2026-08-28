@@ -14,9 +14,11 @@ import { AddressInfo } from 'node:net';
 import { CompanyClientService } from './company-client.service';
 import { JobIndexingService } from './job-indexing.service';
 import {
+  JobSearchPaginationMode,
   JobSearchSort,
   JobSearchSource,
 } from './job-search.dto';
+import { JobSearchCursorService } from './job-search-cursor.service';
 import { JobSearchService } from './job-search.service';
 import { PrismaService } from './prisma.service';
 
@@ -30,6 +32,8 @@ const REDIS_URL =
   'redis://:job_test_redis_password@redis-test:6379/15';
 const ELASTICSEARCH_NODE =
   process.env.ELASTICSEARCH_NODE ?? 'http://elasticsearch-test:9200';
+const SEARCH_CURSOR_KEY =
+  'job-search-integration-cursor-key-at-least-32-bytes';
 
 interface JobIndexTask {
   jobId: string;
@@ -131,6 +135,7 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
   let prisma: PrismaService;
   let indexing: JobIndexingService;
   let search: JobSearchService;
+  let searchCursor: JobSearchCursorService;
   let elastic: Client;
   let externalQueue: Queue<JobIndexTask>;
   let config: ConfigService;
@@ -155,7 +160,8 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
     config = serviceConfig();
     const companies = new CompanyClientService(config);
     indexing = new JobIndexingService(prisma, companies, config);
-    search = new JobSearchService(prisma, config, indexing);
+    searchCursor = new JobSearchCursorService(config);
+    search = new JobSearchService(prisma, config, indexing, searchCursor);
     externalQueue = new Queue<JobIndexTask>(QUEUE_NAME, {
       connection: redisConnection(REDIS_URL),
     });
@@ -213,6 +219,7 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
       page: 1,
       limit: 20,
       sort: JobSearchSort.RELEVANCE,
+      pagination: JobSearchPaginationMode.OFFSET,
     });
 
     expect(result.source).toBe(JobSearchSource.ELASTICSEARCH);
@@ -227,12 +234,102 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
     const analyzed = await elastic.indices.analyze({
       index: INDEX,
       analyzer: 'vietnamese_text',
-      text: 'Kỹ sư dữ liệu',
+      text: 'Kỹ sư dữ liệu Đà Nẵng',
     });
+    const analyzedNfd = await elastic.indices.analyze({
+      index: INDEX,
+      analyzer: 'vietnamese_text',
+      text: 'Kỹ sư dữ liệu Đà Nẵng'.normalize('NFD'),
+    });
+    const analyzedAccentless = await elastic.indices.analyze({
+      index: INDEX,
+      analyzer: 'vietnamese_text',
+      text: 'ky su du lieu da nang',
+    });
+    const expectedTokens = ['ky', 'su', 'du', 'lieu', 'da', 'nang'];
     expect(analyzed.tokens?.map((token) => token.token)).toEqual(
-      expect.arrayContaining(['ky', 'su', 'du', 'lieu']),
+      expectedTokens,
+    );
+    expect(analyzedNfd.tokens?.map((token) => token.token)).toEqual(
+      expectedTokens,
+    );
+    expect(analyzedAccentless.tokens?.map((token) => token.token)).toEqual(
+      expectedTokens,
     );
     await expectStrictMapping();
+  });
+
+  it('traverses tied results with PIT search_after and fails a closed PIT stale',
+  async () => {
+    const count = 205;
+    const jobIds = Array.from({ length: count }, () => randomUUID());
+    const operations = jobIds.flatMap((jobId) => [
+      { index: { _index: INDEX, _id: jobId } },
+      {
+        jobId,
+        aggregateVersion: 1,
+        indexGeneration: 1,
+        searchable: true,
+        companyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        companyName: 'Công ty Phân Trang',
+        title: 'Kiểm chứng phân trang sâu',
+        description: 'Tất cả kết quả cố ý trùng thời gian công bố',
+        salaryMin: 20_000_000,
+        salaryMax: 30_000_000,
+        isNegotiable: false,
+        currency: 'VND',
+        location: 'Hà Nội',
+        jobType: JobType.FULL_TIME,
+        experienceYears: 2,
+        skills: ['Dữ liệu'],
+        deadline: '2099-12-31',
+        status: JobStatus.PUBLISHED,
+        publishedAt: '2026-08-29T00:00:00.000Z',
+      },
+    ]);
+    const bulk = await elastic.bulk({ refresh: true, operations });
+    expect(bulk.errors).toBe(false);
+
+    const baseQuery = {
+      q: 'kiem chung phan trang sau',
+      companyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      page: 1,
+      limit: 50,
+      sort: JobSearchSort.RELEVANCE,
+      pagination: JobSearchPaginationMode.CURSOR,
+    };
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    let expectedPage = 1;
+    do {
+      const result = await search.search({
+        ...baseQuery,
+        ...(cursor ? { cursor } : {}),
+      });
+      expect(result.source).toBe(JobSearchSource.ELASTICSEARCH);
+      expect(result.total).toBe(count);
+      expect(result.page).toBe(expectedPage);
+      for (const item of result.items) {
+        expect(seen.has(item.id)).toBe(false);
+        seen.add(item.id);
+      }
+      cursor = result.nextCursor ?? undefined;
+      expectedPage += 1;
+    } while (cursor);
+    expect(seen).toEqual(new Set(jobIds));
+
+    const first = await search.search(baseQuery);
+    expect(first.nextCursor).toEqual(expect.any(String));
+    const state = searchCursor.decode(first.nextCursor ?? undefined, baseQuery);
+    expect(state).not.toBeNull();
+    await elastic.closePointInTime({ id: state!.pitId });
+    await expect(search.search({
+      ...baseQuery,
+      cursor: first.nextCursor ?? undefined,
+    })).rejects.toMatchObject({
+      code: 'JOB_SEARCH_CURSOR_STALE',
+      status: 409,
+    });
   });
 
   it('keeps the newer tombstone when an older BullMQ task arrives late',
@@ -289,6 +386,7 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
       page: 1,
       limit: 20,
       sort: JobSearchSort.RELEVANCE,
+      pagination: JobSearchPaginationMode.OFFSET,
     });
     expect(result.source).toBe(JobSearchSource.ELASTICSEARCH);
     expect(result.items.find((item) => item.id === published.id)).toBeUndefined();
@@ -540,10 +638,10 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
     expect((await getStoredDocument(job.id)).source.searchable).toBe(true);
   });
 
-  it('uses job_index_v3 without mutating an existing job_index_v2',
+  it('uses job_index_v4 without mutating an existing job_index_v3',
   async () => {
-    const legacyIndex = 'job_index_v2';
-    const upgradedIndex = 'job_index_v3';
+    const legacyIndex = 'job_index_v3';
+    const upgradedIndex = 'job_index_v4';
     const legacyDocumentId = 'legacy-' + randomUUID();
     await deleteIndexIfExists(legacyIndex);
     await deleteIndexIfExists(upgradedIndex);
@@ -786,7 +884,8 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
       new CompanyClientService(config),
       config,
     );
-    search = new JobSearchService(prisma, config, indexing);
+    searchCursor = new JobSearchCursorService(config);
+    search = new JobSearchService(prisma, config, indexing, searchCursor);
     indexing.onModuleInit();
 
     expect(indexing.isSearchReady()).toBe(false);
@@ -794,6 +893,7 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
       page: 1,
       limit: 20,
       sort: JobSearchSort.NEWEST,
+      pagination: JobSearchPaginationMode.OFFSET,
     });
     expect(fallback.source).toBe(JobSearchSource.POSTGRESQL);
 
@@ -816,7 +916,7 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
         | { index?: { uuid?: string } }
         | undefined
     )?.index?.uuid;
-    expect(completedMeta?.baselineVersion).toBe(3);
+    expect(completedMeta?.baselineVersion).toBe(4);
     expect(completedIndexUuid).toEqual(expect.any(String));
     expect(completedMeta?.baselineIndexUuid).toBe(completedIndexUuid);
 
@@ -824,6 +924,7 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
       page: 1,
       limit: 20,
       sort: JobSearchSort.NEWEST,
+      pagination: JobSearchPaginationMode.OFFSET,
     });
     expect(indexed.source).toBe(JobSearchSource.ELASTICSEARCH);
   });
@@ -837,6 +938,7 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
       ELASTICSEARCH_NODE,
       ELASTICSEARCH_INDEX: INDEX,
       ELASTICSEARCH_REQUEST_TIMEOUT_MS: '1000',
+      JOB_SEARCH_CURSOR_HMAC_KEY: SEARCH_CURSOR_KEY,
       JOB_INDEX_QUEUE_NAME: QUEUE_NAME,
       JOB_INDEX_ATTEMPTS: '3',
       JOB_INDEX_BACKOFF_MS: '50',
@@ -1037,13 +1139,41 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
       properties?: Record<string, unknown>;
     };
     expect(configured.dynamic).toBe('strict');
-    expect(configured._meta?.projectionVersion).toBe(3);
+    expect(configured._meta?.projectionVersion).toBe(4);
     expect(configured.properties).toEqual(expect.objectContaining({
       aggregateVersion: expect.objectContaining({ type: 'long' }),
       indexGeneration: expect.objectContaining({ type: 'integer' }),
       searchable: expect.objectContaining({ type: 'boolean' }),
       title: expect.objectContaining({ analyzer: 'vietnamese_text' }),
     }));
+    const settings = await elastic.indices.getSettings({ index: indexName });
+    const analysis = (
+      settings[indexName]?.settings as unknown as {
+        index?: {
+          analysis?: {
+            analyzer?: Record<string, unknown>;
+            char_filter?: Record<string, unknown>;
+          };
+        };
+      }
+    )?.index?.analysis;
+    expect(analysis).toEqual({
+      analyzer: {
+        vietnamese_text: {
+          type: 'custom',
+          tokenizer: 'standard',
+          char_filter: ['vietnamese_combining_marks'],
+          filter: ['lowercase', 'asciifolding'],
+        },
+      },
+      char_filter: {
+        vietnamese_combining_marks: {
+          type: 'pattern_replace',
+          pattern: '\\p{M}',
+          replacement: '',
+        },
+      },
+    });
   }
 });
 

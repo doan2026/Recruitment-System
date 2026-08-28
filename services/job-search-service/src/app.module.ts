@@ -19,6 +19,7 @@ import { ProfileRecommendationClientService } from './profile-recommendation-cli
 import { AiCandidateRecommendationClientService } from './ai-candidate-recommendation-client.service';
 import { ProfileCandidateDiscoveryClientService } from './profile-candidate-discovery-client.service';
 import { RecruiterCandidateRecommendationService } from './recruiter-candidate-recommendation.service';
+import { JobSearchCursorService } from './job-search-cursor.service';
 import { JobSearchService } from './job-search.service';
 import { JobService } from './job.service';
 import { PrismaService } from './prisma.service';
@@ -36,6 +37,7 @@ import { PrismaService } from './prisma.service';
     JobExpiryService,
     JobIndexingService,
     JobEventPublisherService,
+    JobSearchCursorService,
     JobSearchService,
     JobRecommendationService,
     AiRecommendationClientService,
