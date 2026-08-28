@@ -1,5 +1,6 @@
 import { HttpStatus } from '@nestjs/common';
 import {
+  CompanyAuditAction,
   CompanyMediaOperationKind,
   CompanyMediaType,
   CompanyMemberRole,
@@ -24,6 +25,7 @@ import {
 } from './dto/verify-company.dto';
 
 const RECRUITER_ID = '18c604a4-4be6-4c3d-85ea-c1f45daf17c8';
+const ADMIN_ID = '48c604a4-4be6-4c3d-85ea-c1f45daf17c8';
 const OTHER_RECRUITER_ID = '22c604a4-4be6-4c3d-85ea-c1f45daf17c8';
 const COMPANY_ID = '90eec7f1-fb6e-49d0-89ff-7d65d2438ff7';
 const LOGO_FILE_ID = '6105e846-3bb5-4dc0-a6ed-d0f0148c5bc8';
@@ -194,6 +196,7 @@ describe('CompanyService', () => {
       deleteMany: jest.Mock;
       upsert: jest.Mock;
     };
+    companyAuditLog: { create: jest.Mock };
   };
   let media: {
     createCompanyUploadIntent: jest.Mock;
@@ -250,6 +253,7 @@ describe('CompanyService', () => {
           return storedUploadIntent;
         }),
       },
+      companyAuditLog: { create: jest.fn() },
     };
     prisma = {
       $transaction: jest.fn(async (input: unknown) => {
@@ -1310,6 +1314,7 @@ describe('CompanyService', () => {
         }),
       }),
     );
+    expect(transaction.companyAuditLog.create).not.toHaveBeenCalled();
   });
 
   it('rejects null for non-nullable update fields before persistence', async () => {
@@ -1377,7 +1382,7 @@ describe('CompanyService', () => {
     };
 
     await expect(
-      service.verify(COMPANY_ID, dto),
+      service.verify(ADMIN_ID, COMPANY_ID, dto),
     ).rejects.toMatchObject({
       code: 'VERIFICATION_REASON_REQUIRED',
       details: { field: 'reason' },
@@ -1394,7 +1399,7 @@ describe('CompanyService', () => {
       }),
     );
 
-    const result = await service.verify(COMPANY_ID, {
+    const result = await service.verify(ADMIN_ID, COMPANY_ID, {
       decision: CompanyVerificationDecision.APPROVE,
     });
 
@@ -1410,6 +1415,65 @@ describe('CompanyService', () => {
     expect(result.verifiedStatus).toBe(
       CompanyVerificationStatus.VERIFIED,
     );
+    expect(transaction.companyAuditLog.create).toHaveBeenCalledWith({
+      data: {
+        companyId: COMPANY_ID,
+        action: CompanyAuditAction.VERIFICATION_APPROVED,
+        actorId: ADMIN_ID,
+        targetUserId: null,
+        resultingAggregateVersion: 1,
+        fromVerificationStatus: CompanyVerificationStatus.PENDING,
+        toVerificationStatus: CompanyVerificationStatus.VERIFIED,
+        reason: null,
+      },
+    });
+  });
+
+  it('rejects a PENDING company and records only the trimmed reason', async () => {
+    transaction.company.findUnique.mockResolvedValue(companyRecord());
+    transaction.company.update.mockResolvedValue(
+      companyRecord({
+        aggregateVersion: 1,
+        verifiedStatus: CompanyVerificationStatus.REJECTED,
+        rejectReason: 'Missing legal document',
+      }),
+    );
+
+    await service.verify(ADMIN_ID, COMPANY_ID, {
+      decision: CompanyVerificationDecision.REJECT,
+      reason: '  Missing legal document  ',
+    });
+
+    expect(transaction.companyAuditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: CompanyAuditAction.VERIFICATION_REJECTED,
+        actorId: ADMIN_ID,
+        resultingAggregateVersion: 1,
+        fromVerificationStatus: CompanyVerificationStatus.PENDING,
+        toVerificationStatus: CompanyVerificationStatus.REJECTED,
+        reason: 'Missing legal document',
+      }),
+    });
+  });
+
+  it('fails the review transaction when the audit insert fails', async () => {
+    transaction.company.findUnique.mockResolvedValue(companyRecord());
+    transaction.company.update.mockResolvedValue(
+      companyRecord({
+        aggregateVersion: 1,
+        verifiedStatus: CompanyVerificationStatus.VERIFIED,
+      }),
+    );
+    transaction.companyAuditLog.create.mockRejectedValue(
+      new Error('forced audit failure'),
+    );
+
+    await expect(
+      service.verify(ADMIN_ID, COMPANY_ID, {
+        decision: CompanyVerificationDecision.APPROVE,
+      }),
+    ).rejects.toThrow('forced audit failure');
+    expect(transaction.companyAuditLog.create).toHaveBeenCalledTimes(1);
   });
 
   it('treats an identical completed review as an idempotent retry', async () => {
@@ -1419,7 +1483,7 @@ describe('CompanyService', () => {
       }),
     );
 
-    const result = await service.verify(COMPANY_ID, {
+    const result = await service.verify(ADMIN_ID, COMPANY_ID, {
       decision: CompanyVerificationDecision.APPROVE,
     });
 
@@ -1427,6 +1491,7 @@ describe('CompanyService', () => {
       CompanyVerificationStatus.VERIFIED,
     );
     expect(transaction.company.update).not.toHaveBeenCalled();
+    expect(transaction.companyAuditLog.create).not.toHaveBeenCalled();
   });
 
   it('lets an OWNER resubmit a REJECTED company and increments its version', async () => {
@@ -1457,6 +1522,7 @@ describe('CompanyService', () => {
     expect(result.verifiedStatus).toBe(
       CompanyVerificationStatus.PENDING,
     );
+    expect(transaction.companyAuditLog.create).not.toHaveBeenCalled();
   });
 
   it('rejects upload access when the recruiter belongs to another company', async () => {

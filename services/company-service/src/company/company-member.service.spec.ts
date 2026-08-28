@@ -1,4 +1,5 @@
 import {
+  CompanyAuditAction,
   CompanyInvitationStatus,
   CompanyMemberRole,
   CompanyVerificationStatus,
@@ -70,6 +71,8 @@ describe('CompanyMemberService', () => {
       upsert: jest.Mock;
       update: jest.Mock;
     };
+    company: { update: jest.Mock };
+    companyAuditLog: { create: jest.Mock };
   };
 
   beforeEach(() => {
@@ -86,6 +89,10 @@ describe('CompanyMemberService', () => {
         upsert: jest.fn(),
         update: jest.fn(),
       },
+      company: {
+        update: jest.fn().mockResolvedValue({ aggregateVersion: 7 }),
+      },
+      companyAuditLog: { create: jest.fn() },
     };
     prisma = {
       $transaction: jest.fn(
@@ -282,7 +289,42 @@ describe('CompanyMemberService', () => {
         data: { role: CompanyMemberRole.OWNER },
       },
     );
+    expect(transaction.company.update).toHaveBeenCalledWith({
+      where: { id: COMPANY_ID },
+      data: { aggregateVersion: { increment: 1 } },
+      select: { aggregateVersion: true },
+    });
+    expect(transaction.companyAuditLog.create).toHaveBeenCalledWith({
+      data: {
+        companyId: COMPANY_ID,
+        action: CompanyAuditAction.OWNERSHIP_TRANSFERRED,
+        actorId: OWNER_ID,
+        targetUserId: MEMBER_ID,
+        resultingAggregateVersion: 7,
+        fromVerificationStatus: null,
+        toVerificationStatus: null,
+        reason: null,
+      },
+    });
     expect(result[0].role).toBe(CompanyMemberRole.OWNER);
+  });
+
+  it('fails the ownership transaction when its audit insert fails', async () => {
+    transaction.companyMember.findUnique
+      .mockResolvedValueOnce(
+        memberRecord(OWNER_ID, CompanyMemberRole.OWNER),
+      )
+      .mockResolvedValueOnce(
+        memberRecord(MEMBER_ID, CompanyMemberRole.MEMBER),
+      );
+    transaction.companyAuditLog.create.mockRejectedValue(
+      new Error('forced audit failure'),
+    );
+
+    await expect(
+      service.transferOwnership(OWNER_ID, COMPANY_ID, MEMBER_ID),
+    ).rejects.toThrow('forced audit failure');
+    expect(transaction.companyMember.findMany).not.toHaveBeenCalled();
   });
 
   it('allows self lookup and ADMIN lookup but blocks other recruiters', async () => {

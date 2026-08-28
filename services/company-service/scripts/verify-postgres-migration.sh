@@ -7,6 +7,7 @@ DEFAULT_PG_IMAGE='postgres@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0
 BASELINE_ONE='20260822000000_company_profile'
 BASELINE_TWO='20260824000000_company_members'
 MEDIA_MIGRATION='20260828000000_company_media_ownership'
+AUDIT_MIGRATION='20260829000000_company_audit_log'
 SENTINEL_PREFIX='recruitment-company-migration-harness:'
 STEP='preflight'
 TASK_TMP=''
@@ -98,21 +99,24 @@ MIGRATIONS="$SERVICE_DIR/prisma/migrations"
 for path in "$SCRIPT_DIR/migration-verify.Dockerfile" \
   "$SCRIPT_DIR/migration-verification-fixture.psql" \
   "$SCRIPT_DIR/migration-verification-assert-upgraded.psql" \
+  "$SCRIPT_DIR/migration-verification-audit-log.psql" \
   "$SCRIPT_DIR/migration-verification-old-schema-smoke.psql" \
   "$SERVICE_DIR/prisma/schema.prisma" \
   "$MIGRATIONS/$BASELINE_ONE/migration.sql" \
   "$MIGRATIONS/$BASELINE_TWO/migration.sql" \
-  "$MIGRATIONS/$MEDIA_MIGRATION/migration.sql"; do
+  "$MIGRATIONS/$MEDIA_MIGRATION/migration.sql" \
+  "$MIGRATIONS/$AUDIT_MIGRATION/migration.sql"; do
   [[ -f "$path" ]] || fail "required input is missing: $path"
 done
 mapfile -t ALL_MIGRATIONS < <(
   find "$MIGRATIONS" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | LC_ALL=C sort
 )
-(( ${#ALL_MIGRATIONS[@]} >= 3 )) || fail 'at least three Company migrations are required'
+(( ${#ALL_MIGRATIONS[@]} >= 4 )) || fail 'at least four Company migrations are required'
 [[ ${ALL_MIGRATIONS[0]} == "$BASELINE_ONE" \
   && ${ALL_MIGRATIONS[1]} == "$BASELINE_TWO" \
-  && ${ALL_MIGRATIONS[2]} == "$MEDIA_MIGRATION" ]] \
-  || fail 'the expected first-three migration order changed'
+  && ${ALL_MIGRATIONS[2]} == "$MEDIA_MIGRATION" \
+  && ${ALL_MIGRATIONS[3]} == "$AUDIT_MIGRATION" ]] \
+  || fail 'the expected first-four migration order changed'
 for migration in "${ALL_MIGRATIONS[@]}"; do
   [[ "$migration" =~ ^[0-9]{14}_[a-z0-9_]+$ \
     && -f "$MIGRATIONS/$migration/migration.sql" ]] \
@@ -259,6 +263,8 @@ pending_status() {
   fi
   grep -Fq "$MEDIA_MIGRATION" "$log_file" \
     || fail 'pending status did not name the media migration'
+  grep -Fq "$AUDIT_MIGRATION" "$log_file" \
+    || fail 'pending status did not name the audit migration'
 }
 
 current_status() {
@@ -312,7 +318,9 @@ catalog_fingerprint() {
     SELECT 'col' k,table_name||'|'||column_name||'|'||data_type||'|'||udt_name||'|'||is_nullable||'|'||coalesce(column_default,'') v FROM information_schema.columns WHERE table_schema='company'
     UNION ALL SELECT 'con',c.relname||'|'||con.conname||'|'||con.contype::text||'|'||pg_get_constraintdef(con.oid,true) FROM pg_constraint con JOIN pg_class c ON c.oid=con.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='company'
     UNION ALL SELECT 'idx',tablename||'|'||indexname||'|'||indexdef FROM pg_indexes WHERE schemaname='company'
-    UNION ALL SELECT 'enum',t.typname||'|'||e.enumsortorder::text||'|'||e.enumlabel FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace JOIN pg_enum e ON e.enumtypid=t.oid WHERE n.nspname='company')
+    UNION ALL SELECT 'enum',t.typname||'|'||e.enumsortorder::text||'|'||e.enumlabel FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace JOIN pg_enum e ON e.enumtypid=t.oid WHERE n.nspname='company'
+    UNION ALL SELECT 'trg',c.relname||'|'||tg.tgname||'|'||pg_get_triggerdef(tg.oid,true) FROM pg_trigger tg JOIN pg_class c ON c.oid=tg.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='company' AND NOT tg.tgisinternal
+    UNION ALL SELECT 'fn',p.proname||'|'||pg_get_functiondef(p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='company')
     SELECT md5(coalesce(string_agg(k||':'||v,E'\\n' ORDER BY k,v),'')) FROM r;"
 }
 
@@ -324,8 +332,8 @@ fixture_ok() {
 pre_schema_ok() {
   local value
   value="$(scalar "$1" \
-    "SELECT (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='company' AND table_name='companies' AND column_name='aggregate_version'))::integer::text || '|' || (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='company' AND table_name='company_media' AND column_name='media_reference_id'))::integer::text || '|' || (to_regclass('company.company_media_operations') IS NOT NULL)::integer::text || '|' || (to_regclass('company.company_media_upload_intents') IS NOT NULL)::integer::text;")"
-  [[ "$value" == '0|0|0|0' ]] || fail 'pre-media schema contains upgraded objects'
+    "SELECT (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='company' AND table_name='companies' AND column_name='aggregate_version'))::integer::text || '|' || (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='company' AND table_name='company_media' AND column_name='media_reference_id'))::integer::text || '|' || (to_regclass('company.company_media_operations') IS NOT NULL)::integer::text || '|' || (to_regclass('company.company_media_upload_intents') IS NOT NULL)::integer::text || '|' || (to_regclass('company.company_audit_logs') IS NOT NULL)::integer::text || '|' || (to_regtype('company.\"CompanyAuditAction\"') IS NOT NULL)::integer::text || '|' || (to_regprocedure('company.reject_company_audit_log_mutation()') IS NOT NULL)::integer::text;")"
+  [[ "$value" == '0|0|0|0|0|0|0' ]] || fail 'pre-upgrade schema contains upgraded objects'
 }
 
 constraint_failures_ok() {
@@ -483,6 +491,8 @@ ledger "$SOURCE_DB" "${ALL_MIGRATIONS[@]}"
 no_drift "$SOURCE_DB"
 sql_file "$SOURCE_DB" "$SCRIPT_DIR/migration-verification-assert-upgraded.psql" \
   "$TASK_TMP/assert-upgraded.log"
+sql_file "$SOURCE_DB" "$SCRIPT_DIR/migration-verification-audit-log.psql" \
+  "$TASK_TMP/audit-log-invariants.log"
 fixture_ok "$SOURCE_DB" "$BASELINE_HASH"
 constraint_failures_ok "$SOURCE_DB"
 CATALOG_HASH="$(catalog_fingerprint "$SOURCE_DB")"
@@ -534,12 +544,15 @@ ledger "$UPGRADED_RESTORE_DB" "${ALL_MIGRATIONS[@]}"
 sql_file "$UPGRADED_RESTORE_DB" \
   "$SCRIPT_DIR/migration-verification-assert-upgraded.psql" \
   "$TASK_TMP/assert-upgraded-restore.log"
+sql_file "$UPGRADED_RESTORE_DB" \
+  "$SCRIPT_DIR/migration-verification-audit-log.psql" \
+  "$TASK_TMP/audit-log-invariants-restore.log"
 fixture_ok "$UPGRADED_RESTORE_DB" "$BASELINE_HASH"
 [[ "$(catalog_fingerprint "$UPGRADED_RESTORE_DB")" == "$CATALOG_HASH" ]] \
   || fail 'restored upgraded catalog mismatch'
 [[ "$(ledger_fingerprint "$UPGRADED_RESTORE_DB")" == "$LEDGER_HASH" ]] \
   || fail 'restored upgraded migration ledger mismatch'
-say 'Upgraded restore migration/data/constraints/catalog/drift checks PASS'
+say 'Upgraded restore migration/data/audit/constraints/catalog/drift checks PASS'
 
 STEP='corrupted archive negative test'
 say 'Proving a corrupted custom archive is rejected before restore'
@@ -558,4 +571,4 @@ fi
 say 'Corrupted archive was rejected before any restore target was created'
 
 STEP='complete'
-say 'PASS: PostgreSQL 16 migration/backup/restore/rollback gate completed'
+say 'PASS: PostgreSQL 16 migration/audit/backup/restore/rollback gate completed'
