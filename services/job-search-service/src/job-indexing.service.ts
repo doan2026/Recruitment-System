@@ -76,6 +76,13 @@ interface IndexAnalysisContract {
       char_filter?: unknown;
     };
   };
+  char_filter?: {
+    vietnamese_combining_marks?: {
+      type?: string;
+      pattern?: string;
+      replacement?: string;
+    };
+  };
 }
 
 export interface JobIndexFailure {
@@ -111,7 +118,9 @@ const DEFAULT_LEASE_MS = 30_000;
 const DEFAULT_BATCH_SIZE = 100;
 const DEFAULT_REDIS_COMMAND_TIMEOUT_MS = 2_000;
 const DISPATCH_RETRY_MAX_MS = 60_000;
-const INDEX_PROJECTION_VERSION = 3;
+const INDEX_PROJECTION_VERSION = 4;
+const VIETNAMESE_COMBINING_MARKS_CHAR_FILTER =
+  'vietnamese_combining_marks';
 
 @Injectable()
 export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
@@ -171,7 +180,7 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
       retryStrategy: redisRetryDelay,
     };
     this.index = config.get<string>('ELASTICSEARCH_INDEX')?.trim() ||
-      'job_index_v3';
+      'job_index_v4';
     if (!/^[a-z0-9][a-z0-9._-]{0,254}$/.test(this.index)) {
       throw new Error(
         'ELASTICSEARCH_INDEX must be one lowercase index or alias',
@@ -791,10 +800,18 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
         index: this.index,
         settings: {
           analysis: {
+            char_filter: {
+              [VIETNAMESE_COMBINING_MARKS_CHAR_FILTER]: {
+                type: 'pattern_replace',
+                pattern: '\\p{M}',
+                replacement: '',
+              },
+            },
             analyzer: {
               vietnamese_text: {
                 type: 'custom',
                 tokenizer: 'standard',
+                char_filter: [VIETNAMESE_COMBINING_MARKS_CHAR_FILTER],
                 filter: ['lowercase', 'asciifolding'],
               },
             },
@@ -1122,17 +1139,41 @@ function isCompatibleVietnameseAnalyzer(
   analysis: IndexAnalysisContract | undefined,
 ): boolean {
   const analyzer = analysis?.analyzer?.vietnamese_text;
-  const charFilter = analyzer?.char_filter;
-  return analyzer?.type === 'custom' &&
+  const combiningMarks = analysis?.char_filter
+    ?.vietnamese_combining_marks;
+  return hasExactKeys(analysis, ['analyzer', 'char_filter']) &&
+    hasExactKeys(analysis?.analyzer, ['vietnamese_text']) &&
+    hasExactKeys(analyzer, ['type', 'tokenizer', 'char_filter', 'filter']) &&
+    analyzer?.type === 'custom' &&
     analyzer.tokenizer === 'standard' &&
-    (
-      charFilter === undefined ||
-      (Array.isArray(charFilter) && charFilter.length === 0)
-    ) &&
+    Array.isArray(analyzer.char_filter) &&
+    analyzer.char_filter.length === 1 &&
+    analyzer.char_filter[0] ===
+      VIETNAMESE_COMBINING_MARKS_CHAR_FILTER &&
     Array.isArray(analyzer.filter) &&
     analyzer.filter.length === 2 &&
     analyzer.filter[0] === 'lowercase' &&
-    analyzer.filter[1] === 'asciifolding';
+    analyzer.filter[1] === 'asciifolding' &&
+    hasExactKeys(analysis?.char_filter, [
+      VIETNAMESE_COMBINING_MARKS_CHAR_FILTER,
+    ]) &&
+    hasExactKeys(combiningMarks, ['type', 'pattern', 'replacement']) &&
+    combiningMarks?.type === 'pattern_replace' &&
+    combiningMarks.pattern === '\\p{M}' &&
+    combiningMarks.replacement === '';
+}
+
+function hasExactKeys(
+  value: unknown,
+  expected: string[],
+): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const actual = Object.keys(value).sort();
+  const required = [...expected].sort();
+  return actual.length === required.length &&
+    actual.every((key, index) => key === required[index]);
 }
 
 function positiveInteger(

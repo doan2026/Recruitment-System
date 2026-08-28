@@ -15,6 +15,8 @@ import {
   Res,
 } from '@nestjs/common';
 import {
+  ApiBadGatewayResponse,
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiCreatedResponse,
   ApiConflictResponse,
@@ -26,6 +28,7 @@ import {
   ApiQuery,
   ApiServiceUnavailableResponse,
   ApiTags,
+  ApiTooManyRequestsResponse,
   getSchemaPath,
 } from '@nestjs/swagger';
 
@@ -237,10 +240,102 @@ export class JobController {
   @Public()
   @Get('search')
   @ApiOperation({
-    summary: 'Search published jobs with Elasticsearch and PostgreSQL fallback',
+    summary: 'Search published jobs with stable cursor pagination',
+    description:
+      'OFFSET is the backward-compatible default and supports page/limit inside the Elasticsearch 10000-result window without opening a snapshot. Set pagination=CURSOR on the first request and follow nextCursor for stable deep traversal. The short-lived opaque cursor is bound to the original pagination mode, filters, sort and limit.',
   })
-  @ApiOkResponse({ schema: searchEnvelope })
-  search(@Query() query: JobSearchQueryDto): Promise<JobSearchResultDto> {
+  @ApiOkResponse({
+    schema: searchEnvelope,
+    headers: {
+      'Cache-Control': {
+        description: 'Search responses and opaque PIT cursors are not cached',
+        schema: { type: 'string', example: 'no-store' },
+      },
+      Pragma: {
+        description: 'Legacy cache prevention',
+        schema: { type: 'string', example: 'no-cache' },
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Invalid cursor, cursor/query scope mismatch, or offset page beyond the supported search window',
+    schema: {
+      type: 'object',
+      required: ['code', 'message'],
+      properties: {
+        code: {
+          type: 'string',
+          enum: [
+            'INVALID_SALARY_FILTER',
+            'JOB_SEARCH_CURSOR_INVALID',
+            'JOB_SEARCH_CURSOR_SCOPE_MISMATCH',
+            'JOB_SEARCH_PAGE_TOO_DEEP',
+          ],
+        },
+        message: { type: 'string' },
+        details: { type: 'object', nullable: true },
+      },
+    },
+  })
+  @ApiConflictResponse({
+    description: 'The cursor point-in-time snapshot is stale',
+    schema: {
+      type: 'object',
+      required: ['code', 'message'],
+      properties: {
+        code: { type: 'string', enum: ['JOB_SEARCH_CURSOR_STALE'] },
+        message: { type: 'string' },
+        details: { type: 'object', nullable: true },
+      },
+    },
+  })
+  @ApiServiceUnavailableResponse({
+    description:
+      'A CURSOR first page or continuation cannot be resolved from Elasticsearch',
+    schema: {
+      type: 'object',
+      required: ['code', 'message'],
+      properties: {
+        code: {
+          type: 'string',
+          enum: ['JOB_SEARCH_CONTINUATION_UNAVAILABLE'],
+        },
+        message: { type: 'string' },
+        details: { type: 'object', nullable: true },
+      },
+    },
+  })
+  @ApiTooManyRequestsResponse({
+    description: 'This service instance has reached its bounded open-PIT capacity',
+    schema: {
+      type: 'object',
+      required: ['code', 'message'],
+      properties: {
+        code: { type: 'string', enum: ['JOB_SEARCH_CURSOR_CAPACITY'] },
+        message: { type: 'string' },
+        details: { type: 'object', nullable: true },
+      },
+    },
+  })
+  @ApiBadGatewayResponse({
+    description: 'Elasticsearch rejected a locally generated search request',
+    schema: {
+      type: 'object',
+      required: ['code', 'message'],
+      properties: {
+        code: { type: 'string', enum: ['JOB_SEARCH_BACKEND_REJECTED'] },
+        message: { type: 'string' },
+        details: { type: 'object', nullable: true },
+      },
+    },
+  })
+  search(
+    @Query() query: JobSearchQueryDto,
+    @Res({ passthrough: true }) response: HeaderResponse,
+  ): Promise<JobSearchResultDto> {
+    response.setHeader('Cache-Control', 'no-store');
+    response.setHeader('Pragma', 'no-cache');
     return this.jobSearch.search(query);
   }
 
