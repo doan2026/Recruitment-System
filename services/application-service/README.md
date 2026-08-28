@@ -13,7 +13,7 @@ routes discard client-supplied internal identity headers.
 | `POST /` | `POST /applications/` | CANDIDATE |
 | `GET /my` | `GET /applications/my` | CANDIDATE |
 | `GET /{applicationId}` | `GET /applications/{applicationId}` | CANDIDATE, RECRUITER |
-| `GET /` | `GET /applications/` | RECRUITER |
+| `GET /?job_id=&status=&appliedFrom=&appliedTo=&skills=&sort=&page=&size=` | `GET /applications/?job_id=&status=&appliedFrom=&appliedTo=&skills=&sort=&page=&size=` | RECRUITER |
 | `GET /stats` | `GET /applications/stats` | RECRUITER |
 | `POST /{applicationId}/match-score/refresh` | `POST /applications/{applicationId}/match-score/refresh` | RECRUITER |
 | `PATCH /{applicationId}/status` | `PATCH /applications/{applicationId}/status` | RECRUITER |
@@ -40,15 +40,19 @@ manage every job.
 ## Canonical Profile CV contract
 
 Candidate submission no longer lists Candidate CVs and scans a permissive
-response. Application calls `POST /internal/v1/cvs/verify` with both
+response. Application calls `POST /internal/v2/cvs/verify` with both
 `X-Internal-Service: application-service`/`X-Internal-Api-Key` and the
 Candidate bearer token from the submission request. Profile independently
 verifies the strict Candidate JWT and requires its subject to equal the
 requested `candidateId`. Application then validates the exact response
 envelope, echoed candidate/CV identifiers, Media-backed file ID, type,
-deleted state, aggregate version, and timestamps. Missing, wrong-owner,
-deleted, and legacy URL-only revisions remain the existing public
-`CV_NOT_AVAILABLE` result.
+deleted state, aggregate version, timestamps, and the names-only
+`profileSkillSnapshot`. Snapshot schema version 1, the positive Profile
+aggregate version, the 100-name cap, Unicode-normalized names, length/control
+rules, and case-insensitive uniqueness are all checked at this trust boundary.
+Missing, wrong-owner, deleted, and legacy URL-only revisions remain the same
+public `CV_NOT_AVAILABLE` result. Profile keeps v1 unchanged so older
+Application replicas can drain during a rolling deployment.
 
 Recruiters access the immutable revision selected at submission through:
 
@@ -115,6 +119,44 @@ response state, unsafe JSON integer count, timeout, or authentication failure
 all fail closed. The fence intentionally has no lease, expiry, cancel, or
 reopen endpoint: an expiring reservation could lapse between the remote ACK
 and Profile's delete commit and recreate the original race.
+
+## Application-time skill snapshot and recruiter filter
+
+Flyway V8 stores the Profile skill projection that was observed at submission.
+The Application row carries immutable snapshot schema/Profile aggregate
+metadata, while `application_profile_skill_snapshots` stores the exact display
+name plus a database-generated normalized name used only for filtering. The
+Application, snapshot rows, initial history, V6 usage ledger update, and Kafka
+outbox row commit or roll back together. Existing Applications keep null
+snapshot metadata and receive no historical backfill: current Profile data
+cannot reconstruct what a Candidate had declared at an earlier submission.
+Snapshot metadata and child rows cannot be edited or independently deleted;
+deleting the parent Application may still cascade its child rows.
+
+Recruiters may filter the company-scoped pipeline through repeated or
+comma-separated query values, for example
+`GET /applications/?skills=Java,Spring&skills=Kafka`. At most ten unique,
+non-blank names are accepted after NFKC normalization and trimming. Matching
+uses `ANY` semantics and exact, case-insensitive names; it does not use
+substrings. Blank values, control characters, names longer than 120 code
+points, duplicates, and more than ten names return `INVALID_SKILL_FILTER` with
+HTTP 400. The predicate composes with job, status, submission-time, sorting,
+and pagination filters. A correlated `EXISTS` avoids duplicate Applications
+when several requested skills match, and UUID is the stable final sort key.
+Legacy Applications and submissions whose captured snapshot was empty remain
+visible without a skill filter and do not match when one is active. Listing
+reads only the immutable Application-owned snapshot, never calls live Profile,
+does not return skill names or add them to Kafka events, and sends
+`Cache-Control: private, no-store` plus `Vary: Authorization`.
+
+These names are self-declared Profile data captured at application time. They
+are a recruiter discovery aid, not proof of PDF content, and must not drive
+automatic rejection. Root Nginx uses a query-free access-log format for
+`/applications/`; production gateways, APM, tracing, and upstream proxies must
+preserve that redaction or apply restricted access and short retention. Roll
+out Profile v2 first, apply V8, then deploy the Application
+writer/filter and drain replicas still calling Profile v1. Historical rows
+remain unbackfilled by design.
 
 Recruiter Dashboard is available through
 `GET /applications/stats?company_id=<uuid>`. The requested company must match
@@ -269,14 +311,16 @@ Submission performs these checks in order:
 1. Verify the Job through `GET /jobs/:id/exists` using
    `X-Internal-Api-Key`.
 2. Verify the selected CV through Profile's
-   `POST /internal/v1/cvs/verify`, using the Application service key plus the
-   forwarded Candidate bearer JWT and validating the exact echoed owner/CV.
+   `POST /internal/v2/cvs/verify`, using the Application service key plus the
+   forwarded Candidate bearer JWT and validating the exact echoed owner/CV and
+   names-only Profile skill snapshot.
 3. Lock the V7 Application-owned CV submission gate in the database
    transaction and reject a permanent deletion fence.
 4. Reject an existing active application.
 5. Enforce a 30-day cooldown after the latest `REJECTED` application.
-6. Store `Application(APPLIED)`, initial `ApplicationHistory`, the V6 CV-usage
-   ledger update, and a Kafka outbox row in one database transaction.
+6. Store `Application(APPLIED)`, its V8 skill snapshot metadata/names, initial
+   `ApplicationHistory`, the V6 CV-usage ledger update, and a Kafka outbox row
+   in one database transaction.
 
 The database also has a partial unique index for active candidate/job pairs,
 which protects against two concurrent submission requests. The outbox publisher
@@ -323,9 +367,13 @@ key hardening, V6 backfill/trigger/rollback/immutability, cross-Candidate
 rejection, usage retention after Application deletion, and usage lookup. The
 V7 coverage includes isolated-schema writes, permanent/idempotent fences,
 owner/request conflicts, rollback, database immutability, unsafe JSON counts,
-and both deterministic submit-versus-fence lock schedules. The verified
-Application Service suite passes 219 unit tests and 50 PostgreSQL/Kafka
-integration tests.
+and both deterministic submit-versus-fence lock schedules. V8 coverage includes
+V7-to-V8 migration without historical backfill, strict v2
+Profile parsing, transactional snapshot persistence/rollback, metadata and
+child-row protection, exact `ANY` filtering, combined filters, company
+isolation, legacy/empty-snapshot behavior, and deterministic tied-value
+pagination. The verified Application Service suite passes 238 unit tests and
+63 PostgreSQL/Kafka integration tests.
 
 In Root Compose, use two distinct keys: `PROFILE_INTERNAL_API_KEY_APPLICATION`
 maps to Application's `PROFILE_INTERNAL_API_KEY` and Profile's

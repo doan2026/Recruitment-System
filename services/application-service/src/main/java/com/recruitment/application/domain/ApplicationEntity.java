@@ -57,6 +57,15 @@ public class ApplicationEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "profile_skill_snapshot_schema_version")
+    private Integer profileSkillSnapshotSchemaVersion;
+
+    @Column(name = "profile_aggregate_version")
+    private Long profileAggregateVersion;
+
+    @Column(name = "profile_skill_snapshot_expected_count")
+    private Integer profileSkillSnapshotExpectedCount;
+
     @Version
     @Column(nullable = false)
     private long version;
@@ -75,6 +84,38 @@ public class ApplicationEntity {
         ApplicationSource source,
         Instant now
     ) {
+        return applied(
+            id,
+            jobId,
+            companyId,
+            candidateId,
+            recruiterId,
+            cvId,
+            jobTitle,
+            coverLetter,
+            source,
+            null,
+            null,
+            null,
+            now
+        );
+    }
+
+    public static ApplicationEntity applied(
+        UUID id,
+        UUID jobId,
+        UUID companyId,
+        UUID candidateId,
+        UUID recruiterId,
+        UUID cvId,
+        String jobTitle,
+        String coverLetter,
+        ApplicationSource source,
+        Integer profileSkillSnapshotSchemaVersion,
+        Long profileAggregateVersion,
+        Integer profileSkillSnapshotExpectedCount,
+        Instant now
+    ) {
         ApplicationEntity application = new ApplicationEntity();
         application.id = id;
         application.jobId = jobId;
@@ -86,6 +127,11 @@ public class ApplicationEntity {
         application.coverLetter = coverLetter;
         application.status = ApplicationStatus.APPLIED;
         application.source = source;
+        application.profileSkillSnapshotSchemaVersion =
+            profileSkillSnapshotSchemaVersion;
+        application.profileAggregateVersion = profileAggregateVersion;
+        application.profileSkillSnapshotExpectedCount =
+            profileSkillSnapshotExpectedCount;
         application.appliedAt = now;
         application.updatedAt = now;
         return application;
@@ -115,5 +161,14 @@ public class ApplicationEntity {
     public BigDecimal getMatchScore() { return matchScore; }
     public Instant getAppliedAt() { return appliedAt; }
     public Instant getUpdatedAt() { return updatedAt; }
+    public Integer getProfileSkillSnapshotSchemaVersion() {
+        return profileSkillSnapshotSchemaVersion;
+    }
+    public Long getProfileAggregateVersion() {
+        return profileAggregateVersion;
+    }
+    public Integer getProfileSkillSnapshotExpectedCount() {
+        return profileSkillSnapshotExpectedCount;
+    }
     public long getVersion() { return version; }
 }

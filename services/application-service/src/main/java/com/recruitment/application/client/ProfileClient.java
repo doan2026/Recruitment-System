@@ -3,11 +3,17 @@ package com.recruitment.application.client;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.recruitment.application.api.BusinessException;
+import com.recruitment.application.submission.ProfileSkillSnapshot;
 import java.net.URI;
+import java.text.Normalizer;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,6 +33,9 @@ public class ProfileClient {
     private static final String CALLER_SERVICE = "application-service";
     private static final Set<String> CV_TYPES = Set.of("UPLOAD", "ONLINE");
     private static final Duration MAX_DOWNLOAD_TTL = Duration.ofMinutes(10);
+    private static final int PROFILE_SKILL_SNAPSHOT_SCHEMA_VERSION = 1;
+    private static final int PROFILE_SKILL_SNAPSHOT_LIMIT = 100;
+    private static final int PROFILE_SKILL_NAME_LIMIT = 120;
 
     private final RestClient restClient;
     private final String internalApiKey;
@@ -86,6 +95,68 @@ public class ProfileClient {
         } catch (HttpClientErrorException exception) {
             throw clientError(exception);
         } catch (RestClientException exception) {
+            throw invalidResponse();
+        }
+    }
+
+    public Optional<ProfileSkillSnapshot> verifyCandidateCvForSubmission(
+        UUID candidateId,
+        UUID cvId,
+        String authorization
+    ) {
+        if (!isUuidV4(candidateId)) {
+            throw invalidTokenSubject();
+        }
+        if (!isUuidV4(cvId)) {
+            return Optional.empty();
+        }
+
+        try {
+            Envelope<CvVerificationV2> response = restClient.post()
+                .uri("/internal/v2/cvs/verify")
+                .headers(headers -> internalHeaders(headers, authorization))
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new CvVerificationRequest(candidateId, cvId))
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+            CvVerificationV2 verification = requireEnvelope(response);
+            if (
+                !candidateId.equals(verification.candidateId()) ||
+                !cvId.equals(verification.cvId()) ||
+                verification.available() == null
+            ) {
+                throw invalidResponse();
+            }
+            if (!verification.available()) {
+                if (
+                    verification.cv() != null ||
+                    verification.profileSkillSnapshot() != null
+                ) {
+                    throw invalidResponse();
+                }
+                return Optional.empty();
+            }
+
+            validateCv(verification.cv(), candidateId, cvId, false);
+            ProfileSkillSnapshotResponse snapshot =
+                verification.profileSkillSnapshot();
+            List<String> canonicalSkills =
+                validateAndCanonicalizeProfileSkillSnapshot(snapshot);
+            return Optional.of(new ProfileSkillSnapshot(
+                snapshot.schemaVersion(),
+                snapshot.profileAggregateVersion(),
+                canonicalSkills
+            ));
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (
+            HttpServerErrorException |
+            ResourceAccessException exception
+        ) {
+            throw unavailable();
+        } catch (HttpClientErrorException exception) {
+            throw clientError(exception);
+        } catch (RestClientException | IllegalArgumentException exception) {
             throw invalidResponse();
         }
     }
@@ -228,6 +299,74 @@ public class ProfileClient {
         }
     }
 
+    private List<String> validateAndCanonicalizeProfileSkillSnapshot(
+        ProfileSkillSnapshotResponse snapshot
+    ) {
+        if (
+            snapshot == null ||
+            snapshot.schemaVersion() == null ||
+            snapshot.schemaVersion() !=
+                PROFILE_SKILL_SNAPSHOT_SCHEMA_VERSION ||
+            snapshot.profileAggregateVersion() == null ||
+            snapshot.profileAggregateVersion() < 1 ||
+            snapshot.skills() == null ||
+            snapshot.skills().size() > PROFILE_SKILL_SNAPSHOT_LIMIT
+        ) {
+            throw invalidResponse();
+        }
+
+        List<String> canonicalSkills = new ArrayList<>(
+            snapshot.skills().size()
+        );
+        Set<String> normalizedSkills = new HashSet<>();
+        for (String rawSkill : snapshot.skills()) {
+            if (rawSkill == null) {
+                throw invalidResponse();
+            }
+            String normalizedSkill = Normalizer.normalize(
+                rawSkill,
+                Normalizer.Form.NFKC
+            );
+            if (normalizedSkill.codePoints().anyMatch(
+                Character::isISOControl
+            )) {
+                throw invalidResponse();
+            }
+            String skill = trimUnicodeSpace(normalizedSkill);
+            if (
+                skill.isBlank() ||
+                skill.codePointCount(0, skill.length()) >
+                    PROFILE_SKILL_NAME_LIMIT ||
+                !normalizedSkills.add(skill.toLowerCase(Locale.ROOT))
+            ) {
+                throw invalidResponse();
+            }
+            canonicalSkills.add(skill);
+        }
+        return List.copyOf(canonicalSkills);
+    }
+
+    private String trimUnicodeSpace(String value) {
+        int start = 0;
+        int end = value.length();
+        while (start < end) {
+            int codePoint = value.codePointAt(start);
+            if (!isUnicodeSpace(codePoint)) break;
+            start += Character.charCount(codePoint);
+        }
+        while (end > start) {
+            int codePoint = value.codePointBefore(end);
+            if (!isUnicodeSpace(codePoint)) break;
+            end -= Character.charCount(codePoint);
+        }
+        return value.substring(start, end);
+    }
+
+    private boolean isUnicodeSpace(int codePoint) {
+        return Character.isWhitespace(codePoint) ||
+            Character.isSpaceChar(codePoint);
+    }
+
     private boolean isHttps(String value) {
         if (isBlank(value)) return false;
         try {
@@ -323,6 +462,36 @@ public class ProfileClient {
         public void rejectUnknownField(String field, Object value) {
             throw new IllegalArgumentException(
                 "Unknown CV verification field: " + field
+            );
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = false)
+    private record CvVerificationV2(
+        UUID candidateId,
+        UUID cvId,
+        Boolean available,
+        ProfileCv cv,
+        ProfileSkillSnapshotResponse profileSkillSnapshot
+    ) {
+        @JsonAnySetter
+        public void rejectUnknownField(String field, Object value) {
+            throw new IllegalArgumentException(
+                "Unknown CV v2 verification field: " + field
+            );
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = false)
+    private record ProfileSkillSnapshotResponse(
+        Integer schemaVersion,
+        Long profileAggregateVersion,
+        List<String> skills
+    ) {
+        @JsonAnySetter
+        public void rejectUnknownField(String field, Object value) {
+            throw new IllegalArgumentException(
+                "Unknown Profile skill snapshot field: " + field
             );
         }
     }

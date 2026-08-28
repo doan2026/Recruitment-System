@@ -19,6 +19,7 @@ import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -39,15 +40,18 @@ public class SubmissionTransactionService {
 
     private final CvSubmissionGateService cvSubmissionGate;
     private final ApplicationRepository applications;
+    private final ApplicationProfileSkillSnapshotWriter skillSnapshots;
     private final ApplicationHistoryRepository history;
     private final ApplicationEventOutboxRepository outbox;
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final String topic;
 
+    @Autowired
     public SubmissionTransactionService(
         CvSubmissionGateService cvSubmissionGate,
         ApplicationRepository applications,
+        ApplicationProfileSkillSnapshotWriter skillSnapshots,
         ApplicationHistoryRepository history,
         ApplicationEventOutboxRepository outbox,
         ObjectMapper objectMapper,
@@ -56,6 +60,7 @@ public class SubmissionTransactionService {
         this(
             cvSubmissionGate,
             applications,
+            skillSnapshots,
             history,
             outbox,
             objectMapper,
@@ -67,6 +72,7 @@ public class SubmissionTransactionService {
     SubmissionTransactionService(
         CvSubmissionGateService cvSubmissionGate,
         ApplicationRepository applications,
+        ApplicationProfileSkillSnapshotWriter skillSnapshots,
         ApplicationHistoryRepository history,
         ApplicationEventOutboxRepository outbox,
         ObjectMapper objectMapper,
@@ -75,6 +81,7 @@ public class SubmissionTransactionService {
     ) {
         this.cvSubmissionGate = cvSubmissionGate;
         this.applications = applications;
+        this.skillSnapshots = skillSnapshots;
         this.history = history;
         this.outbox = outbox;
         this.objectMapper = objectMapper;
@@ -86,7 +93,8 @@ public class SubmissionTransactionService {
     public ApplicationResponse create(
         UUID candidateId,
         CreateApplicationRequest request,
-        JobAvailability job
+        JobAvailability job,
+        ProfileSkillSnapshot skillSnapshot
     ) {
         cvSubmissionGate.lockForSubmission(candidateId, request.cvId());
         rejectDuplicateOrCooldown(candidateId, request.jobId());
@@ -104,6 +112,9 @@ public class SubmissionTransactionService {
             request.source() == null
                 ? ApplicationSource.SEARCH
                 : request.source(),
+            skillSnapshot.schemaVersion(),
+            skillSnapshot.profileAggregateVersion(),
+            skillSnapshot.skills().size(),
             now
         );
 
@@ -111,6 +122,11 @@ public class SubmissionTransactionService {
             applications.saveAndFlush(application);
         } catch (DataIntegrityViolationException exception) {
             throw duplicate();
+        }
+        try {
+            skillSnapshots.save(applicationId, skillSnapshot.skills());
+        } catch (DataIntegrityViolationException exception) {
+            throw invalidProfileSkillSnapshot();
         }
         history.save(
             ApplicationHistoryEntity.initial(
@@ -170,6 +186,14 @@ public class SubmissionTransactionService {
             "ACTIVE_APPLICATION_EXISTS",
             "You have already applied for this job",
             HttpStatus.CONFLICT
+        );
+    }
+
+    private BusinessException invalidProfileSkillSnapshot() {
+        return new BusinessException(
+            "PROFILE_SERVICE_INVALID_RESPONSE",
+            "Profile Service returned an invalid skill snapshot",
+            HttpStatus.BAD_GATEWAY
         );
     }
 

@@ -13,6 +13,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -86,11 +87,13 @@ public class ApplicationPipelineService {
         ApplicationStatus status,
         Instant appliedFrom,
         Instant appliedTo,
+        List<String> rawSkills,
         ApplicationSort sort,
         int page,
         int size
     ) {
         validatePageAndRange(page, size, appliedFrom, appliedTo);
+        List<String> skills = ApplicationSkillFilter.parse(rawSkills);
         UUID companyId = authorizedCompanyId(recruiterId, authorization);
         Page<ApplicationEntity> result = applications.findAll(
             ApplicationSpecifications.recruiterFilter(
@@ -99,6 +102,7 @@ public class ApplicationPipelineService {
                 status,
                 appliedFrom,
                 appliedTo,
+                skills,
                 sort
             ),
             PageRequest.of(page, size)
@@ -111,6 +115,32 @@ public class ApplicationPipelineService {
             result.getSize(),
             result.getTotalElements(),
             result.getTotalPages()
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public RecruiterApplicationPageResponse listForRecruiter(
+        UUID recruiterId,
+        String authorization,
+        UUID jobId,
+        ApplicationStatus status,
+        Instant appliedFrom,
+        Instant appliedTo,
+        ApplicationSort sort,
+        int page,
+        int size
+    ) {
+        return listForRecruiter(
+            recruiterId,
+            authorization,
+            jobId,
+            status,
+            appliedFrom,
+            appliedTo,
+            List.of(),
+            sort,
+            page,
+            size
         );
     }
 

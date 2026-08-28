@@ -5,6 +5,7 @@ import com.recruitment.application.client.JobClient;
 import com.recruitment.application.client.JobClient.JobAvailability;
 import com.recruitment.application.client.ProfileClient;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -32,20 +33,25 @@ public class SubmissionService {
     ) {
         JobAvailability job = jobs.getAvailability(request.jobId());
         validateJob(job);
-        if (
-            !profiles.candidateOwnsCv(
+        Optional<ProfileSkillSnapshot> skillSnapshot =
+            profiles.verifyCandidateCvForSubmission(
                 candidateId,
                 request.cvId(),
                 authorization
-            )
-        ) {
+            );
+        if (skillSnapshot.isEmpty()) {
             throw new BusinessException(
                 "CV_NOT_AVAILABLE",
                 "The selected CV does not exist or is not available to this candidate",
                 HttpStatus.BAD_REQUEST
             );
         }
-        return transactions.create(candidateId, request, job);
+        return transactions.create(
+            candidateId,
+            request,
+            job,
+            skillSnapshot.orElseThrow()
+        );
     }
 
     private void validateJob(JobAvailability job) {

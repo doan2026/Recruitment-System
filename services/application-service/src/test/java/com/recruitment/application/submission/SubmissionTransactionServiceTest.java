@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -22,11 +23,13 @@ import com.recruitment.application.repository.ApplicationRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataIntegrityViolationException;
 
 class SubmissionTransactionServiceTest {
     private static final Instant NOW =
@@ -36,6 +39,8 @@ class SubmissionTransactionServiceTest {
         mock(ApplicationRepository.class);
     private final CvSubmissionGateService cvSubmissionGate =
         mock(CvSubmissionGateService.class);
+    private final ApplicationProfileSkillSnapshotWriter skillSnapshots =
+        mock(ApplicationProfileSkillSnapshotWriter.class);
     private final ApplicationHistoryRepository history =
         mock(ApplicationHistoryRepository.class);
     private final ApplicationEventOutboxRepository outbox =
@@ -49,12 +54,15 @@ class SubmissionTransactionServiceTest {
     private final UUID recruiterId = UUID.randomUUID();
     private final CreateApplicationRequest request =
         new CreateApplicationRequest(jobId, cvId, "  Hello HR  ", null);
+    private final ProfileSkillSnapshot skillSnapshot =
+        new ProfileSkillSnapshot(1, 7L, List.of("Java", "Spring Boot"));
 
     @BeforeEach
     void setUp() {
         service = new SubmissionTransactionService(
             cvSubmissionGate,
             applications,
+            skillSnapshots,
             history,
             outbox,
             new ObjectMapper().findAndRegisterModules(),
@@ -82,14 +90,28 @@ class SubmissionTransactionServiceTest {
         ApplicationResponse response = service.create(
             candidateId,
             request,
-            availableJob()
+            availableJob(),
+            skillSnapshot
         );
 
         assertThat(response.status()).isEqualTo(ApplicationStatus.APPLIED);
         assertThat(response.coverLetter()).isEqualTo("Hello HR");
         verify(applications).saveAndFlush(any(ApplicationEntity.class));
         verify(cvSubmissionGate).lockForSubmission(candidateId, cvId);
+        verify(skillSnapshots).save(
+            response.id(),
+            List.of("Java", "Spring Boot")
+        );
         verify(history).save(any(ApplicationHistoryEntity.class));
+
+        var writes = inOrder(applications, skillSnapshots, history, outbox);
+        writes.verify(applications).saveAndFlush(any(ApplicationEntity.class));
+        writes.verify(skillSnapshots).save(
+            response.id(),
+            List.of("Java", "Spring Boot")
+        );
+        writes.verify(history).save(any(ApplicationHistoryEntity.class));
+        writes.verify(outbox).save(any(ApplicationEventOutboxEntity.class));
 
         ArgumentCaptor<ApplicationEventOutboxEntity> captor =
             ArgumentCaptor.forClass(ApplicationEventOutboxEntity.class);
@@ -100,6 +122,47 @@ class SubmissionTransactionServiceTest {
             .contains("\"action\":\"STATUS_CHANGED\"")
             .contains("\"to_status\":\"APPLIED\"")
             .contains(jobId.toString());
+
+        ArgumentCaptor<ApplicationEntity> applicationCaptor =
+            ArgumentCaptor.forClass(ApplicationEntity.class);
+        verify(applications).saveAndFlush(applicationCaptor.capture());
+        assertThat(
+            applicationCaptor.getValue()
+                .getProfileSkillSnapshotSchemaVersion()
+        ).isEqualTo(1);
+        assertThat(
+            applicationCaptor.getValue().getProfileAggregateVersion()
+        ).isEqualTo(7L);
+        assertThat(
+            applicationCaptor.getValue()
+                .getProfileSkillSnapshotExpectedCount()
+        ).isEqualTo(2);
+    }
+
+    @Test
+    void snapshotFailureStopsHistoryAndOutboxWrites() {
+        doThrow(new DataIntegrityViolationException("malformed snapshot"))
+            .when(skillSnapshots)
+            .save(any(), any());
+
+        assertThatThrownBy(() -> service.create(
+            candidateId,
+            request,
+            availableJob(),
+            skillSnapshot
+        ))
+            .isInstanceOf(BusinessException.class)
+            .satisfies(error -> {
+                BusinessException business = (BusinessException) error;
+                assertThat(business.code())
+                    .isEqualTo("PROFILE_SERVICE_INVALID_RESPONSE");
+                assertThat(business.status())
+                    .isEqualTo(org.springframework.http.HttpStatus.BAD_GATEWAY);
+            });
+
+        verify(applications).saveAndFlush(any(ApplicationEntity.class));
+        verify(skillSnapshots).save(any(), any());
+        verifyNoDownstreamWrites();
     }
 
     @Test
@@ -111,7 +174,12 @@ class SubmissionTransactionServiceTest {
         )).when(cvSubmissionGate).lockForSubmission(candidateId, cvId);
 
         assertThatThrownBy(() ->
-            service.create(candidateId, request, availableJob())
+            service.create(
+                candidateId,
+                request,
+                availableJob(),
+                skillSnapshot
+            )
         )
             .isInstanceOf(BusinessException.class)
             .extracting("code")
@@ -134,7 +202,12 @@ class SubmissionTransactionServiceTest {
         ).thenReturn(true);
 
         assertThatThrownBy(() ->
-            service.create(candidateId, request, availableJob())
+            service.create(
+                candidateId,
+                request,
+                availableJob(),
+                skillSnapshot
+            )
         )
             .isInstanceOf(BusinessException.class)
             .extracting("code")
@@ -161,7 +234,12 @@ class SubmissionTransactionServiceTest {
         ).thenReturn(Optional.of(previous));
 
         assertThatThrownBy(() ->
-            service.create(candidateId, request, availableJob())
+            service.create(
+                candidateId,
+                request,
+                availableJob(),
+                skillSnapshot
+            )
         )
             .isInstanceOf(BusinessException.class)
             .extracting("code")
