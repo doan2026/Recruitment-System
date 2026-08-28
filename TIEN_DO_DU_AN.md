@@ -2,7 +2,7 @@
 
 > Ngày cập nhật: 29/08/2026
 > Nhánh đối chiếu chính: `develop`
-> Pull Request lần cập nhật: PR #56 từ `feature/company-service/audit-log` vào `develop`
+> Pull Request lần cập nhật: PR #57 từ `feature/company-service/public-search-load` vào `develop`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -22,7 +22,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 | User/Profile Service | Người 1 | 🟡 Persistence, Candidate CRUD/completion, hai consent aggregate tách biệt cho Job preferences và Recruiter discovery, Media, Application CV contract v1, skill snapshot contract v2, lifecycle, backend Builder, deletion fence, transactional `cv-events` và controlled historical CV baseline đã hoàn thành; baseline chưa execute trên dữ liệu thật, frontend Builder/PDF renderer cùng consent/preferences UI còn pending |
 | File/Media Service | Người 1 | 🟡 Core signed upload/confirm, Profile consumer, AI private-download consumer contract, durable cleanup/reconciliation và guarded six-policy Cloudinary smoke runner đã hoàn thành; live staging execution, Offer letter, các consumer khác và production hardening còn pending |
 | Admin & Statistics Service | Người 1 | ⏳ Scaffold |
-| Company Service | Người 2 | 🟡 Nghiệp vụ chính, ownership logo/ảnh/video qua Media, migration backup/restore và domain audit duyệt/OWNER đã hoàn thành; real multi-service E2E và load public search còn pending |
+| Company Service | Người 2 | 🟡 Nghiệp vụ chính, ownership logo/ảnh/video qua Media, migration backup/restore, domain audit duyệt/OWNER và public search/load đã hoàn thành; real Auth/Admin/File multi-service E2E còn pending |
 | Job & Search Service | Người 2 | 🟡 CRUD/search, transactional `job-events`, controlled historical Job baseline, Redis/BullMQ/Elasticsearch integration, Candidate job recommendation và consent-scoped Recruiter candidate recommendation đã hoàn thành; load/quality/deep-pagination benchmark còn thiếu |
 | Application Service | Người 2 | 🟡 Các luồng từ Submission đến AI Match, canonical Profile CV contract, durable usage/deletion gate, Application-time skill snapshot và canonical `application-events` v1 đã hoàn thành; còn P17 deployed E2E/load/production rollout |
 | AI Service | Người 2 | 🟡 Provider `/match`, consumer `job-events`, strict `cv-events` private-PDF embedding worker cùng internal `/recommend/jobs` và `/recommend/candidates` đã hoàn thành; source-side baseline chưa chạy trên dữ liệu thật, còn ANN/load/distributed-rate-limit benchmark và chatbot |
@@ -158,7 +158,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Mục tiêu:** chứng minh các luồng xuyên service chạy thật, ổn định và có thể triển khai.
 - **Công nghệ/công cụ:** unit/integration/E2E test, Docker Compose, CI/CD, Swagger/OpenAPI, logging/metrics/tracing.
 - **Đầu ra:** test contract REST/Kafka; migration sạch; test concurrency/idempotency; security test; smoke test; tài liệu môi trường; backup/restore; monitoring.
-- **Trạng thái:** đã có unit/integration test tập trung ở Company, Job/Search, Application, AI, Profile, Media, Interview và Notification. Company hiện đạt **148/148 unit test + build** cho profile/member/JWT/Media client/upload-intent guard/saga reconciler/domain audit và PostgreSQL 16 migration/audit/backup/separate-restore gate PASS; Profile đạt **62/62 unit + 89/89 PostgreSQL/Kafka integration test**, Media **26 + 26**, Job/Search **292 + 19**, AI **331 unit/non-integration + 54 integration (385 tổng)**, Application **260 unit + 63 PostgreSQL/Kafka integration**, Interview **143/143 unit/WebMvc/security/client/event/query + 16/16 PostgreSQL/Kafka integration**, Notification **51 unit + 7 PostgreSQL/Kafka integration** với migration deploy lặp sạch. Đây là bằng chứng service-level, không đồng nghĩa deployed E2E toàn hệ thống và P17 vẫn pending.
+- **Trạng thái:** đã có unit/integration test tập trung ở Company, Job/Search, Application, AI, Profile, Media, Interview và Notification. Company hiện đạt **198/198 unit test + build**, PostgreSQL 16 migration/audit/search-index/backup/separate-restore gate PASS và public-search HTTP load gate PASS trên 100.000 Company; Profile đạt **62/62 unit + 89/89 PostgreSQL/Kafka integration test**, Media **26 + 26**, Job/Search **292 + 19**, AI **331 unit/non-integration + 54 integration (385 tổng)**, Application **260 unit + 63 PostgreSQL/Kafka integration**, Interview **143/143 unit/WebMvc/security/client/event/query + 16/16 PostgreSQL/Kafka integration**, Notification **51 unit + 7 PostgreSQL/Kafka integration** với migration deploy lặp sạch. Đây là bằng chứng service-level có kiểm tải Company một instance, không đồng nghĩa deployed E2E toàn hệ thống và P17 vẫn pending.
 
 ---
 
@@ -216,6 +216,15 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Phạm vi giữ đúng Người 2: không thêm query API/UI/Kafka/retention, không sửa Admin Service và không thay thế global Admin AuditLog. Audit không lưu email, token/hash invitation, JWT/Authorization, tax code, Media ID/URL, IP/User-Agent hay request body. Production vẫn phải tách migrator/runtime DB role vì table owner/superuser có thể vô hiệu trigger.
 - Company JWT consumer nay fail closed với issuer/audience bắt buộc, `alg=RS256`, `typ=JWT`, RFC 7638 thumbprint `kid`, UUID v4 `sub/jti`, integer `iat/exp` và exact uppercase role; controller truyền authenticated Admin ID thay vì nhận actor từ DTO/header.
 - Full regression đạt **148/148 unit test** và build PASS. Disposable PostgreSQL **16** gate PASS cho upgrade legacy đủ bốn migration, valid/invalid audit shape, rollback coupling, one-OWNER/FK/append-only negative, deploy lần hai no-op, drift bằng 0, catalog gồm trigger/function, backup/restore tách database và corrupt-archive rejection; audit probe cũng PASS lại sau upgraded restore.
+
+### Company Public Search & Load Verification — PR #57
+
+- Bổ sung public `GET /companies/search?q=&cursor=&limit=` tách biệt hoàn toàn với review queue `GET /companies` của ADMIN. API hard-code chỉ đọc `VERIFIED`, trả card allowlist `id/name/slug/industry/size/address/logoUrl`, ẩn description/tax code/workflow/member/invitation/audit/File/Media ID và biến logo legacy chưa bind thành `null`.
+- Phân trang dùng HMAC-SHA256 cursor canonical, versioned và bind exact query đã fold cùng limit; sort/keyset `(normalized_name ASC, id ASC)`, lấy `limit + 1`, không deep `OFFSET` hoặc `COUNT(*)`. Cursor sai chữ ký, sai query/limit, payload/version/UUID không canonical đều fail closed HTTP 400.
+- Migration thứ năm dùng function immutable/parallel-safe nằm trong schema `company` để fold case/dấu tiếng Việt và `đ`, partial B-tree cho VERIFIED keyset cùng expression GIN `simple` FTS cho AND token-prefix. Không phụ thuộc extension ngoài schema nên backup chỉ schema Company vẫn restore được; migration deploy lặp, drift, exact function/index/opclass/predicate, audit, backup/restore/rollback và corrupt-archive gate đều PASS trên PostgreSQL 16.
+- Full Company đạt **198/198 unit test** và build PASS. Dockerfile Company được bổ sung OpenSSL cho Prisma Alpine; service success/error log chỉ ghi path và search trả `no-store/no-cache` để không phục vụ stale Company vừa mất VERIFIED. Rollout bắt buộc provision `COMPANY_PUBLIC_CURSOR_HMAC_KEY` riêng tối thiểu 32 byte; thiếu hoặc để placeholder làm startup fail closed.
+- Default isolated load gate PASS trên **100.000 Company** (80.000 VERIFIED, 10.000 PENDING, 10.000 REJECTED): duyệt đủ 80.000 row qua 1.600 cursor page không trùng/thiếu/sai thứ tự; ba dạng tiếng Việt có dấu/decomposed/không dấu cùng trả 8.000 row; status isolation, privacy, tamper/scope, response tối đa 12.327 byte và EXPLAIN không Seq Scan đều PASS. Benchmark HTTP thật 10.000 request, concurrency 32, **0 lỗi**, p95 **40,362 ms**, p99 **46,685 ms**, throughput **1.213,571 req/s** trên runner Docker cục bộ kiểm soát; đây không phải production SLO/CDN/multi-replica claim.
+- Giữ đúng phạm vi Người 2: chưa sửa shared Nginx access-log của Người 3, hiện gateway Company vẫn có rủi ro ghi query/cursor; chưa làm Company frontend/P16 và chưa đánh dấu real Auth/Admin/File E2E hoặc P17.
 
 ## 2.2 Job & Search Service — đã merge vào `develop`
 
@@ -757,7 +766,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [x] Xác minh ownership của logo, ảnh và video qua File/Media thay vì chỉ nhận reference; dùng upload/confirm OWNER-only với durable exact upload-intent guard, abandoned-upload quota cleanup, canonical verify, generation bind-before-commit và leased attach/detach reconciliation.
 - [x] Chạy Prisma migration trên database sạch và kiểm tra backup/restore cùng restore-based rollback; verifier PostgreSQL 16 fail-closed, migration deploy lặp, drift/ledger/data/constraint và corrupt-archive negative đều PASS.
 - [x] Bổ sung append-only Company domain audit cho duyệt công ty và thay đổi OWNER; actor từ canonical JWT, mutation/audit cùng transaction và PostgreSQL migration/audit/backup/restore gate PASS.
-- [ ] Kiểm tra phân trang/tìm kiếm trang công ty công khai ở tải lớn.
+- [x] Kiểm tra phân trang/tìm kiếm trang công ty công khai ở tải lớn: signed keyset + Vietnamese FTS, full 80.000-row traversal và 10.000-request HTTP benchmark trên fixture 100.000 Company đều PASS; PR #57.
 
 ## P07 — Auth Service
 
