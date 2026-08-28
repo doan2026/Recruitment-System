@@ -24,6 +24,18 @@ spring:
     schemas: interview
   kafka:
     bootstrap-servers: ${KAFKA_BROKERS:kafka:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      retries: 1
+      properties:
+        enable.idempotence: true
+        allow.auto.create.topics: false
+        max.in.flight.requests.per.connection: 1
+        request.timeout.ms: 3000
+        delivery.timeout.ms: 5000
+        max.block.ms: 5000
   security:
     oauth2:
       resourceserver:
@@ -46,11 +58,26 @@ interview:
     request-timeout-ms: ${APPLICATION_REQUEST_TIMEOUT_MS:2000}
     internal-api-key: ${APPLICATION_INTERNAL_API_KEY}
 
+interview-events:
+  topic: ${KAFKA_INTERVIEW_TOPIC:interview-events}
+  publisher-enabled: ${INTERVIEW_EVENT_PUBLISHER_ENABLED:true}
+  poll-delay-ms: ${INTERVIEW_EVENT_OUTBOX_POLL_DELAY_MS:5000}
+  publish-initial-delay-ms: ${INTERVIEW_EVENT_OUTBOX_INITIAL_DELAY_MS:5000}
+  lease-ms: ${INTERVIEW_EVENT_OUTBOX_LEASE_MS:30000}
+  batch-size: ${INTERVIEW_EVENT_OUTBOX_BATCH_SIZE:100}
+  retry-base-ms: ${INTERVIEW_EVENT_OUTBOX_RETRY_BASE_MS:1000}
+  retry-max-ms: ${INTERVIEW_EVENT_OUTBOX_RETRY_MAX_MS:60000}
+  publish-timeout-ms: ${INTERVIEW_EVENT_KAFKA_TIMEOUT_MS:5000}
+  backlog-max-age-ms: ${INTERVIEW_EVENT_OUTBOX_MAX_AGE_MS:900000}
+
 management:
   endpoint:
     health:
       probes:
         enabled: true
+      group:
+        readiness:
+          include: readinessState,db,interviewEventOutbox
   endpoints:
     web:
       exposure:

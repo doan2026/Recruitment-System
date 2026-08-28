@@ -106,7 +106,9 @@ public class InterviewSchedulingService {
                     schedule.requestHash()
                 );
             }
-            throw mapConstraint(exception);
+            BusinessException mapped = mapConstraint(exception);
+            if (mapped != null) throw mapped;
+            throw exception;
         }
     }
 
@@ -314,10 +316,7 @@ public class InterviewSchedulingService {
                 "Interview overlaps an active schedule"
             );
         }
-        return conflict(
-            "INTERVIEW_CONSTRAINT_VIOLATION",
-            "Interview violates a scheduling constraint"
-        );
+        return null;
     }
 
     private BusinessException invalid(String field, String message) {

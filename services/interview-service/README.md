@@ -1,8 +1,9 @@
 # Interview Service
 
 Spring Boot/Java 21 service for interview scheduling. The current vertical
-slice implements the production foundation for **offline scheduling**; it does
-not claim that the complete interview/video lifecycle is finished.
+slice implements the production foundation for **offline scheduling** and its
+transactional `SCHEDULED` event; it does not claim that the complete
+interview/video lifecycle is finished.
 
 ## Implemented in scheduling foundation v1
 
@@ -30,6 +31,29 @@ not claim that the complete interview/video lifecycle is finished.
 Online scheduling deliberately returns `INTERVIEW_ONLINE_NOT_READY`. Jitsi
 room/token generation must be implemented with its lifecycle task; this
 service never generates a fake or reusable room URL.
+
+## `interview-events` v1
+
+Creating an Interview and appending its event outbox row occur in the same
+PostgreSQL transaction. Kafka delivery is at-least-once: a lease/fence and
+`SKIP LOCKED` allow multiple publishers, exponential retry preserves the
+stable `event_id`, and a row is marked published only after broker ACK. The
+Kafka key is the lowercase canonical `interview_id`.
+
+Foundation v1 emits only `action=SCHEDULED` and `status=SCHEDULED`, with exactly
+these 15 fields:
+
+```text
+schema_version, event_id, action, interview_id, application_id,
+candidate_id, interviewer_id, actor_id, round_number, schedule_revision,
+scheduled_start_at, scheduled_end_at, status, aggregate_version, occurred_at
+```
+
+Timestamps use exact UTC milliseconds. The contract intentionally excludes
+location, notes, request identifiers/hashes, CV/contact data, room URL and join
+token. Room credentials must later be obtained from an authenticated join API,
+never retained in Kafka. Existing Interview rows are not silently backfilled;
+production rollout must make an explicit baseline decision.
 
 ## API
 
@@ -71,6 +95,9 @@ Copy `.env.example` to the runtime secret configuration. At minimum configure:
   must equal Application's inbound `INTERNAL_API_KEY_INTERVIEW` and must differ
   from every other service-direction key;
 - exact frontend `CORS_ORIGINS`.
+- Kafka brokers/topic and `INTERVIEW_EVENT_PUBLISHER_ENABLED`; outbox poll,
+  lease, batch, retry, publish-timeout and backlog-age bounds have safe local
+  defaults documented in `.env.example`.
 
 The HTTP client rejects redirects, credentials/path/query/fragment in its base
 URL, non-allowlisted hosts, responses over 16 KiB, wrong content type, unknown
@@ -78,7 +105,7 @@ fields and mismatched Application IDs. Connect/read timeout defaults to 2 s.
 
 ## Verification
 
-Unit/WebMvc/security/client suite (43 tests):
+Unit/WebMvc/security/client/event suite (51 tests):
 
 ```bash
 docker run --rm \
@@ -88,7 +115,7 @@ docker run --rm \
   mvn test
 ```
 
-Full suite, including eight clean PostgreSQL 16 migration/concurrency tests:
+Full suite, including twelve PostgreSQL 16/Kafka 3.8 integration tests:
 
 ```bash
 docker run --rm --network host \
@@ -102,12 +129,13 @@ docker run --rm --network host \
 
 The integration gate covers clean/repeated Flyway deployment, JPA validation,
 UTC persistence, adjacent slots, idempotency collision, active round, cancelled
-slot release, direct-SQL protection and parallel Candidate/interviewer races.
+slot release, direct-SQL protection, parallel Candidate/interviewer races,
+Interview/outbox rollback and exact outbox-to-Kafka key/payload delivery.
 
 ## Explicit backlog
 
 `InterviewFeedback`, arbitrary interviewer/panel membership authorization,
 list/detail/calendar/availability, Candidate confirmation/reschedule,
-cancel/no-show, Jitsi, transactional `interview-events` outbox, Notification
-consumer/reminders and frontend/E2E remain separate tasks in
+cancel/no-show, Jitsi, remaining lifecycle event actions, reminders and
+frontend/deployed E2E remain separate tasks in
 `TIEN_DO_DU_AN.md`.
