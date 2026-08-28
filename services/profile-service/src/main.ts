@@ -1,13 +1,18 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { InternalAuthService } from './common/auth/internal-auth.service';
 
 export const configureApplication = (
-  app: INestApplication,
+  app: NestExpressApplication,
 ): void => {
+  // Builder content is capped at 1 MiB by DTO and PostgreSQL. Leave enough
+  // envelope headroom so the HTTP parser does not impose a lower hidden cap.
+  app.useBodyParser('json', { limit: 1_100_000 });
+
   app.useGlobalPipes(
     new ValidationPipe({
       transform: true,
@@ -63,7 +68,7 @@ export const configureApplication = (
 };
 
 export async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   configureApplication(app);
 
   const config = app.get(ConfigService);

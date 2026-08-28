@@ -123,7 +123,7 @@ export class ProfileMediaController {
   }
 
   @Get(['cvs', 'cv'])
-  @ApiOperation({ summary: 'List my active uploaded CVs' })
+  @ApiOperation({ summary: 'List my active uploaded and Online CVs' })
   @ApiOkResponse({ schema: CV_LIST_ENVELOPE })
   listCvs(
     @CurrentUser() user: AuthUser,
@@ -132,7 +132,7 @@ export class ProfileMediaController {
   }
 
   @Patch(['cvs/:id', 'cv/:id'])
-  @ApiOperation({ summary: 'Rename one of my active uploaded CVs' })
+  @ApiOperation({ summary: 'Rename one of my active CVs' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiOkResponse({ schema: envelope(UploadedCvResponseDto) })
   renameCv(
@@ -144,7 +144,7 @@ export class ProfileMediaController {
   }
 
   @Patch(['cvs/:id/default', 'cv/:id/default'])
-  @ApiOperation({ summary: 'Make one of my active uploaded CVs the default' })
+  @ApiOperation({ summary: 'Make one of my active CVs the default' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiOkResponse({ schema: envelope(UploadedCvResponseDto) })
   setDefaultCv(
@@ -161,7 +161,7 @@ export class ProfileMediaController {
 
   @Delete(['cvs/:id', 'cv/:id'])
   @ApiOperation({
-    summary: 'Soft-delete one of my uploaded CVs',
+    summary: 'Soft-delete one of my CVs',
     description:
       'The CV record and its private Media reference are retained so historical applications remain resolvable.',
   })

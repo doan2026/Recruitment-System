@@ -331,6 +331,69 @@ const main = async () => {
 
     executeMigration('20260827140000_cv_default_invariant');
 
+    let markRevisionWriterInserted;
+    const revisionWriterInserted = new Promise((resolve) => {
+      markRevisionWriterInserted = resolve;
+    });
+    let releaseRevisionWriter;
+    const revisionWriterRelease = new Promise((resolve) => {
+      releaseRevisionWriter = resolve;
+    });
+    const revisionWriterCompletion = prisma.$transaction(
+      async (transaction) => {
+        await transaction.$queryRawUnsafe(`
+          SELECT "id"
+          FROM "profile"."profiles"
+          WHERE "user_id" =
+            '75000000-0000-4000-8000-000000000002'::uuid
+          FOR UPDATE
+        `);
+        await transaction.$executeRawUnsafe(`
+          INSERT INTO "profile"."cvs"
+            ("id", "user_id", "title", "type", "file_id", "file_url",
+             "media_reference_id", "is_default", "updated_at")
+          VALUES
+            ('75000000-0000-4000-8000-000000000011',
+             '75000000-0000-4000-8000-000000000002',
+             'CV committed while revision migration waits',
+             'UPLOAD',
+             '75000000-0000-4000-8000-000000000111',
+             NULL,
+             '75000000-0000-4000-8000-000000000211',
+             false,
+             CURRENT_TIMESTAMP)
+        `);
+        markRevisionWriterInserted();
+        await revisionWriterRelease;
+      },
+      { timeout: 15_000 },
+    );
+    await Promise.race([
+      revisionWriterInserted,
+      revisionWriterCompletion.then(() => {
+        throw new Error(
+          'Legacy writer committed before the revision migration started',
+        );
+      }),
+    ]);
+
+    const revisionMigration = startMigration(
+      '20260827150000_cv_builder_revisions',
+    );
+    let revisionLockWaitError;
+    try {
+      await waitForMigrationWriterLock(revisionMigration.child);
+    } catch (error) {
+      revisionLockWaitError = error;
+    } finally {
+      releaseRevisionWriter();
+    }
+    await revisionWriterCompletion;
+    await revisionMigration.completion;
+    if (revisionLockWaitError) {
+      throw revisionLockWaitError;
+    }
+
     const rows = await prisma.$queryRawUnsafe(`
       SELECT "completion_percent", "completion_rule_version"
       FROM "profile"."profiles"
@@ -361,7 +424,10 @@ const main = async () => {
         "file_id"::text AS "fileId",
         "file_url" AS "fileUrl",
         "media_reference_id"::text AS "mediaReferenceId",
-        "is_default" AS "isDefault"
+        "is_default" AS "isDefault",
+        "revision_series_id"::text AS "revisionSeriesId",
+        "revision_number" AS "revisionNumber",
+        "previous_revision_id"::text AS "previousRevisionId"
       FROM "profile"."cvs"
       WHERE "id" = '71000000-0000-4000-8000-000000000006'::uuid
     `);
@@ -371,6 +437,38 @@ const main = async () => {
         fileUrl: 'https://media.example.com/cvs/legacy-candidate.pdf',
         mediaReferenceId: null,
         isDefault: true,
+        revisionSeriesId: '71000000-0000-4000-8000-000000000006',
+        revisionNumber: 1,
+        previousRevisionId: null,
+      },
+    ]);
+
+    const lineageRows = await prisma.$queryRawUnsafe(`
+      SELECT COUNT(*)::integer AS "count"
+      FROM "profile"."cvs"
+      WHERE "revision_series_id" = "id"
+        AND "revision_number" = 1
+        AND "previous_revision_id" IS NULL
+    `);
+    const totalCvRows = await prisma.$queryRawUnsafe(`
+      SELECT COUNT(*)::integer AS "count"
+      FROM "profile"."cvs"
+    `);
+    assert.equal(lineageRows[0].count, totalCvRows[0].count);
+
+    const concurrentBackfillRows = await prisma.$queryRawUnsafe(`
+      SELECT
+        "revision_series_id"::text AS "revisionSeriesId",
+        "revision_number" AS "revisionNumber",
+        "previous_revision_id"::text AS "previousRevisionId"
+      FROM "profile"."cvs"
+      WHERE "id" = '75000000-0000-4000-8000-000000000011'::uuid
+    `);
+    assert.deepEqual(concurrentBackfillRows, [
+      {
+        revisionSeriesId: '75000000-0000-4000-8000-000000000011',
+        revisionNumber: 1,
+        previousRevisionId: null,
       },
     ]);
 

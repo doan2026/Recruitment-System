@@ -245,7 +245,13 @@ before(async () => {
       'Used CV',
       false,
       '2026-08-27T02:00:00.000Z',
-      { firstUsedAt: new Date('2026-08-27T03:00:00.000Z') },
+      {
+        type: CvType.ONLINE,
+        templateId: 'clean-v1',
+        contentSchemaVersion: 1,
+        contentJson: { basics: { fullName: 'Lifecycle Candidate A' } },
+        firstUsedAt: new Date('2026-08-27T03:00:00.000Z'),
+      },
     ),
     cvFixture(CV_A3, 'Third CV', false, '2026-08-27T04:00:00.000Z'),
   ]);
@@ -257,7 +263,18 @@ before(async () => {
   ]);
   await createProfile(CANDIDATE_C, [
     cvFixture(CV_C1, 'Only eventual CV', true, '2026-08-27T01:00:00.000Z'),
-    cvFixture(CV_C2, 'Non-default CV', false, '2026-08-27T02:00:00.000Z'),
+    cvFixture(
+      CV_C2,
+      'Non-default Online CV',
+      false,
+      '2026-08-27T02:00:00.000Z',
+      {
+        type: CvType.ONLINE,
+        templateId: 'clean-v1',
+        contentSchemaVersion: 1,
+        contentJson: { basics: { fullName: 'Lifecycle Candidate C' } },
+      },
+    ),
   ]);
   await createProfile(CANDIDATE_D, [
     cvFixture(CV_D1, 'Usage outage', true, '2026-08-27T01:00:00.000Z'),
@@ -352,6 +369,7 @@ test('Profile CV lifecycle integration', async (t) => {
     );
     const renamed = expectSuccess(renameResponse);
     assert.equal(renamed.title, 'Renamed used CV');
+    assert.equal(renamed.type, 'ONLINE');
     assert.equal(renamed.aggregateVersion, 2);
     assert.match(
       renameResponse.headers.get('cache-control') ?? '',

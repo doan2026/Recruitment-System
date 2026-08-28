@@ -25,12 +25,15 @@ import {
   AvatarProjectionMutation,
   ProfileService,
 } from './profile.service';
+import {
+  ACTIVE_CV_LIMIT,
+  RETAINED_CV_SNAPSHOT_LIMIT,
+} from './cv-limits';
 
-const CV_LIMIT = 5;
 const AVATAR_REFERENCE_TYPE = 'PROFILE_AVATAR';
 const CV_REFERENCE_TYPE = 'PROFILE_CV';
-const UPLOADED_MEDIA_BACKED_CV = {
-  type: CvType.UPLOAD,
+const MEDIA_BACKED_CV = {
+  type: { in: [CvType.UPLOAD, CvType.ONLINE] },
   fileUrl: null,
   mediaReferenceId: { not: null },
 } satisfies Prisma.CvWhereInput;
@@ -186,12 +189,23 @@ export class ProfileMediaService {
         const activeCount = await transaction.cv.count({
           where: { userId, isDeleted: false },
         });
-        if (activeCount >= CV_LIMIT) {
+        if (activeCount >= ACTIVE_CV_LIMIT) {
           throw new ApiException(
             'CV_LIMIT_REACHED',
-            `A candidate can keep at most ${CV_LIMIT} active CVs`,
+            `A candidate can keep at most ${ACTIVE_CV_LIMIT} active CVs`,
             HttpStatus.CONFLICT,
-            { limit: CV_LIMIT },
+            { limit: ACTIVE_CV_LIMIT },
+          );
+        }
+        const retainedCount = await transaction.cv.count({
+          where: { userId },
+        });
+        if (retainedCount >= RETAINED_CV_SNAPSHOT_LIMIT) {
+          throw new ApiException(
+            'CV_SNAPSHOT_LIMIT_REACHED',
+            `A candidate can retain at most ${RETAINED_CV_SNAPSHOT_LIMIT} CV snapshots`,
+            HttpStatus.CONFLICT,
+            { limit: RETAINED_CV_SNAPSHOT_LIMIT },
           );
         }
 
@@ -240,9 +254,7 @@ export class ProfileMediaService {
         transaction.cv.findMany({
           where: {
             userId,
-            type: CvType.UPLOAD,
-            fileUrl: null,
-            mediaReferenceId: { not: null },
+            ...MEDIA_BACKED_CV,
             isDeleted: false,
           },
           orderBy: [
@@ -527,9 +539,7 @@ export class ProfileMediaService {
       where: {
         id: cvId,
         userId,
-        type: CvType.UPLOAD,
-        fileUrl: null,
-        mediaReferenceId: { not: null },
+        ...MEDIA_BACKED_CV,
         isDeleted: false,
       },
     });
@@ -553,7 +563,7 @@ export class ProfileMediaService {
       where: {
         id: cvId,
         userId,
-        ...UPLOADED_MEDIA_BACKED_CV,
+        ...MEDIA_BACKED_CV,
         ...(includeDeleted ? {} : { isDeleted: false }),
       },
     });
@@ -711,13 +721,25 @@ export class ProfileMediaService {
   }
 
   private toCvResponse(cv: Cv): UploadedCvResponseDto {
+    if (!cv.revisionSeriesId || !cv.revisionNumber) {
+      throw new ApiException(
+        'CV_REVISION_STATE_INVALID',
+        'The CV revision lineage is inconsistent',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
     return {
       id: cv.id,
       userId: cv.userId,
       title: cv.title,
-      type: 'UPLOAD',
+      type: cv.type,
       fileId: cv.fileId,
       fileUrl: null,
+      templateId: cv.templateId,
+      contentSchemaVersion: cv.contentSchemaVersion,
+      revisionSeriesId: cv.revisionSeriesId,
+      revisionNumber: cv.revisionNumber,
+      previousRevisionId: cv.previousRevisionId,
       isDefault: cv.isDefault,
       aggregateVersion: cv.aggregateVersion,
       createdAt: cv.createdAt.toISOString(),
