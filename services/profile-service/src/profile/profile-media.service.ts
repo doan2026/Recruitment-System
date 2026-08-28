@@ -1,7 +1,6 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { Cv, CvType, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
-import { ApplicationCvUsageClient } from '../application/application-cv-usage.client';
 import { ApiException } from '../common/http/api-exception';
 import {
   BoundMediaReference,
@@ -29,6 +28,7 @@ import {
   ACTIVE_CV_LIMIT,
   RETAINED_CV_SNAPSHOT_LIMIT,
 } from './cv-limits';
+import { CvDeletionService } from './cv-deletion.service';
 
 const AVATAR_REFERENCE_TYPE = 'PROFILE_AVATAR';
 const CV_REFERENCE_TYPE = 'PROFILE_CV';
@@ -58,7 +58,7 @@ export class ProfileMediaService {
     private readonly prisma: PrismaService,
     private readonly profiles: ProfileService,
     private readonly media: ProfileMediaClient,
-    private readonly applicationUsages: ApplicationCvUsageClient,
+    private readonly deletions: CvDeletionService,
   ) {}
 
   async attachAvatar(
@@ -149,6 +149,7 @@ export class ProfileMediaService {
       userId,
       ProfileMediaType.CV,
     );
+    await this.assertCvFileNotRetired(this.prisma, dto.fileId);
     const cvId = randomUUID();
     const reference = await this.media.bindUserFile(
       dto.fileId,
@@ -162,6 +163,10 @@ export class ProfileMediaService {
     try {
       mutation = await this.profiles.runMutation(async (transaction) => {
         const locked = await this.lockProfile(transaction, userId);
+        await this.assertCvFileNotRetired(
+          transaction,
+          dto.fileId,
+        );
         const existing = await transaction.cv.findUnique({
           where: { fileId: dto.fileId },
         });
@@ -372,90 +377,16 @@ export class ProfileMediaService {
     });
   }
 
-  async softDeleteUploadedCv(
+  async deleteUploadedCv(
     userIdInput: string,
     cvIdInput: string,
     expectedAggregateVersion: number,
   ): Promise<DeletedCvResponseDto> {
-    const userId = this.canonicalUuid(userIdInput);
-    const cvId = this.canonicalUuid(cvIdInput);
-    const snapshot = await this.findLifecycleCv(
-      this.prisma,
-      userId,
-      cvId,
-      true,
-    );
-    if (snapshot.isDeleted) {
-      return this.toDeletedCvResponse(snapshot, null);
-    }
-    this.assertExpectedCvVersion(
-      snapshot,
+    return this.deletions.deleteCv(
+      userIdInput,
+      cvIdInput,
       expectedAggregateVersion,
     );
-
-    const usage = await this.applicationUsages.lookup(userId, cvId);
-    const authoritativeFirstUsedAt = this.validateUsageTimeline(
-      snapshot,
-      usage.used,
-      usage.firstUsedAt,
-    );
-
-    return this.profiles.runMutation(async (transaction) => {
-      const profileId = await this.lockExistingProfile(
-        transaction,
-        userId,
-      );
-      const current = await this.findLifecycleCv(
-        transaction,
-        userId,
-        cvId,
-        true,
-      );
-      if (current.isDeleted) {
-        return this.toDeletedCvResponse(current, null);
-      }
-      this.assertExpectedCvVersion(current, expectedAggregateVersion);
-
-      const replacement = current.isDefault
-        ? await transaction.cv.findFirst({
-            where: {
-              userId,
-              isDeleted: false,
-              id: { not: current.id },
-            },
-            orderBy: [
-              { createdAt: 'desc' },
-              { id: 'asc' },
-            ],
-          })
-        : null;
-      const deleted = await transaction.cv.update({
-        where: { id: current.id },
-        data: {
-          isDefault: false,
-          isDeleted: true,
-          deletedAt: new Date(),
-          firstUsedAt:
-            current.firstUsedAt ?? authoritativeFirstUsedAt,
-          aggregateVersion: { increment: 1 },
-        },
-      });
-      if (replacement) {
-        await transaction.cv.update({
-          where: { id: replacement.id },
-          data: {
-            isDefault: true,
-            aggregateVersion: { increment: 1 },
-          },
-        });
-      }
-      await this.bumpProfileVersion(transaction, profileId);
-      await this.assertCvDefaultInvariant(transaction);
-      return this.toDeletedCvResponse(
-        deleted,
-        replacement?.id ?? null,
-      );
-    });
   }
 
   private async lockProfile(
@@ -534,6 +465,25 @@ export class ProfileMediaService {
     });
   }
 
+  private async assertCvFileNotRetired(
+    client:
+      | Pick<PrismaService, 'cvDeletionWorkflow'>
+      | Transaction,
+    fileId: string,
+  ): Promise<void> {
+    const retired = await client.cvDeletionWorkflow.findUnique({
+      where: { fileId },
+      select: { cvId: true },
+    });
+    if (retired) {
+      throw new ApiException(
+        'CV_FILE_RETIRED',
+        'A file from a hard-deletion workflow cannot be registered again',
+        HttpStatus.CONFLICT,
+      );
+    }
+  }
+
   private async findOwnedCv(userId: string, cvId: string): Promise<Cv> {
     const cv = await this.prisma.cv.findFirst({
       where: {
@@ -588,40 +538,6 @@ export class ProfileMediaService {
         },
       );
     }
-  }
-
-  private validateUsageTimeline(
-    cv: Cv,
-    used: boolean,
-    firstUsedAtValue: string | null,
-  ): Date | null {
-    if (!used) {
-      if (firstUsedAtValue !== null || cv.firstUsedAt !== null) {
-        throw this.invalidApplicationUsage();
-      }
-      return null;
-    }
-    if (firstUsedAtValue === null) {
-      throw this.invalidApplicationUsage();
-    }
-    const firstUsedAt = new Date(firstUsedAtValue);
-    if (
-      Number.isNaN(firstUsedAt.getTime()) ||
-      firstUsedAt.getTime() < cv.createdAt.getTime() ||
-      (cv.firstUsedAt !== null &&
-        cv.firstUsedAt.getTime() !== firstUsedAt.getTime())
-    ) {
-      throw this.invalidApplicationUsage();
-    }
-    return firstUsedAt;
-  }
-
-  private invalidApplicationUsage(): ApiException {
-    return new ApiException(
-      'APPLICATION_CV_USAGE_INVALID',
-      'Application Service returned inconsistent CV usage data',
-      HttpStatus.SERVICE_UNAVAILABLE,
-    );
   }
 
   private cvNotFound(): ApiException {
@@ -753,28 +669,6 @@ export class ProfileMediaService {
     return {
       url: download.url,
       expiresAt: download.expiresAt,
-    };
-  }
-
-  private toDeletedCvResponse(
-    cv: Cv,
-    replacementDefaultCvId: string | null,
-  ): DeletedCvResponseDto {
-    if (!cv.isDeleted || cv.deletedAt === null) {
-      throw new ApiException(
-        'CV_STATE_INVALID',
-        'The CV deletion state is inconsistent',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-    return {
-      id: cv.id,
-      userId: cv.userId,
-      deletionMode: 'SOFT',
-      isDeleted: true,
-      deletedAt: cv.deletedAt.toISOString(),
-      replacementDefaultCvId,
-      aggregateVersion: cv.aggregateVersion,
     };
   }
 

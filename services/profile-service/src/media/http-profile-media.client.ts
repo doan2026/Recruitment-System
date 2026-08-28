@@ -137,6 +137,26 @@ export class HttpProfileMediaClient extends ProfileMediaClient {
     }
   }
 
+  async deleteUserFile(
+    fileId: string,
+    userId: string,
+    type: ProfileMediaType,
+  ): Promise<void> {
+    this.assertExpectation(fileId, userId, type);
+    const expectedFileId = fileId.toLowerCase();
+    const expectedUserId = userId.toLowerCase();
+    const data = await this.request(
+      'DELETE',
+      '/internal/files/' + encodeURIComponent(expectedFileId),
+    );
+    this.parseDeletedFile(
+      data,
+      expectedFileId,
+      expectedUserId,
+      type,
+    );
+  }
+
   async createUserDownloadUrl(
     fileId: string,
     userId: string,
@@ -331,6 +351,47 @@ export class HttpProfileMediaClient extends ProfileMediaClient {
       throw this.badResponse();
     }
     return data as unknown as UserFileReference;
+  }
+
+  private parseDeletedFile(
+    data: JsonRecord,
+    expectedFileId: string,
+    expectedUserId: string,
+    expectedType: ProfileMediaType,
+  ): void {
+    if (
+      !this.hasExactKeys(data, METADATA_KEYS) ||
+      data.id !== expectedFileId ||
+      data.ownerType !== 'USER' ||
+      data.ownerId !== expectedUserId ||
+      data.type !== expectedType ||
+      data.status !== 'DELETED' ||
+      typeof data.originalFilename !== 'string' ||
+      data.originalFilename.length === 0 ||
+      !this.isNullableNonEmptyString(data.mimeType) ||
+      !this.isNullableNonEmptyString(data.format) ||
+      !this.isNullableNonNegativeInteger(data.bytes) ||
+      !Number.isInteger(data.aggregateVersion) ||
+      (data.aggregateVersion as number) < 1 ||
+      !this.isDateTime(data.createdAt) ||
+      !this.isDateTime(data.updatedAt) ||
+      Date.parse(data.updatedAt as string) <
+        Date.parse(data.createdAt as string)
+    ) {
+      throw this.badResponse();
+    }
+    if (
+      expectedType === ProfileMediaType.CV &&
+      (data.privateDelivery !== true || data.url !== null)
+    ) {
+      throw this.badResponse();
+    }
+    if (
+      expectedType === ProfileMediaType.AVATAR &&
+      data.privateDelivery !== false
+    ) {
+      throw this.badResponse();
+    }
   }
 
   private assertExpectation(

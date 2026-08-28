@@ -13,6 +13,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class CvUsageLookupService {
+    private static final long MAX_SAFE_JSON_INTEGER =
+        9_007_199_254_740_991L;
+
     private final JdbcTemplate jdbc;
 
     public CvUsageLookupService(JdbcTemplate jdbc) {
@@ -59,7 +62,11 @@ public class CvUsageLookupService {
                 HttpStatus.CONFLICT
             );
         }
-        if (usage.firstUsedAt() == null || usage.applicationCount() < 1) {
+        if (
+            usage.firstUsedAt() == null ||
+            usage.applicationCount() < 1 ||
+            usage.applicationCount() > MAX_SAFE_JSON_INTEGER
+        ) {
             throw new BusinessException(
                 "CV_USAGE_INVALID_STATE",
                 "CV usage state is invalid",

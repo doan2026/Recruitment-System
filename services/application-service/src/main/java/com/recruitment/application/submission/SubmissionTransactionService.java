@@ -37,6 +37,7 @@ public class SubmissionTransactionService {
         );
     private static final Duration REJECTION_COOLDOWN = Duration.ofDays(30);
 
+    private final CvSubmissionGateService cvSubmissionGate;
     private final ApplicationRepository applications;
     private final ApplicationHistoryRepository history;
     private final ApplicationEventOutboxRepository outbox;
@@ -45,6 +46,7 @@ public class SubmissionTransactionService {
     private final String topic;
 
     public SubmissionTransactionService(
+        CvSubmissionGateService cvSubmissionGate,
         ApplicationRepository applications,
         ApplicationHistoryRepository history,
         ApplicationEventOutboxRepository outbox,
@@ -52,6 +54,7 @@ public class SubmissionTransactionService {
         @Value("${application-events.topic}") String topic
     ) {
         this(
+            cvSubmissionGate,
             applications,
             history,
             outbox,
@@ -62,6 +65,7 @@ public class SubmissionTransactionService {
     }
 
     SubmissionTransactionService(
+        CvSubmissionGateService cvSubmissionGate,
         ApplicationRepository applications,
         ApplicationHistoryRepository history,
         ApplicationEventOutboxRepository outbox,
@@ -69,6 +73,7 @@ public class SubmissionTransactionService {
         Clock clock,
         String topic
     ) {
+        this.cvSubmissionGate = cvSubmissionGate;
         this.applications = applications;
         this.history = history;
         this.outbox = outbox;
@@ -83,6 +88,7 @@ public class SubmissionTransactionService {
         CreateApplicationRequest request,
         JobAvailability job
     ) {
+        cvSubmissionGate.lockForSubmission(candidateId, request.cvId());
         rejectDuplicateOrCooldown(candidateId, request.jobId());
         Instant now = clock.instant();
         UUID applicationId = UUID.randomUUID();

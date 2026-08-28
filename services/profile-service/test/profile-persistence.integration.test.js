@@ -268,7 +268,7 @@ test('Profile persistence constraints on PostgreSQL 16', async (t) => {
     });
     await assert.rejects(
       () => prisma.cv.delete({ where: { id: unused.id } }),
-      /hard delete is disabled/i,
+      /hard delete requires an authoritative CV deletion fence/i,
     );
     await assert.rejects(() =>
       prisma.cv.update({

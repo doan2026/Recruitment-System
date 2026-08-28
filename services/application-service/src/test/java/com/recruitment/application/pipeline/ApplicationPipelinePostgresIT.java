@@ -148,6 +148,7 @@ class ApplicationPipelinePostgresIT {
                 application.application_history,
                 application.bookmarks,
                 application.application_cv_usage,
+                application.cv_submission_gates,
                 application.applications
             CASCADE
             """
@@ -198,7 +199,8 @@ class ApplicationPipelinePostgresIT {
             String.class
         );
 
-        assertThat(appliedVersions).containsExactly("1", "2", "3", "4", "5", "6");
+        assertThat(appliedVersions)
+            .containsExactly("1", "2", "3", "4", "5", "6", "7");
         assertThat(tables).contains(
             "applications",
             "application_history",
@@ -206,7 +208,8 @@ class ApplicationPipelinePostgresIT {
             "bookmarks",
             "evaluations",
             "offers",
-            "application_cv_usage"
+            "application_cv_usage",
+            "cv_submission_gates"
         );
     }
 

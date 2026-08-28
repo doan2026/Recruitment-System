@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { ApiException } from '../common/http/api-exception';
 import {
+  ApplicationCvDeletionFence,
   ApplicationCvUsage,
   ApplicationCvUsageClient,
 } from './application-cv-usage.client';
@@ -13,6 +14,8 @@ const MAX_REQUEST_TIMEOUT_MS = 10_000;
 const MAX_JSON_RESPONSE_BYTES = 16 * 1024;
 const PROFILE_SERVICE_NAME = 'profile-service';
 const LOOKUP_PATH = '/internal/v1/cv-usages/lookup';
+const ACQUIRE_DELETION_FENCE_PATH =
+  '/internal/v1/cv-deletion-fences/acquire';
 
 const UUID_V4_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -25,6 +28,15 @@ const USAGE_KEYS = [
   'cvId',
   'firstUsedAt',
   'used',
+] as const;
+const DELETION_FENCE_KEYS = [
+  'applicationCount',
+  'candidateId',
+  'cvId',
+  'deletionRequestId',
+  'disposition',
+  'fencedAt',
+  'firstUsedAt',
 ] as const;
 
 type JsonRecord = Record<string, unknown>;
@@ -105,6 +117,72 @@ export class HttpApplicationCvUsageClient
     );
   }
 
+  async acquireDeletionFence(
+    candidateId: string,
+    cvId: string,
+    deletionRequestId: string,
+  ): Promise<ApplicationCvDeletionFence> {
+    if (
+      !UUID_V4_PATTERN.test(candidateId) ||
+      !UUID_V4_PATTERN.test(cvId) ||
+      !UUID_V4_PATTERN.test(deletionRequestId)
+    ) {
+      throw this.invalidRequest();
+    }
+    const expectedCandidateId = candidateId.toLowerCase();
+    const expectedCvId = cvId.toLowerCase();
+    const expectedDeletionRequestId =
+      deletionRequestId.toLowerCase();
+
+    let response: Response;
+    try {
+      response = await fetch(
+        this.baseUrl + ACQUIRE_DELETION_FENCE_PATH,
+        {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-Internal-Api-Key': this.internalApiKey,
+            'X-Internal-Service': PROFILE_SERVICE_NAME,
+          },
+          body: JSON.stringify({
+            candidateId: expectedCandidateId,
+            cvId: expectedCvId,
+            deletionRequestId: expectedDeletionRequestId,
+          }),
+          redirect: 'error',
+          signal: AbortSignal.timeout(this.requestTimeoutMs),
+        },
+      );
+    } catch {
+      throw this.unavailable();
+    }
+
+    if (response.status !== HttpStatus.OK) {
+      void response.body?.cancel().catch(() => undefined);
+      if (response.ok) {
+        throw this.badResponse();
+      }
+      throw this.mapDeletionFenceUpstreamStatus(response.status);
+    }
+
+    const envelope = await this.readJson(response);
+    if (
+      !this.hasExactKeys(envelope, ENVELOPE_KEYS) ||
+      !this.isRecord(envelope.data) ||
+      envelope.meta !== null
+    ) {
+      throw this.badResponse();
+    }
+    return this.parseDeletionFence(
+      envelope.data,
+      expectedCandidateId,
+      expectedCvId,
+      expectedDeletionRequestId,
+    );
+  }
+
   private parseUsage(
     value: JsonRecord,
     expectedCandidateId: string,
@@ -136,6 +214,43 @@ export class HttpApplicationCvUsageClient
     }
 
     return value as unknown as ApplicationCvUsage;
+  }
+
+  private parseDeletionFence(
+    value: JsonRecord,
+    expectedCandidateId: string,
+    expectedCvId: string,
+    expectedDeletionRequestId: string,
+  ): ApplicationCvDeletionFence {
+    if (
+      !this.hasExactKeys(value, DELETION_FENCE_KEYS) ||
+      value.candidateId !== expectedCandidateId ||
+      value.cvId !== expectedCvId ||
+      value.deletionRequestId !== expectedDeletionRequestId ||
+      (value.disposition !== 'FENCED' &&
+        value.disposition !== 'USED') ||
+      !Number.isSafeInteger(value.applicationCount)
+    ) {
+      throw this.badResponse();
+    }
+
+    if (value.disposition === 'FENCED') {
+      if (
+        value.applicationCount !== 0 ||
+        !this.isDateTime(value.fencedAt) ||
+        value.firstUsedAt !== null
+      ) {
+        throw this.badResponse();
+      }
+    } else if (
+      (value.applicationCount as number) < 1 ||
+      value.fencedAt !== null ||
+      !this.isDateTime(value.firstUsedAt)
+    ) {
+      throw this.badResponse();
+    }
+
+    return value as unknown as ApplicationCvDeletionFence;
   }
 
   private async readJson(response: Response): Promise<JsonRecord> {
@@ -298,6 +413,13 @@ export class HttpApplicationCvUsageClient
       );
     }
     return this.unavailable();
+  }
+
+  private mapDeletionFenceUpstreamStatus(status: number): ApiException {
+    if (status === HttpStatus.NOT_FOUND) {
+      return this.unavailable();
+    }
+    return this.mapUpstreamStatus(status);
   }
 
   private hasExactKeys(

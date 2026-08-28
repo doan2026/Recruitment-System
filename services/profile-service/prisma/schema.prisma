@@ -14,31 +14,50 @@ enum CvType {
   @@map("cv_type")
 }
 
+enum CvDeletionState {
+  PENDING_FENCE
+  SOFT_RETAINED
+  HARD_DELETE_AUTHORIZED
+  HARD_DELETED
+
+  @@map("cv_deletion_state")
+}
+
+enum CvMediaCleanupStatus {
+  PENDING
+  RUNNING
+  RETRY
+  SUCCEEDED
+
+  @@map("cv_media_cleanup_status")
+}
+
 model Profile {
-  id                     String        @id @default(uuid()) @db.Uuid
-  userId                 String        @unique(map: "profiles_user_id_key") @map("user_id") @db.Uuid
-  fullName               String?       @map("full_name") @db.VarChar(160)
-  headline               String?       @db.VarChar(200)
+  id                     String               @id @default(uuid()) @db.Uuid
+  userId                 String               @unique(map: "profiles_user_id_key") @map("user_id") @db.Uuid
+  fullName               String?              @map("full_name") @db.VarChar(160)
+  headline               String?              @db.VarChar(200)
   summary                String?
-  phone                  String?       @db.VarChar(32)
-  address                String?       @db.VarChar(500)
-  avatarFileId           String?       @map("avatar_file_id") @db.Uuid
-  avatarUrl              String?       @map("avatar_url") @db.VarChar(2048)
-  avatarMediaReferenceId String?       @unique(map: "profiles_avatar_media_reference_id_key") @map("avatar_media_reference_id") @db.Uuid
-  githubUrl              String?       @map("github_url") @db.VarChar(2048)
-  linkedinUrl            String?       @map("linkedin_url") @db.VarChar(2048)
-  portfolioUrl           String?       @map("portfolio_url") @db.VarChar(2048)
-  completionRuleVersion  Int           @default(1) @map("completion_rule_version")
-  completionPercent      Int           @default(0) @map("completion_percent")
-  aggregateVersion       Int           @default(1) @map("aggregate_version")
-  createdAt              DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt              DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  phone                  String?              @db.VarChar(32)
+  address                String?              @db.VarChar(500)
+  avatarFileId           String?              @map("avatar_file_id") @db.Uuid
+  avatarUrl              String?              @map("avatar_url") @db.VarChar(2048)
+  avatarMediaReferenceId String?              @unique(map: "profiles_avatar_media_reference_id_key") @map("avatar_media_reference_id") @db.Uuid
+  githubUrl              String?              @map("github_url") @db.VarChar(2048)
+  linkedinUrl            String?              @map("linkedin_url") @db.VarChar(2048)
+  portfolioUrl           String?              @map("portfolio_url") @db.VarChar(2048)
+  completionRuleVersion  Int                  @default(1) @map("completion_rule_version")
+  completionPercent      Int                  @default(0) @map("completion_percent")
+  aggregateVersion       Int                  @default(1) @map("aggregate_version")
+  createdAt              DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
   educations             Education[]
   experiences            Experience[]
   skills                 Skill[]
   certificates           Certificate[]
   projects               Project[]
   cvs                    Cv[]
+  cvDeletions            CvDeletionWorkflow[]
 
   @@map("profiles")
 }
@@ -162,4 +181,58 @@ model Cv {
   @@index([userId, isDeleted, createdAt], map: "cvs_user_active_created_idx")
   @@index([userId, revisionSeriesId, revisionNumber], map: "cvs_user_revision_series_idx")
   @@map("cvs")
+}
+
+model CvDeletionWorkflow {
+  cvId                     String             @id @map("cv_id") @db.Uuid
+  userId                   String             @map("user_id") @db.Uuid
+  deletionRequestId        String             @unique(map: "cv_deletion_workflow_request_id_key") @map("deletion_request_id") @db.Uuid
+  expectedAggregateVersion Int                @map("expected_aggregate_version")
+  resultAggregateVersion   Int                @map("result_aggregate_version")
+  fileId                   String             @unique(map: "cv_deletion_workflow_file_id_key") @map("file_id") @db.Uuid
+  mediaReferenceId         String             @unique(map: "cv_deletion_workflow_media_reference_id_key") @map("media_reference_id") @db.Uuid
+  replacementDefaultCvId   String?            @map("replacement_default_cv_id") @db.Uuid
+  cvCreatedAt              DateTime           @map("cv_created_at") @db.Timestamptz(3)
+  deletedAt                DateTime           @map("deleted_at") @db.Timestamptz(3)
+  state                    CvDeletionState    @default(PENDING_FENCE)
+  fencedAt                 DateTime?          @map("fenced_at") @db.Timestamptz(3)
+  firstUsedAt              DateTime?          @map("first_used_at") @db.Timestamptz(3)
+  applicationCount         BigInt             @default(0) @map("application_count")
+  fenceAttemptCount        Int                @default(0) @map("fence_attempt_count")
+  fenceNextAttemptAt       DateTime           @default(now()) @map("fence_next_attempt_at") @db.Timestamptz(3)
+  fenceLeaseOwner          String?            @map("fence_lease_owner") @db.VarChar(64)
+  fenceLeaseFence          Int                @default(0) @map("fence_lease_fence")
+  fenceLeaseUntil          DateTime?          @map("fence_lease_until") @db.Timestamptz(3)
+  lastFenceErrorCode       String?            @map("last_fence_error_code") @db.VarChar(96)
+  createdAt                DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+  profile                  Profile            @relation(fields: [userId], references: [userId], onDelete: Restrict, onUpdate: Restrict)
+  cleanup                  CvMediaCleanupJob?
+
+  @@index([userId, state, createdAt], map: "cv_deletion_workflow_user_state_idx")
+  @@map("cv_deletion_workflow")
+}
+
+model CvMediaCleanupJob {
+  id                  String               @id @default(uuid()) @db.Uuid
+  cvId                String               @unique(map: "cv_media_cleanup_job_cv_id_key") @map("cv_id") @db.Uuid
+  userId              String               @map("user_id") @db.Uuid
+  fileId              String               @unique(map: "cv_media_cleanup_job_file_id_key") @map("file_id") @db.Uuid
+  mediaReferenceId    String               @unique(map: "cv_media_cleanup_job_reference_id_key") @map("media_reference_id") @db.Uuid
+  status              CvMediaCleanupStatus @default(PENDING)
+  attemptCount        Int                  @default(0) @map("attempt_count")
+  nextAttemptAt       DateTime             @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
+  leaseOwner          String?              @map("lease_owner") @db.VarChar(64)
+  leaseFence          Int                  @default(0) @map("lease_fence")
+  leaseUntil          DateTime?            @map("lease_until") @db.Timestamptz(3)
+  referenceReleasedAt DateTime?            @map("reference_released_at") @db.Timestamptz(3)
+  fileDeletedAt       DateTime?            @map("file_deleted_at") @db.Timestamptz(3)
+  lastErrorCode       String?              @map("last_error_code") @db.VarChar(96)
+  completedAt         DateTime?            @map("completed_at") @db.Timestamptz(3)
+  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletion            CvDeletionWorkflow   @relation(fields: [cvId], references: [cvId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([status, nextAttemptAt, leaseUntil, id], map: "cv_media_cleanup_job_due_idx")
+  @@map("cv_media_cleanup_job")
 }

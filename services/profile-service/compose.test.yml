@@ -27,6 +27,8 @@ services:
       INTERNAL_API_KEY_APPLICATION: profile-test-application-key-0000000000000
       MEDIA_REQUEST_TIMEOUT_MS: "300"
       APPLICATION_REQUEST_TIMEOUT_MS: "300"
+      CV_DELETION_RECONCILE_ENABLED: "false"
+      CV_MEDIA_CLEANUP_ENABLED: "false"
       TZ: Asia/Ho_Chi_Minh
     depends_on:
       postgres-test:

@@ -11,6 +11,8 @@ const { HttpApplicationCvUsageClient } = require(
 
 const CANDIDATE_ID = '11111111-1111-4111-8111-111111111111';
 const CV_ID = '22222222-2222-4222-8222-222222222222';
+const DELETION_REQUEST_ID =
+  '33333333-3333-4333-8333-333333333333';
 const INTERNAL_KEY = 'profile-application-test-key-000000000000';
 const BASE_CONFIG = {
   APPLICATION_INTERNAL_API_KEY: INTERNAL_KEY,
@@ -49,6 +51,28 @@ const usedUsage = (overrides = {}) => ({
   cvId: CV_ID,
   firstUsedAt: '2026-08-27T03:00:00.123456Z',
   used: true,
+  ...overrides,
+});
+
+const fencedDeletion = (overrides = {}) => ({
+  applicationCount: 0,
+  candidateId: CANDIDATE_ID,
+  cvId: CV_ID,
+  deletionRequestId: DELETION_REQUEST_ID,
+  disposition: 'FENCED',
+  fencedAt: '2026-08-27T03:00:00.123456Z',
+  firstUsedAt: null,
+  ...overrides,
+});
+
+const usedDeletion = (overrides = {}) => ({
+  applicationCount: 3,
+  candidateId: CANDIDATE_ID,
+  cvId: CV_ID,
+  deletionRequestId: DELETION_REQUEST_ID,
+  disposition: 'USED',
+  fencedAt: null,
+  firstUsedAt: '2026-08-27T03:00:00.123456Z',
   ...overrides,
 });
 
@@ -154,6 +178,136 @@ test('lookup sends exact identity, path, and canonical UUID body', async () => {
     () => client.lookup(CANDIDATE_ID.toUpperCase(), CV_ID.toUpperCase()),
   );
   assert.deepEqual(result, unusedUsage());
+});
+
+test('deletion fence sends the stable request identity and accepts the exact FENCED contract', async () => {
+  const client = new HttpApplicationCvUsageClient(createConfig());
+  const result = await withFetch(
+    async (url, options) => {
+      assert.equal(
+        url,
+        'https://application.internal.example/internal/v1/cv-deletion-fences/acquire',
+      );
+      assert.equal(options.method, 'POST');
+      assert.equal(options.redirect, 'error');
+      assert.deepEqual(options.headers, {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-Internal-Api-Key': INTERNAL_KEY,
+        'X-Internal-Service': 'profile-service',
+      });
+      assert.deepEqual(JSON.parse(options.body), {
+        candidateId: CANDIDATE_ID,
+        cvId: CV_ID,
+        deletionRequestId: DELETION_REQUEST_ID,
+      });
+      return envelopeResponse(fencedDeletion());
+    },
+    () =>
+      client.acquireDeletionFence(
+        CANDIDATE_ID.toUpperCase(),
+        CV_ID.toUpperCase(),
+        DELETION_REQUEST_ID.toUpperCase(),
+      ),
+  );
+  assert.deepEqual(result, fencedDeletion());
+});
+
+test('deletion fence validates UUIDv4 locally and fails closed on inconsistent decisions', async () => {
+  let called = false;
+  await withFetch(
+    async () => {
+      called = true;
+      return envelopeResponse(fencedDeletion());
+    },
+    () =>
+      assertApiError(
+        () =>
+          new HttpApplicationCvUsageClient(
+            createConfig(),
+          ).acquireDeletionFence(
+            CANDIDATE_ID,
+            CV_ID,
+            '33333333-3333-1333-8333-333333333333',
+          ),
+        422,
+        'APPLICATION_CV_USAGE_REQUEST_INVALID',
+      ),
+  );
+  assert.equal(called, false);
+
+  const invalidPayloads = [
+    fencedDeletion({ candidateId: CV_ID }),
+    fencedDeletion({ cvId: CANDIDATE_ID }),
+    fencedDeletion({ deletionRequestId: CANDIDATE_ID }),
+    fencedDeletion({ disposition: 'USED' }),
+    fencedDeletion({ applicationCount: 1 }),
+    fencedDeletion({ fencedAt: null }),
+    fencedDeletion({ firstUsedAt: '2026-08-27T03:00:00Z' }),
+    usedDeletion({ applicationCount: 0 }),
+    usedDeletion({ fencedAt: '2026-08-27T03:00:00Z' }),
+    usedDeletion({ firstUsedAt: null }),
+    { ...fencedDeletion(), unexpected: true },
+  ];
+  for (const payload of invalidPayloads) {
+    await withFetch(
+      async () => envelopeResponse(payload),
+      () =>
+        assertApiError(
+          () =>
+            new HttpApplicationCvUsageClient(
+              createConfig(),
+            ).acquireDeletionFence(
+              CANDIDATE_ID,
+              CV_ID,
+              DELETION_REQUEST_ID,
+            ),
+          503,
+          'APPLICATION_SERVICE_BAD_RESPONSE',
+        ),
+    );
+  }
+});
+
+test('deletion fence accepts only HTTP 200 and treats a missing endpoint as unavailable', async () => {
+  for (const status of [201, 204]) {
+    await withFetch(
+      async () =>
+        status === 204
+          ? new Response(null, { status })
+          : envelopeResponse(fencedDeletion(), { status }),
+      () =>
+        assertApiError(
+          () =>
+            new HttpApplicationCvUsageClient(
+              createConfig(),
+            ).acquireDeletionFence(
+              CANDIDATE_ID,
+              CV_ID,
+              DELETION_REQUEST_ID,
+            ),
+          503,
+          'APPLICATION_SERVICE_BAD_RESPONSE',
+        ),
+    );
+  }
+
+  await withFetch(
+    async () => new Response(null, { status: 404 }),
+    () =>
+      assertApiError(
+        () =>
+          new HttpApplicationCvUsageClient(
+            createConfig(),
+          ).acquireDeletionFence(
+            CANDIDATE_ID,
+            CV_ID,
+            DELETION_REQUEST_ID,
+          ),
+        503,
+        'APPLICATION_SERVICE_UNAVAILABLE',
+      ),
+  );
 });
 
 test('lookup validates UUIDv4 before any network call', async () => {

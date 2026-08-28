@@ -123,6 +123,16 @@ const validUsage = (candidateId, cvId, overrides = {}) => ({
   ...overrides,
 });
 
+const fenceDecision = (body, usage) => ({
+  candidateId: body.candidateId,
+  cvId: body.cvId,
+  deletionRequestId: body.deletionRequestId,
+  disposition: usage.used ? 'USED' : 'FENCED',
+  fencedAt: usage.used ? null : new Date().toISOString(),
+  firstUsedAt: usage.firstUsedAt,
+  applicationCount: usage.applicationCount,
+});
+
 const handleUsageRequest = async (request, response) => {
   const body = await readBody(request);
   usageRequests.push({
@@ -140,7 +150,7 @@ const handleUsageRequest = async (request, response) => {
   }
   if (
     request.method !== 'POST' ||
-    request.url !== '/internal/v1/cv-usages/lookup'
+    request.url !== '/internal/v1/cv-deletion-fences/acquire'
   ) {
     return json(response, 404, { code: 'NOT_FOUND' });
   }
@@ -153,8 +163,10 @@ const handleUsageRequest = async (request, response) => {
     return json(response, 200, state.payload);
   }
   return json(response, 200, {
-    data:
+    data: fenceDecision(
+      body,
       state?.usage ?? validUsage(body.candidateId, body.cvId),
+    ),
     meta: null,
   });
 };
@@ -294,10 +306,18 @@ before(async () => {
     }),
   });
   usageStates.set(CV_C1, {
-    usage: validUsage(CANDIDATE_C, CV_C1),
+    usage: validUsage(CANDIDATE_C, CV_C1, {
+      used: true,
+      firstUsedAt: '2026-08-27T05:00:00.000Z',
+      applicationCount: 1,
+    }),
   });
   usageStates.set(CV_C2, {
-    usage: validUsage(CANDIDATE_C, CV_C2),
+    usage: validUsage(CANDIDATE_C, CV_C2, {
+      used: true,
+      firstUsedAt: '2026-08-27T05:00:00.000Z',
+      applicationCount: 1,
+    }),
   });
   usageStates.set(CV_D1, { status: 503 });
   usageStates.set(CV_D2, {
@@ -547,7 +567,10 @@ test('Profile CV lifecycle integration', async (t) => {
     const usageCall = usageRequests.at(callsBefore);
     assert.equal(usageRequests.length, callsBefore + 1);
     assert.equal(usageCall.method, 'POST');
-    assert.equal(usageCall.url, '/internal/v1/cv-usages/lookup');
+    assert.equal(
+      usageCall.url,
+      '/internal/v1/cv-deletion-fences/acquire',
+    );
     assert.equal(
       usageCall.headers['x-internal-api-key'],
       APPLICATION_OUTBOUND_KEY,
@@ -556,10 +579,12 @@ test('Profile CV lifecycle integration', async (t) => {
       usageCall.headers['x-internal-service'],
       'profile-service',
     );
-    assert.deepEqual(usageCall.body, {
-      candidateId: CANDIDATE_B,
-      cvId: CV_B1,
-    });
+    assert.equal(usageCall.body.candidateId, CANDIDATE_B);
+    assert.equal(usageCall.body.cvId, CV_B1);
+    assert.match(
+      usageCall.body.deletionRequestId,
+      /^[0-9a-f-]{36}$/,
+    );
 
     const row = await prisma.cv.findUniqueOrThrow({ where: { id: CV_B1 } });
     assert.equal(row.isDeleted, true);
@@ -673,7 +698,7 @@ test('Profile CV lifecycle integration', async (t) => {
     );
   });
 
-  await t.test('stale or foreign deletes avoid usage lookup and upstream failures never mutate', async () => {
+  await t.test('stale or foreign deletes avoid the fence while upstream failures retain durable local premarks', async () => {
     const profileBefore = await prisma.profile.findUniqueOrThrow({
       where: { userId: CANDIDATE_D },
     });
@@ -696,41 +721,59 @@ test('Profile CV lifecycle integration', async (t) => {
     const outage = await api('DELETE', `/cvs/${CV_D1}`, tokenD, {
       expectedAggregateVersion: 1,
     });
-    assert.equal(outage.status, 503);
-    assert.equal(outage.body.code, 'APPLICATION_SERVICE_UNAVAILABLE');
+    assert.equal(outage.status, 202);
+    assert.equal(outage.body.data.deletionMode, 'PENDING');
+    assert.equal(outage.body.data.cleanupPending, false);
 
     const invalid = await api('DELETE', `/cvs/${CV_D2}`, tokenD, {
       expectedAggregateVersion: 1,
     });
-    assert.equal(invalid.status, 503);
-    assert.equal(invalid.body.code, 'APPLICATION_SERVICE_BAD_RESPONSE');
+    assert.equal(invalid.status, 202);
+    assert.equal(invalid.body.data.deletionMode, 'PENDING');
+    assert.equal(invalid.body.data.cleanupPending, false);
 
     const invalidTimeline = await api(
       'DELETE',
       `/cvs/${CV_D3}`,
       tokenD,
-      { expectedAggregateVersion: 1 },
+      { expectedAggregateVersion: 2 },
     );
-    assert.equal(invalidTimeline.status, 503);
-    assert.equal(
-      invalidTimeline.body.code,
-      'APPLICATION_CV_USAGE_INVALID',
-    );
+    assert.equal(invalidTimeline.status, 202);
+    assert.equal(invalidTimeline.body.data.deletionMode, 'PENDING');
+    assert.equal(invalidTimeline.body.data.cleanupPending, false);
 
     const rows = await prisma.cv.findMany({
       where: { userId: CANDIDATE_D },
     });
-    assert.equal(rows.every((cv) => !cv.isDeleted), true);
-    assert.equal(rows.every((cv) => cv.aggregateVersion === 1), true);
+    assert.equal(rows.every((cv) => cv.isDeleted), true);
+    assert.deepEqual(
+      rows
+        .map((cv) => [cv.id, cv.aggregateVersion])
+        .sort(([left], [right]) => left.localeCompare(right)),
+      [
+        [CV_D1, 2],
+        [CV_D2, 2],
+        [CV_D3, 3],
+      ],
+    );
     assert.equal(rows.every((cv) => cv.firstUsedAt === null), true);
-    assert.equal(rows.filter((cv) => cv.isDefault).length, 1);
+    assert.equal(rows.filter((cv) => cv.isDefault).length, 0);
+    assert.equal(
+      await prisma.cvDeletionWorkflow.count({
+        where: {
+          userId: CANDIDATE_D,
+          state: 'PENDING_FENCE',
+        },
+      }),
+      3,
+    );
     assert.equal(
       (
         await prisma.profile.findUniqueOrThrow({
           where: { userId: CANDIDATE_D },
         })
       ).aggregateVersion,
-      profileBefore.aggregateVersion,
+      profileBefore.aggregateVersion + 3,
     );
   });
 
@@ -767,7 +810,10 @@ test('Profile CV lifecycle integration', async (t) => {
         WHERE "id" = ${CV_E2}::uuid
       `,
       (error) => {
-        assert.match(databaseErrorText(error), /hard delete is disabled/i);
+        assert.match(
+          databaseErrorText(error),
+          /hard delete requires an authoritative CV deletion fence/i,
+        );
         return true;
       },
     );

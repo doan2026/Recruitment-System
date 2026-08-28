@@ -119,6 +119,7 @@ class ApplicationEvaluationPostgresIT {
                 application.application_history,
                 application.bookmarks,
                 application.application_cv_usage,
+                application.cv_submission_gates,
                 application.applications
             CASCADE
             """
@@ -177,7 +178,8 @@ class ApplicationEvaluationPostgresIT {
             String.class
         );
 
-        assertThat(appliedVersions).containsExactly("1", "2", "3", "4", "5", "6");
+        assertThat(appliedVersions)
+            .containsExactly("1", "2", "3", "4", "5", "6", "7");
         assertThat(criteriaType).isEqualTo("jsonb");
         assertThat(tables).contains("evaluations", "offers");
     }

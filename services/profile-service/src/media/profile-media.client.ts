@@ -71,6 +71,12 @@ export abstract class ProfileMediaClient {
 
   abstract releaseReference(referenceId: string): Promise<void>;
 
+  abstract deleteUserFile(
+    fileId: string,
+    userId: string,
+    type: ProfileMediaType,
+  ): Promise<void>;
+
   abstract createUserDownloadUrl(
     fileId: string,
     userId: string,

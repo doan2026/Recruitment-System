@@ -84,11 +84,37 @@ Profile can query that authority through the Swagger-hidden
 `{candidateId, cvId}` and the response is
 `{candidateId, cvId, used, firstUsedAt, applicationCount}`; the internal
 response is also `no-store`. A mismatched Candidate for an already-used
-`cvId` fails closed. Profile's local `firstUsedAt` mirror is not synchronized
-yet. A `used=false` lookup is not sufficient to authorize hard delete because
-a concurrent submission can win between lookup and delete; Profile keeps hard
-delete disabled until a future deletion fence/reservation closes that TOCTOU
-window.
+`cvId` fails closed. This lookup remains backward compatible for soft-delete
+and first-use mirroring, but a `used=false` result alone never authorizes hard
+delete.
+
+Flyway V7 closes that lookup-to-delete race with a permanent Application-owned
+submission gate. Every Application insert creates and locks the gate before
+the V6 usage trigger runs; the Java submission transaction takes the same lock
+to return the existing generic `CV_NOT_AVAILABLE` contract, while a database
+`BEFORE INSERT` trigger protects rolling deployments and direct SQL. Gate rows
+are owner-bound, cannot be removed or reopened, and can move only once from
+`OPEN` to `DELETE_FENCED`. V7 also makes both gate and usage triggers resolve
+`TG_TABLE_SCHEMA`, so isolated Flyway schemas cannot write into the deployed
+`application` schema.
+
+Profile acquires the irreversible decision through the Swagger-hidden
+`POST /internal/v1/cv-deletion-fences/acquire`, using the same dedicated
+Profile-to-Application identity. The strict request is
+`{candidateId, cvId, deletionRequestId}` with UUIDv4 values. The exact request
+is idempotent and returns one of two no-store responses:
+
+- `FENCED`: `fencedAt` is present, `firstUsedAt` is null and
+  `applicationCount` is zero. No Application for that `cvId` can commit after
+  this response, so Profile may continue its durable local deletion saga.
+- `USED`: `fencedAt` is null, authoritative `firstUsedAt` is present and
+  `applicationCount` is positive. Profile must retain the immutable snapshot.
+
+A different request for an already-fenced CV, owner mismatch, malformed
+response state, unsafe JSON integer count, timeout, or authentication failure
+all fail closed. The fence intentionally has no lease, expiry, cancel, or
+reopen endpoint: an expiring reservation could lapse between the remote ACK
+and Profile's delete commit and recreate the original race.
 
 Recruiter Dashboard is available through
 `GET /applications/stats?company_id=<uuid>`. The requested company must match
@@ -245,9 +271,11 @@ Submission performs these checks in order:
 2. Verify the selected CV through Profile's
    `POST /internal/v1/cvs/verify`, using the Application service key plus the
    forwarded Candidate bearer JWT and validating the exact echoed owner/CV.
-3. Reject an existing active application.
-4. Enforce a 30-day cooldown after the latest `REJECTED` application.
-5. Store `Application(APPLIED)`, initial `ApplicationHistory`, the V6 CV-usage
+3. Lock the V7 Application-owned CV submission gate in the database
+   transaction and reject a permanent deletion fence.
+4. Reject an existing active application.
+5. Enforce a 30-day cooldown after the latest `REJECTED` application.
+6. Store `Application(APPLIED)`, initial `ApplicationHistory`, the V6 CV-usage
    ledger update, and a Kafka outbox row in one database transaction.
 
 The database also has a partial unique index for active candidate/job pairs,
@@ -293,8 +321,11 @@ dual-auth submission verification, strict Profile-response validation,
 Company-first recruiter authorization, minimal/no-store public DTOs, internal
 key hardening, V6 backfill/trigger/rollback/immutability, cross-Candidate
 rejection, usage retention after Application deletion, and usage lookup. The
-verified Application Service suite passes 212 unit tests and 43
-PostgreSQL/Kafka integration tests.
+V7 coverage includes isolated-schema writes, permanent/idempotent fences,
+owner/request conflicts, rollback, database immutability, unsafe JSON counts,
+and both deterministic submit-versus-fence lock schedules. The verified
+Application Service suite passes 219 unit tests and 50 PostgreSQL/Kafka
+integration tests.
 
 In Root Compose, use two distinct keys: `PROFILE_INTERNAL_API_KEY_APPLICATION`
 maps to Application's `PROFILE_INTERNAL_API_KEY` and Profile's

@@ -9,8 +9,10 @@ import {
   Patch,
   Post,
   Put,
+  Res,
 } from '@nestjs/common';
 import {
+  ApiAcceptedResponse,
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiConflictResponse,
@@ -28,6 +30,7 @@ import {
   ApiUnprocessableEntityResponse,
   getSchemaPath,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { AuthUser } from '../common/auth/auth-user.interface';
 import { CurrentUser, Roles } from '../common/auth/auth.decorators';
 import { SystemRole } from '../common/auth/system-role.enum';
@@ -161,22 +164,26 @@ export class ProfileMediaController {
 
   @Delete(['cvs/:id', 'cv/:id'])
   @ApiOperation({
-    summary: 'Soft-delete one of my CVs',
+    summary: 'Delete one of my CVs',
     description:
-      'The CV record and its private Media reference are retained so historical applications remain resolvable.',
+      'Application-used CVs are retained as soft-deleted snapshots. Never-used CVs are hard-deleted only after an authoritative Application deletion fence; Media cleanup may complete asynchronously.',
   })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiOkResponse({ schema: envelope(DeletedCvResponseDto) })
-  deleteCv(
+  @ApiAcceptedResponse({ schema: envelope(DeletedCvResponseDto) })
+  async deleteCv(
     @CurrentUser() user: AuthUser,
     @Param('id', UUID_PIPE) id: string,
     @Body() dto: CvVersionPreconditionDto,
+    @Res({ passthrough: true }) response: Response,
   ): Promise<DeletedCvResponseDto> {
-    return this.media.softDeleteUploadedCv(
+    const result = await this.media.deleteUploadedCv(
       user.id,
       id,
       dto.expectedAggregateVersion,
     );
+    response.status(result.deletionMode === 'PENDING' ? 202 : 200);
+    return result;
   }
 
   @Post(['cvs/:id/download-url', 'cv/:id/download-url'])
