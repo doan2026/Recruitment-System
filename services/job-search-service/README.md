@@ -45,10 +45,48 @@ before the current UTC date.
 
 Search accepts `q`, `location`, `salaryMin`, `salaryMax`, comma-separated
 or repeated `skills`, `experienceYears`, `jobType`, `companyId`, `sort`,
-`page`, and `limit` (maximum 50). Sort is `RELEVANCE`, `NEWEST`, or
-`SALARY_DESC`. Results include total count, facets, and the data source used.
+`page`, `pagination`, `cursor`, and `limit` (maximum 50). Sort is `RELEVANCE`,
+`NEWEST`, or `SALARY_DESC`. OFFSET pages and the first CURSOR page include the
+exact total count and facets, plus the data source used, `hasMore`, and nullable
+`nextCursor`. CURSOR continuations preserve the signed first-page total and
+return empty facet maps instead of recomputing totals and aggregations on every
+deep page; clients should retain the facets from the first page.
+
+`pagination=OFFSET` is the backward-compatible default. It uses `page` and
+`limit`, does not allocate an Elasticsearch point-in-time snapshot, and rejects
+requests beyond the 10,000-result window. `hasMore` can be true while
+`nextCursor` is null in this mode. Clients that need a stable or deep traversal
+must send `pagination=CURSOR` from the first page, keep `page=1`, then repeat
+the exact pagination mode, filters, sort, and limit with each returned cursor.
+CURSOR mode uses PIT plus `search_after`, deterministic Job-ID and shard
+tie-breakers, and never falls back to a different data source mid-traversal.
+The opaque cursor input is limited to 4096 UTF-8 characters.
+The signed cursor expires at a fixed time five minutes after the first page;
+following it does not extend that absolute deadline. Expired cursors return
+`409 JOB_SEARCH_CURSOR_STALE`; malformed/tampered or scope-mismatched cursors
+return `400`; a temporarily unavailable continuation returns `503`.
+
+`JOB_SEARCH_CURSOR_HMAC_KEY` is mandatory at startup and must be a distinct,
+non-placeholder secret of at least 32 UTF-8 bytes. Rotate it only with a
+drain/restart plan because rotation deliberately invalidates outstanding
+cursors. The PIT idle lifetime is bounded by the same absolute five-minute
+cursor expiry. `JOB_SEARCH_MAX_OPEN_PITS` (default 64, maximum 1024) caps PITs
+opened by one service process, including requests clients abandon; new CURSOR
+starts receive `429 JOB_SEARCH_CURSOR_CAPACITY` at the cap while existing
+continuations can finish. Size the aggregate cap across all replicas against
+the Elasticsearch cluster and alert on search open-context usage. Search
+responses use `Cache-Control: no-store` and `Pragma: no-cache`. Elasticsearch
+timed-out, failed-shard, and otherwise incomplete results are rejected rather
+than exposed as a complete page.
+
+Keyword relevance requires every normalized term and uses bounded Elasticsearch
+fuzziness (`AUTO`, prefix length 1, maximum 25 expansions). This keeps typo
+tolerance while preventing a broad OR query from dominating latency or returning
+documents that match only one term.
+
 If Elasticsearch is unavailable or the index has not been created yet, the
-request falls back to PostgreSQL. PostgreSQL facets describe the returned page;
+OFFSET requests fall back to PostgreSQL. PostgreSQL facets describe the returned
+page;
 Elasticsearch facets describe the complete filtered result set.
 Search also stays on PostgreSQL while an Elasticsearch baseline is incomplete.
 During that window `GET /health` reports `DEGRADED` with
@@ -56,12 +94,17 @@ During that window `GET /health` reports `DEGRADED` with
 `UP` with `searchIndexReady=true` and search can use Elasticsearch.
 The Elasticsearch request timeout defaults to two seconds and is configurable
 with `ELASTICSEARCH_REQUEST_TIMEOUT_MS`.
-`ELASTICSEARCH_INDEX` defaults to the new versioned index `job_index_v3`.
+`ELASTICSEARCH_INDEX` defaults to the new versioned index `job_index_v4`.
 Never point this release at the legacy `job_index`: its strict mapping and
 internal document versions are incompatible with the new projection contract.
 At startup the service validates the strict mapping contract, all required
 field types/analyzers/keyword multifields (including usable `index` and
-`doc_values` settings), and the required `vietnamese_text` analyzer definition.
+`doc_values` settings), and the exact `vietnamese_text` analyzer definition.
+That analyzer removes every Unicode combining mark with a `pattern_replace`
+character filter before standard tokenization, then applies `lowercase` and
+`asciifolding`. NFC, NFD, and accentless Vietnamese therefore produce the same
+tokens; a missing, changed, or extended analyzer/character-filter contract is
+rejected before indexing starts.
 A configured alias is accepted only when it resolves to
 one compatible concrete index; aliases with multiple targets are rejected.
 
@@ -298,7 +341,8 @@ intents. A populated environment must complete this release checklist:
 
 1. Stop and drain every old Job Service instance so no legacy writer remains.
 2. Apply the migration separately and configure the service with a new empty
-   `ELASTICSEARCH_INDEX=job_index_v3`; do not reuse the legacy `job_index`.
+   `ELASTICSEARCH_INDEX=job_index_v4`; do not reuse `job_index_v3` or the
+   legacy `job_index`, because analyzer settings cannot be changed in place.
    If this setting is an alias, stop and drain all instances before changing
    its target, then restart every instance so the new concrete index is
    resolved, fully validated, and baseline-gated.
@@ -353,18 +397,36 @@ npm test
 npm run build
 ```
 
-The verified local suite contains 292 unit tests. The isolated Docker gate
+The verified local suite contains 429 unit tests. The isolated Docker gate
 applies migrations to disposable PostgreSQL 16 and starts Kafka 3.8, authenticated
 Redis 7, and Elasticsearch 8.14.3 with index auto-creation disabled. It runs
-19 integration tests: three historical event baseline/resume/concurrency tests,
-one transaction/order/delivery outbox test, one PostgreSQL bulk-detail contract
-test, three recommendation revalidation/fallback tests, and 11 indexing, search,
-ordering, reindex, retry/dead-letter, outage, recovery, and restart tests:
+20 integration tests covering historical baseline/resume/concurrency,
+transactional outbox delivery, bulk detail, recommendations, mapping validation,
+stable cursor traversal, indexing, reindex, retry/dead-letter, outage, recovery,
+and restart behavior:
 
 ```bash
 docker compose -f compose.test.yml up \
   --build --abort-on-container-exit --exit-code-from job-tests
 docker compose -f compose.test.yml down --volumes --remove-orphans
 ```
+
+The controlled search load gate builds its own pinned PostgreSQL and
+Elasticsearch environment and generates exactly 100,000 Jobs (80,000 public).
+It verifies NFC, NFD, and accentless Vietnamese search across title,
+description, skills, and company name; complete duplicate-free deep cursor
+traversals; salary null ordering and short terminal pages; cursor isolation;
+and PIT cleanup. It then runs 500 warm-up requests and 10,000 measured requests
+at concurrency 32:
+
+```bash
+npm run test:search-load
+```
+
+The verified local controlled run completed with zero errors and zero source
+mismatches, 164.632 requests/second, p95 402.763 ms, and p99 503.771 ms. PIT
+contexts were 0 before the run, peaked at 32, and returned to 0. These figures
+are reproducible development-gate evidence, not a production SLO or a claim for
+multi-replica/CDN traffic.
 
 Swagger: `/docs` directly or `/jobs/docs` through the gateway.
