@@ -9,6 +9,7 @@ import com.recruitment.application.domain.ApplicationEventOutboxEntity;
 import com.recruitment.application.domain.ApplicationHistoryEntity;
 import com.recruitment.application.domain.ApplicationSource;
 import com.recruitment.application.domain.ApplicationStatus;
+import com.recruitment.application.event.ApplicationEventV1;
 import com.recruitment.application.repository.ApplicationEventOutboxRepository;
 import com.recruitment.application.repository.ApplicationHistoryRepository;
 import com.recruitment.application.repository.ApplicationRepository;
@@ -16,7 +17,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.EnumSet;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -208,17 +208,16 @@ public class SubmissionTransactionService {
         ApplicationEntity application,
         Instant occurredAt
     ) {
-        Map<String, Object> event = new LinkedHashMap<>();
-        event.put("event_id", eventId);
-        event.put("action", "STATUS_CHANGED");
-        event.put("application_id", application.getId());
-        event.put("job_id", application.getJobId());
-        event.put("job_title", application.getJobTitle());
-        event.put("candidate_id", application.getCandidateId());
-        event.put("recruiter_id", application.getRecruiterId());
-        event.put("from_status", null);
-        event.put("to_status", application.getStatus());
-        event.put("occurred_at", occurredAt);
+        Map<String, Object> event = ApplicationEventV1.base(
+            eventId,
+            ApplicationEventV1.Action.STATUS_CHANGED,
+            application,
+            application.getCandidateId(),
+            null,
+            application.getStatus(),
+            application.getVersion(),
+            occurredAt
+        );
         try {
             return objectMapper.writeValueAsString(event);
         } catch (JsonProcessingException exception) {

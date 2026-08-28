@@ -337,12 +337,14 @@ class ApplicationOfferPostgresIT {
             .containsEntry("topic", TOPIC)
             .containsEntry("published_at", null);
         assertThat(payload.path("action").asText()).isEqualTo("OFFER_SENT");
+        assertThat(payload.path("schema_version").asInt()).isEqualTo(1);
         assertThat(payload.path("application_id").asText())
             .isEqualTo(applicationId.toString());
         assertThat(payload.path("recruiter_id").asText())
             .isEqualTo(JOB_OWNER_ID.toString());
         assertThat(payload.path("actor_id").asText())
             .isEqualTo(RECRUITER_ID.toString());
+        assertThat(payload.path("aggregate_version").asLong()).isEqualTo(1L);
         assertThat(payload.path("from_status").asText())
             .isEqualTo("INTERVIEW");
         assertThat(payload.path("to_status").asText()).isEqualTo("OFFER");
@@ -400,8 +402,11 @@ class ApplicationOfferPostgresIT {
             .containsEntry("note", null);
         assertThat(acceptedEvent.path("action").asText())
             .isEqualTo("STATUS_CHANGED");
+        assertThat(acceptedEvent.path("schema_version").asInt()).isEqualTo(1);
         assertThat(acceptedEvent.path("actor_id").asText())
             .isEqualTo(CANDIDATE_ID.toString());
+        assertThat(acceptedEvent.path("aggregate_version").asLong())
+            .isEqualTo(2L);
         assertThat(acceptedEvent.path("offer_status").asText())
             .isEqualTo("ACCEPTED");
         assertThat(acceptedEvent.path("offer_version").asLong())

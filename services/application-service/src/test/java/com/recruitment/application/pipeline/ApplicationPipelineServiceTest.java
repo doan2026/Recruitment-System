@@ -10,6 +10,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.recruitment.application.api.BusinessException;
 import com.recruitment.application.client.CompanyClient;
@@ -92,7 +93,7 @@ class ApplicationPipelineServiceTest {
     @EnumSource(CompanyMemberRole.class)
     void companyMemberRolesManageApplicationFromAnotherRecruitersJob(
         CompanyMemberRole role
-    ) {
+    ) throws Exception {
         when(companies.getRecruiterMembership(recruiterId, "Bearer token"))
             .thenReturn(new RecruiterCompanyMembership(companyId, role));
 
@@ -124,9 +125,16 @@ class ApplicationPipelineServiceTest {
         ArgumentCaptor<ApplicationEventOutboxEntity> event =
             ArgumentCaptor.forClass(ApplicationEventOutboxEntity.class);
         verify(outbox).save(event.capture());
-        assertThat(event.getValue().getPayload())
-            .contains("\"from_status\":\"APPLIED\"")
-            .contains("\"to_status\":\"REVIEWING\"");
+        JsonNode payload = new ObjectMapper().findAndRegisterModules()
+            .readTree(event.getValue().getPayload());
+        assertThat(payload.path("schema_version").asInt()).isEqualTo(1);
+        assertThat(payload.path("actor_id").asText())
+            .isEqualTo(recruiterId.toString());
+        assertThat(payload.path("from_status").asText())
+            .isEqualTo("APPLIED");
+        assertThat(payload.path("to_status").asText())
+            .isEqualTo("REVIEWING");
+        assertThat(payload.path("aggregate_version").asLong()).isEqualTo(1L);
     }
 
     @Test
@@ -191,7 +199,7 @@ class ApplicationPipelineServiceTest {
     }
 
     @Test
-    void candidateWithdrawsOwnActiveApplication() {
+    void candidateWithdrawsOwnActiveApplication() throws Exception {
         StatusTransitionResponse response = service.withdraw(
             applicationId,
             candidateId,
@@ -207,6 +215,14 @@ class ApplicationPipelineServiceTest {
             "Personal reason",
             NOW
         );
+        ArgumentCaptor<ApplicationEventOutboxEntity> event =
+            ArgumentCaptor.forClass(ApplicationEventOutboxEntity.class);
+        verify(outbox).save(event.capture());
+        JsonNode payload = new ObjectMapper().findAndRegisterModules()
+            .readTree(event.getValue().getPayload());
+        assertThat(payload.path("actor_id").asText())
+            .isEqualTo(candidateId.toString());
+        assertThat(payload.path("aggregate_version").asLong()).isEqualTo(1L);
     }
 
     @Test

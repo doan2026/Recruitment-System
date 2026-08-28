@@ -304,7 +304,10 @@ Sending an offer writes the Offer, moves the Application to `OFFER`, appends
 history, and stores `OFFER_SENT` in the transactional outbox. Response events
 use `STATUS_CHANGED`. Offer events add `actor_id`, `offer_id`, `offer_status`,
 and `offer_version`, retain `recruiter_id` from the Application, and never
-include salary, notes, decline reasons, `fileId`, or `fileUrl`.
+include salary, notes, decline reasons, `fileId`, or `fileUrl`. Every v1 event
+includes the acting user in nullable `actor_id` and the resulting Application
+state in `aggregate_version`; this version can skip values when a non-event
+mutation, such as a match-score update, increments the same aggregate.
 
 Submission performs these checks in order:
 
@@ -324,10 +327,13 @@ Submission performs these checks in order:
 
 The database also has a partial unique index for active candidate/job pairs,
 which protects against two concurrent submission requests. The outbox publisher
-sends `application-events` with a stable `event_id` and exponential retry.
+sends `application-events` with a stable `event_id` and exponential retry. The
+canonical v1 JSON Schema and producer fixtures live under
+`contracts/events/`.
 
 ```json
 {
+  "schema_version": 1,
   "event_id": "uuid",
   "action": "STATUS_CHANGED",
   "application_id": "uuid",
@@ -335,8 +341,10 @@ sends `application-events` with a stable `event_id` and exponential retry.
   "job_title": "Backend Engineer",
   "candidate_id": "uuid",
   "recruiter_id": "uuid",
+  "actor_id": "candidate uuid",
   "from_status": null,
   "to_status": "APPLIED",
+  "aggregate_version": 0,
   "occurred_at": "2026-08-24T00:00:00Z"
 }
 ```
@@ -372,7 +380,7 @@ V7-to-V8 migration without historical backfill, strict v2
 Profile parsing, transactional snapshot persistence/rollback, metadata and
 child-row protection, exact `ANY` filtering, combined filters, company
 isolation, legacy/empty-snapshot behavior, and deterministic tied-value
-pagination. The verified Application Service suite passes 238 unit tests and
+pagination. The verified Application Service suite passes 246 unit tests and
 63 PostgreSQL/Kafka integration tests.
 
 In Root Compose, use two distinct keys: `PROFILE_INTERNAL_API_KEY_APPLICATION`

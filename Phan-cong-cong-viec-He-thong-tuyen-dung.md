@@ -96,10 +96,12 @@ Ba luồng có tổng điểm bằng nhau. Rủi ro lệch lớn nhất nằm �
  REST File/Media             Người 1          Người 2, 3        POST /files/signature, POST /files; service nghiệp vụ
                                                                 lưu file_id canonical; URL ổn định chỉ cho public media,
                                                                 private media dùng signed URL ngắn hạn theo request
- Kafka application-events    Người 2          Người 3           { event_id, action, application_id, job_id,
-                                              (Notification),   job_title, candidate_id, recruiter_id,
-                                              Người 1           from_status, to_status, occurred_at }
-                                              (Thống kê)
+ Kafka application-events    Người 2          Người 3           key=application_id; schema v1 flat snake_case gồm
+                                              (Notification),   { schema_version, event_id, action, application_id,
+                                              Người 1           job_id, job_title, candidate_id, recruiter_id,
+                                              (Thống kê)        actor_id, from_status, to_status, aggregate_version,
+                                                                occurred_at }; Offer thêm trọn bộ offer_id,
+                                                                offer_status, offer_version; không chứa salary/note/file
  Kafka job-events            Người 2          Người 2 (AI),     key=job_id; schema v1, value flat snake_case gồm
                                               Người 1           đúng 16 trường { event_id, action, job_id,
                                               (Thống kê)        company_id, title, description, skills, location,
@@ -871,8 +873,8 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 
 ### 2.4. Sự kiện Kafka
 - PRODUCE topic application-events mỗi khi trạng thái thay đổi hoặc offer được gửi.
-- Payload gợi ý: { event_id, action: STATUS_CHANGED|OFFER_SENT, application_id, job_id, job_title, candidate_id, recruiter_id, from_status, to_status, occurred_at }.
-- Implementation Offer mở rộng payload bằng `actor_id`, `offer_id`, `offer_status`, `offer_version`. `recruiter_id` vẫn là recruiter gắn với Application/job; người thực hiện thao tác nằm ở `actor_id`.
+- Canonical v1 dùng key `application_id` và exact flat payload `{ schema_version, event_id, action, application_id, job_id, job_title, candidate_id, recruiter_id, actor_id, from_status, to_status, aggregate_version, occurred_at }`; action là `STATUS_CHANGED|OFFER_SENT`.
+- Mọi event đều có nullable `actor_id` và resulting `aggregate_version`. Event Offer thêm trọn bộ `offer_id`, `offer_status`, `offer_version`; `recruiter_id` vẫn là recruiter gắn với Application/job.
 - Event Offer không được chứa salary, note, lý do phản hồi, `file_id` hoặc `file_url`.
 - Consumer: Notification Service (Người 3) và Admin & Statistics Service (Người 1).
 - Đây là hợp đồng liên người quan trọng nhất của Người 2 — chốt schema với Người 3 trong tuần đầu.
@@ -1207,24 +1209,26 @@ Người 3 sở hữu tất cả những gì xảy ra SAU khi hồ sơ được 
  Phụ thuộc                   Kafka (application-events, interview-events, chat-events)
 ```
 
+Trạng thái 28/08/2026: vertical slice `application-events` v1 → private in-app inbox đã hoàn thành với PostgreSQL/Kafka thật. Consumer Interview/Chat, BullMQ, FCM, SMTP, device/settings API và reminder vẫn là backlog.
+
 
 ### 1. Luồng hoạt động các chức năng
 #### Luồng 1: Tiếp nhận sự kiện và đưa vào hàng đợi
-1. Consumer lắng nghe đồng thời 3 topic: application-events, interview-events, chat-events.
-2. Với mỗi event: kiểm tra event_id đã xử lý chưa (chống trùng khi Kafka gửi lại).
-3. Ánh xạ event sang loại thông báo và template nội dung tương ứng.
-4. Xác định người nhận (ứng viên hay recruiter) và các kênh cần gửi (in-app, push, email).
-5. Đẩy job vào hàng đợi BullMQ, tách hàng đợi riêng cho push và cho email.
-6. Trả ack cho Kafka ngay sau khi đưa vào hàng đợi (không chờ gửi xong) để consumer không bị chậm.
-#### Luồng 2: Worker xử lý và gửi thông báo
-1. Tạo bản ghi Notification (in-app) với is_read = false.
+1. Mục tiêu đầy đủ là consumer ba topic; vertical slice hiện tại consume `application-events` bằng dedicated group và replay retained backlog khi group join lần đầu.
+2. Kiểm strict key/payload/version/size, rồi đối chiếu `(topic,event_id)`, event key và payload hash để chống trùng/collision.
+3. Ánh xạ event sang notification type/template và người nhận Candidate/Recruiter; không gửi lại cho actor khi actor trùng recipient.
+4. Ghi `ProcessedEvent + Notification + IN_APP NotificationLog` trong cùng một PostgreSQL transaction. Duplicate cùng hash/key là no-op; collision hoặc event sai contract đi vào poison ledger không chứa raw payload. Record cũ hơn cutoff rollout vẫn được ledger/commit nhưng không sinh unread item mới.
+5. BullMQ push/email là bước sau; không được ack chỉ dựa trên dữ liệu tạm trong Redis.
+6. Chỉ commit Kafka offset sau durable terminal outcome; lỗi database/broker tạm thời không commit để Kafka giao lại.
+#### Luồng 2: Worker xử lý push/email (chưa triển khai)
+1. Đọc delivery intent đã commit bền vững; in-app Notification đã được tạo atomically ở luồng consumer.
 2. Đẩy realtime tới client nếu người dùng đang mở app (qua kênh có sẵn hoặc polling nhẹ).
 3. Gửi push qua FCM tới tất cả device token còn hiệu lực của người nhận.
 4. Nếu FCM trả về token không hợp lệ → xoá token đó khỏi bảng DeviceToken.
 5. Gửi email nếu loại thông báo thuộc nhóm quan trọng (lịch phỏng vấn, offer).
 6. Gửi thất bại → BullMQ retry 3 lần với backoff tăng dần; vẫn lỗi thì ghi status = FAILED kèm lý do.
 #### Luồng 3: Người dùng xem và quản lý thông báo
-1. Mở trung tâm thông báo → GET /notifications phân trang, kèm số lượng chưa đọc.
+1. Mở trung tâm thông báo → `GET /notifications?type=&limit=&cursor=` keyset pagination và gọi unread-count riêng.
 2. Bấm vào một thông báo → đánh dấu đã đọc và điều hướng tới màn tương ứng (deep link theo payload).
 3. Nút "Đánh dấu tất cả đã đọc".
 4. Lọc theo loại thông báo.
@@ -1251,36 +1255,37 @@ Người 3 sở hữu tất cả những gì xảy ra SAU khi hồ sơ được 
 - Mọi thông báo đều lưu log để đối soát khi người dùng khiếu nại "không nhận được".
 - Đây là service duy nhất giữ khoá FCM và thông tin SMTP.
 ### 2.2. Mô hình dữ liệu
-- Notification(id, user_id, type, title, body, payload_json, channel[], is_read, created_at)
-- DeviceToken(id, user_id, token, platform[WEB|ANDROID|IOS], last_used_at)
-- NotificationLog(id, notification_id, channel, status[SENT|FAILED], error, sent_at)
-- ProcessedEvent(event_id, topic, processed_at) — chống xử lý trùng
-- NotificationSetting(user_id, email_enabled, push_enabled)
+- Notification(id, user_id, type, title, body, payload_json, source_topic, source_event_id, read_at, created_at)
+- DeviceToken(id, user_id, token_hash, token_ciphertext, platform[WEB|ANDROID|IOS], last_used_at)
+- NotificationLog(id, notification_id, channel[IN_APP|PUSH|EMAIL], status[PENDING|SENT|FAILED], attempt, error_code, sent_at)
+- ProcessedEvent(topic, event_id, event_key, payload_sha256, schema_version, processed_at) — unique theo `(topic,event_id)` để chống trùng và phát hiện collision
+- PoisonEvent(topic, partition, offset, event_key_sha256, payload_sha256, error_code, recorded_at) — không lưu raw key/value
+- NotificationSetting(user_id, email_enabled, push_enabled, version)
 ### 2.3. API chính
 ```text
  Endpoint                               Mô tả                                          Quyền truy cập
- GET /notifications?user_id=&page=      Danh sách thông báo                            Đã đăng nhập
+ GET /notifications?type=&limit=&cursor= Danh sách keyset, identity chỉ từ JWT subject   Chủ inbox
  GET /notifications/unread-count        Số thông báo chưa đọc                          Đã đăng nhập
  PATCH /notifications/:id/read          Đánh dấu đã đọc                                Chủ thông báo
  PATCH /notifications/read-all          Đánh dấu tất cả đã đọc                         Chủ thông báo
- POST /notifications/devices            Đăng ký FCM token                              Đã đăng nhập
- DELETE /notifications/devices/:token   Gỡ FCM token                                   Đã đăng nhập
- PUT /notifications/settings            Bật/tắt kênh thông báo                         Đã đăng nhập
+ POST /notifications/devices            Đăng ký FCM token (pending)                    Đã đăng nhập
+ DELETE /notifications/devices/:token   Gỡ FCM token (pending)                         Đã đăng nhập
+ PUT /notifications/settings            Bật/tắt kênh thông báo (pending)               Đã đăng nhập
 ```
 
 
 ### 2.4. Sự kiện Kafka
 - CONSUME: application-events (Người 2), interview-events (Người 3), chat-events (Người 3).
 - Không produce event.
-- Danh mục loại thông báo: APPLICATION_STATUS_CHANGED, OFFER_RECEIVED, INTERVIEW_SCHEDULED, INTERVIEW_RESCHEDULED, INTERVIEW_CANCELLED, INTERVIEW_REMINDER, NEW_MESSAGE, JOB_RECOMMENDATION.
+- Đã triển khai: APPLICATION_RECEIVED, APPLICATION_STATUS_CHANGED, OFFER_RECEIVED, OFFER_ACCEPTED, OFFER_DECLINED. Interview/Chat/Recommendation types còn pending theo consumer tương ứng.
 ### 2.5. Phụ thuộc giữa các service
 - Phụ thuộc mạnh vào schema event của Người 2 (application-events) — chốt sớm nhất có thể.
 - Cần tài khoản Firebase và SMTP dùng chung của nhóm.
 ### 2.6. Tiêu chí hoàn thành (Definition of Done)
-- Đổi trạng thái đơn ở Application → ứng viên thấy thông báo in-app trong vài giây.
+- Đổi trạng thái đơn ở Application → ứng viên thấy thông báo in-app sau khi Kafka giao event; đã có service-level PostgreSQL/Kafka integration, deployed E2E vẫn pending.
 - Nhận được push trên trình duyệt.
 - Email lịch phỏng vấn gửi được và có link phòng bấm vào được.
-- Gửi lại cùng một event 2 lần chỉ sinh 1 thông báo.
+- Gửi lại cùng một event 2 lần chỉ sinh 1 thông báo — đã kiểm thử; event ID collision khác payload/key bị quarantine.
 
 <!-- Page 35 -->
 

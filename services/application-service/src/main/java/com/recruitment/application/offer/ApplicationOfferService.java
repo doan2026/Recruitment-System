@@ -10,6 +10,7 @@ import com.recruitment.application.domain.ApplicationEventOutboxEntity;
 import com.recruitment.application.domain.ApplicationStatus;
 import com.recruitment.application.domain.OfferEntity;
 import com.recruitment.application.domain.OfferStatus;
+import com.recruitment.application.event.ApplicationEventV1;
 import com.recruitment.application.pipeline.ApplicationHistoryWriter;
 import com.recruitment.application.pipeline.ApplicationPipelineRepository;
 import com.recruitment.application.repository.ApplicationEventOutboxRepository;
@@ -21,7 +22,6 @@ import java.net.URISyntaxException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import org.hibernate.exception.ConstraintViolationException;
@@ -142,6 +142,7 @@ public class ApplicationOfferService {
             application,
             recruiterId,
             offer,
+            expectedApplicationVersion + 1,
             now
         );
 
@@ -252,6 +253,7 @@ public class ApplicationOfferService {
             targetOfferStatus,
             resultingOfferVersion,
             targetApplicationStatus,
+            resultingApplicationVersion,
             now
         );
 
@@ -636,15 +638,17 @@ public class ApplicationOfferService {
         ApplicationEntity application,
         UUID actorId,
         OfferEntity offer,
+        long aggregateVersion,
         Instant occurredAt
     ) {
         Map<String, Object> event = baseEvent(
             eventId,
-            "OFFER_SENT",
+            ApplicationEventV1.Action.OFFER_SENT,
             application,
             actorId,
             ApplicationStatus.INTERVIEW,
             ApplicationStatus.OFFER,
+            aggregateVersion,
             occurredAt
         );
         event.put("offer_id", offer.getId());
@@ -661,15 +665,17 @@ public class ApplicationOfferService {
         OfferStatus offerStatus,
         long offerVersion,
         ApplicationStatus applicationStatus,
+        long aggregateVersion,
         Instant occurredAt
     ) {
         Map<String, Object> event = baseEvent(
             eventId,
-            "STATUS_CHANGED",
+            ApplicationEventV1.Action.STATUS_CHANGED,
             application,
             actorId,
             ApplicationStatus.OFFER,
             applicationStatus,
+            aggregateVersion,
             occurredAt
         );
         event.put("offer_id", offerId);
@@ -680,26 +686,24 @@ public class ApplicationOfferService {
 
     private Map<String, Object> baseEvent(
         UUID eventId,
-        String action,
+        ApplicationEventV1.Action action,
         ApplicationEntity application,
         UUID actorId,
         ApplicationStatus fromStatus,
         ApplicationStatus toStatus,
+        long aggregateVersion,
         Instant occurredAt
     ) {
-        Map<String, Object> event = new LinkedHashMap<>();
-        event.put("event_id", eventId);
-        event.put("action", action);
-        event.put("application_id", application.getId());
-        event.put("job_id", application.getJobId());
-        event.put("job_title", application.getJobTitle());
-        event.put("candidate_id", application.getCandidateId());
-        event.put("recruiter_id", application.getRecruiterId());
-        event.put("actor_id", actorId);
-        event.put("from_status", fromStatus);
-        event.put("to_status", toStatus);
-        event.put("occurred_at", occurredAt);
-        return event;
+        return ApplicationEventV1.base(
+            eventId,
+            action,
+            application,
+            actorId,
+            fromStatus,
+            toStatus,
+            aggregateVersion,
+            occurredAt
+        );
     }
 
     private String serializeEvent(Map<String, Object> event) {

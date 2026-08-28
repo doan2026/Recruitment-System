@@ -10,6 +10,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.recruitment.application.api.BusinessException;
 import com.recruitment.application.client.JobClient.JobAvailability;
@@ -86,7 +87,7 @@ class SubmissionTransactionServiceTest {
     }
 
     @Test
-    void writesApplicationHistoryAndOutboxTogether() {
+    void writesApplicationHistoryAndOutboxTogether() throws Exception {
         ApplicationResponse response = service.create(
             candidateId,
             request,
@@ -118,10 +119,20 @@ class SubmissionTransactionServiceTest {
         verify(outbox).save(captor.capture());
         assertThat(captor.getValue().getTopic())
             .isEqualTo("application-events");
-        assertThat(captor.getValue().getPayload())
-            .contains("\"action\":\"STATUS_CHANGED\"")
-            .contains("\"to_status\":\"APPLIED\"")
-            .contains(jobId.toString());
+        JsonNode payload = new ObjectMapper().findAndRegisterModules()
+            .readTree(captor.getValue().getPayload());
+        assertThat(payload.path("schema_version").asInt()).isEqualTo(1);
+        assertThat(payload.path("action").asText())
+            .isEqualTo("STATUS_CHANGED");
+        assertThat(payload.path("application_id").asText())
+            .isEqualTo(response.id().toString());
+        assertThat(payload.path("job_id").asText())
+            .isEqualTo(jobId.toString());
+        assertThat(payload.path("actor_id").asText())
+            .isEqualTo(candidateId.toString());
+        assertThat(payload.path("from_status").isNull()).isTrue();
+        assertThat(payload.path("to_status").asText()).isEqualTo("APPLIED");
+        assertThat(payload.path("aggregate_version").asLong()).isZero();
 
         ArgumentCaptor<ApplicationEntity> applicationCaptor =
             ArgumentCaptor.forClass(ApplicationEntity.class);
