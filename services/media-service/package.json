@@ -19,7 +19,8 @@
     "pretest:unit": "npm run build",
     "test:unit": "node --test test/*.unit.test.js",
     "pretest:integration": "npm run build",
-    "test:integration": "node --test --test-concurrency=1 test/*.integration.test.js"
+    "test:integration": "node --test --test-concurrency=1 test/*.integration.test.js",
+    "test:cloudinary:live": "node scripts/cloudinary-live-smoke.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.3",

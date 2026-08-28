@@ -15,6 +15,8 @@
     "prisma:validate": "prisma validate",
     "prisma:generate": "prisma generate",
     "prisma:migrate:deploy": "prisma migrate deploy",
+    "prebaseline:cv-events": "npm run build",
+    "baseline:cv-events": "node dist/cv-event-baseline",
     "test:migration-upgrade": "node test/profile-migration-upgrade.test.js",
     "test": "npm run test:unit && npm run test:integration",
     "pretest:unit": "npm run build",

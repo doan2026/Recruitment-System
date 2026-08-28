@@ -8,6 +8,7 @@ COPY nest-cli.json tsconfig.json ./
 COPY prisma prisma
 RUN npx prisma generate
 COPY src src
+COPY scripts scripts
 COPY test test
 RUN npm run build
 
@@ -21,6 +22,7 @@ ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist dist
+COPY --from=build /app/scripts scripts
 COPY --from=build /app/node_modules/.prisma node_modules/.prisma
 COPY --from=build /app/prisma prisma
 USER node
