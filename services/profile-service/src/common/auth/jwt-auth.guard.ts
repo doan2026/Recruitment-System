@@ -8,10 +8,12 @@ import { Reflector } from '@nestjs/core';
 import { ApiException } from '../http/api-exception';
 import { AuthenticatedRequest } from './auth-user.interface';
 import {
+  INTERNAL_CALLERS_KEY,
   INTERNAL_CANDIDATE_JWT_KEY,
   INTERNAL_ONLY_KEY,
   PUBLIC_ROUTE_KEY,
 } from './auth.decorators';
+import { InternalService } from './auth-user.interface';
 import { InternalAuthService } from './internal-auth.service';
 import { JwtVerifierService } from './jwt-verifier.service';
 
@@ -34,9 +36,15 @@ export class JwtAuthGuard implements CanActivate {
     // Internal-only must win over every other metadata combination so an
     // accidental @Public decorator can never expose a service endpoint.
     if (isInternal) {
+      const allowedCallers =
+        this.reflector.getAllAndOverride<readonly InternalService[]>(
+          INTERNAL_CALLERS_KEY,
+          [context.getHandler(), context.getClass()],
+        ) ?? ['application-service'];
       request.internalCaller = this.internalAuth.authenticate(
         request.headers['x-internal-api-key'],
         request.headers['x-internal-service'],
+        allowedCallers,
       );
       const requiresCandidateJwt =
         this.reflector.getAllAndOverride<boolean>(

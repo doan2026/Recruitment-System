@@ -7,28 +7,56 @@ const { InternalAuthService } = require(
   '../dist/common/auth/internal-auth.service',
 );
 
-const VALID_KEY = 'application-profile-contract-key-000000000001';
-const config = (value) => ({
-  get: (name) =>
-    name === 'INTERNAL_API_KEY_APPLICATION' ? value : undefined,
+const APPLICATION_KEY = 'application-profile-contract-key-000000000001';
+const JOB_SEARCH_KEY = 'job-search-profile-contract-key-0000000000001';
+const config = (applicationKey, jobSearchKey = JOB_SEARCH_KEY) => ({
+  get: (name) => ({
+    INTERNAL_API_KEY_APPLICATION: applicationKey,
+    INTERNAL_API_KEY_JOB_SEARCH: jobSearchKey,
+  })[name],
 });
 
-test('InternalAuthService accepts only application-service with its exact key', () => {
-  const service = new InternalAuthService(config(VALID_KEY));
+test('InternalAuthService scopes distinct exact keys to allowed callers', () => {
+  const service = new InternalAuthService(config(APPLICATION_KEY));
   assert.doesNotThrow(() => service.assertConfiguration());
   assert.deepEqual(
-    service.authenticate(VALID_KEY, 'application-service'),
+    service.authenticate(APPLICATION_KEY, 'application-service'),
     { service: 'application-service' },
+  );
+  assert.deepEqual(
+    service.authenticate(
+      JOB_SEARCH_KEY,
+      'job-search-service',
+      ['job-search-service'],
+    ),
+    { service: 'job-search-service' },
+  );
+  assert.throws(
+    () => service.authenticate(JOB_SEARCH_KEY, 'job-search-service'),
+    (error) =>
+      error.getStatus() === 401 &&
+      error.getResponse().code === 'INTERNAL_AUTH_INVALID',
+  );
+  assert.throws(
+    () => service.authenticate(
+      APPLICATION_KEY,
+      'application-service',
+      ['job-search-service'],
+    ),
+    (error) =>
+      error.getStatus() === 401 &&
+      error.getResponse().code === 'INTERNAL_AUTH_INVALID',
   );
 
   const invalidHeaders = [
     [undefined, 'application-service'],
-    [VALID_KEY, undefined],
-    [VALID_KEY, 'Application-Service'],
-    [VALID_KEY, 'profile-service'],
-    [VALID_KEY.slice(0, -1) + 'x', 'application-service'],
-    [[VALID_KEY], 'application-service'],
-    [VALID_KEY, ['application-service']],
+    [APPLICATION_KEY, undefined],
+    [APPLICATION_KEY, 'Application-Service'],
+    [APPLICATION_KEY, 'profile-service'],
+    [APPLICATION_KEY.slice(0, -1) + 'x', 'application-service'],
+    [APPLICATION_KEY + ' ', 'application-service'],
+    [[APPLICATION_KEY], 'application-service'],
+    [APPLICATION_KEY, ['application-service']],
   ];
   for (const [key, caller] of invalidHeaders) {
     assert.throws(
@@ -59,4 +87,14 @@ test('InternalAuthService fails closed for missing, weak or unsafe configuration
         error.getResponse().code === 'INTERNAL_AUTH_CONFIGURATION_ERROR',
     );
   }
+
+  const duplicated = new InternalAuthService(
+    config(APPLICATION_KEY, APPLICATION_KEY),
+  );
+  assert.throws(
+    () => duplicated.assertConfiguration(),
+    (error) =>
+      error.getStatus() === 503 &&
+      error.getResponse().code === 'INTERNAL_AUTH_CONFIGURATION_ERROR',
+  );
 });

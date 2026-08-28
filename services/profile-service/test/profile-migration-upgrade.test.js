@@ -396,6 +396,7 @@ const main = async () => {
     executeMigration('20260828010000_cv_deletion_fence');
     executeMigration('20260828020000_cv_event_outbox');
     executeMigration('20260828030000_candidate_job_preferences');
+    executeMigration('20260828040000_candidate_recruiter_discovery');
 
     const historicalEventRows = await prisma.$queryRawUnsafe(`
       SELECT COUNT(*)::integer AS "count"
@@ -408,6 +409,60 @@ const main = async () => {
       FROM "profile"."candidate_job_preferences"
     `);
     assert.equal(historicalPreferenceRows[0].count, 0);
+
+    const historicalDiscoveryRows = await prisma.$queryRawUnsafe(`
+      SELECT COUNT(*)::integer AS "count"
+      FROM "profile"."candidate_recruiter_discovery"
+    `);
+    assert.equal(historicalDiscoveryRows[0].count, 0);
+
+    const discoveryForeignKeys = await prisma.$queryRawUnsafe(`
+      SELECT
+        "constraint_name" AS "name",
+        "column_name" AS "columnName"
+      FROM "information_schema"."key_column_usage"
+      WHERE "table_schema" = 'profile'
+        AND "table_name" = 'candidate_recruiter_discovery'
+        AND "constraint_name" LIKE '%_fkey'
+      ORDER BY "constraint_name", "ordinal_position"
+    `);
+    assert.deepEqual(discoveryForeignKeys, [{
+      name: 'candidate_recruiter_discovery_candidate_id_fkey',
+      columnName: 'candidate_id',
+    }]);
+
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO "profile"."candidate_recruiter_discovery" (
+        "candidate_id", "state", "version", "consent_version", "cv_id",
+        "consented_at", "created_at", "updated_at"
+      ) VALUES (
+        '72000000-0000-4000-8000-000000000002'::uuid,
+        'ENABLED', 1, 1,
+        '79999999-9999-4999-8999-999999999999'::uuid,
+        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      )
+    `);
+    await assert.rejects(
+      () => prisma.$executeRawUnsafe(`
+        UPDATE "profile"."candidate_recruiter_discovery"
+        SET "updated_at" = CLOCK_TIMESTAMP()
+        WHERE "candidate_id" =
+          '72000000-0000-4000-8000-000000000002'::uuid
+      `),
+      /version must increment by one/i,
+    );
+    await assert.rejects(
+      () => prisma.$executeRawUnsafe(`
+        INSERT INTO "profile"."candidate_recruiter_discovery" (
+          "candidate_id", "state", "version", "consent_version", "cv_id",
+          "created_at", "updated_at"
+        ) VALUES (
+          '73000000-0000-4000-8000-000000000002'::uuid,
+          'ENABLED', 1, NULL, NULL,
+          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        )
+      `),
+    );
 
     const outboxForeignKeys = await prisma.$queryRawUnsafe(`
       SELECT COUNT(*)::integer AS "count"
