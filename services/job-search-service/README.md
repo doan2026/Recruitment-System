@@ -11,6 +11,7 @@ Nginx strips the `/jobs` gateway prefix before forwarding requests.
 | `GET /mine` | `GET /jobs/mine` | RECRUITER |
 | `GET /pending` | `GET /jobs/pending` | ADMIN |
 | `GET /search` | `GET /jobs/search` | Public |
+| `GET /recommended` | `GET /jobs/recommended` | CANDIDATE |
 | `POST /reindex` | `POST /jobs/reindex` | ADMIN |
 | `GET /reindex/failures` | `GET /jobs/reindex/failures` | ADMIN |
 | `POST /reindex/failures/retry` | `POST /jobs/reindex/failures/retry` | ADMIN |
@@ -62,6 +63,51 @@ field types/analyzers/keyword multifields (including usable `index` and
 `doc_values` settings), and the required `vietnamese_text` analyzer definition.
 A configured alias is accepted only when it resolves to
 one compatible concrete index; aliases with multiple targets are rejected.
+
+## Candidate job recommendations
+
+`GET /recommended` is Candidate-only and derives the Candidate identity from
+the verified JWT. It never accepts a `userId` or `cvId`. The request supports
+`limit` (1–50, default 10), an opaque cursor of at most 1024 UTF-8 bytes, and
+optional `location`, `salaryMin`, and `jobType` filters. Location is
+canonicalized with NFKC, Unicode whitespace is collapsed, and control
+characters plus `%`, `_`, and `\\` are rejected so the PostgreSQL
+case-insensitive filter remains literal rather than treating user input as an
+ILIKE pattern or escape sequence.
+
+The service forwards the Candidate bearer token only to Profile
+`GET /cvs`, selects the active default Media-backed CV (or the deterministic
+newest legacy CV), and calls AI `POST /recommend/jobs` with only the scoped
+`AI_INTERNAL_API_KEY`. Both outbound clients reject redirects, use bounded
+timeouts and response bodies, and never retry. The configured URL must have a
+root path and its normalized hostname must appear in the corresponding
+`*_SERVICE_ALLOWED_HOSTS` list. Deployments using custom DNS names must add
+those names explicitly; this allowlist prevents a bad URL from sending the
+Candidate JWT or scoped AI credential to an untrusted host.
+
+PostgreSQL remains authoritative. One query revalidates AI identifiers against
+`PUBLISHED` status, the UTC deadline, location, salary, and job type, selecting
+only public job-card columns and restoring AI order. On the first page only,
+Profile/AI unavailability, AI not-ready states, or fully stale results return a
+deterministic `LATEST` list with a stable `fallbackReason`. The response
+always includes `source`, `fallbackReason`, and `nextCursor`, and is marked
+`private, no-store` with `Vary: Authorization`.
+
+A continuation request never mixes an AI page with page one of the latest
+fallback. A missing CV, an AI cursor-stale response, empty AI page, or a page
+whose identifiers are all stale returns HTTP 409
+`RECOMMENDATION_CURSOR_STALE`. Profile/AI timeout, malformed response, or 5xx
+returns HTTP 503 `RECOMMENDATION_UNAVAILABLE`.
+
+`AI_INTERNAL_API_KEY` must contain 32–512 printable ASCII characters
+(`0x21`–`0x7e`), excluding spaces and all control/Unicode characters. A
+missing or unsafe key is never sent. First-page requests
+stay on `LATEST`, while `GET /health` reports
+`recommendationConfigured=false` and `DEGRADED`. This field reports local
+configuration only; it is not an upstream AI availability probe. Profile and
+AI URLs, allowed hosts, and timeouts are validated at startup. This release exposes only
+Candidate-facing job recommendations; it does not expose AI candidate
+recommendations to recruiters.
 
 Every event-producing mutation increments the Job's positive
 `aggregate_version` and writes an immutable outbox row in the same PostgreSQL
@@ -243,13 +289,13 @@ npm test
 npm run build
 ```
 
-The verified local suite contains 89 unit tests. The isolated Docker gate
+The verified local suite contains 189 unit tests. The isolated Docker gate
 applies migrations to disposable PostgreSQL 16 and starts Kafka 3.8, authenticated
 Redis 7, and Elasticsearch 8.14.3 with index auto-creation disabled. It runs
-16 integration tests: three historical event baseline/resume/concurrency tests,
+18 integration tests: three historical event baseline/resume/concurrency tests,
 one transaction/order/delivery outbox test, one PostgreSQL bulk-detail contract
-test, and 11 indexing, search, ordering, reindex, retry/dead-letter, outage,
-recovery, and restart tests:
+test, two recommendation revalidation/fallback tests, and 11 indexing, search,
+ordering, reindex, retry/dead-letter, outage, recovery, and restart tests:
 
 ```bash
 docker compose -f compose.test.yml up \
