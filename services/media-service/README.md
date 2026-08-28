@@ -191,6 +191,43 @@ Sáu preset phải là signed preset và phải enforce đúng allowed format, m
 
 Service không tự tạo hoặc gọi remote để xác minh preset khi khởi động. Health chỉ kiểm tra database, cấu hình JWT, sáu internal key và sự hiện diện của Cloudinary credentials/preset name. Vì vậy cần live smoke test trên environment trước release.
 
+## Live Cloudinary staging smoke
+
+Runner `scripts/cloudinary-live-smoke.js` là acceptance gate opt-in, không nằm trong `npm test` và mặc định fail-closed. Runner chỉ bắt đầu khi `CLOUDINARY_LIVE_SMOKE=1` và `CLOUDINARY_LIVE_SMOKE_CONFIRM_CLOUD` khớp chính xác `CLOUDINARY_CLOUD_NAME`.
+
+Runner lấy đúng sáu case từ `MEDIA_POLICIES`, audit read-only từng preset qua Cloudinary Admin API rồi chạy tuần tự:
+
+1. tạo capability qua internal `/internal/signature`;
+2. upload multipart trực tiếp bằng đúng params/signature;
+3. confirm và verify canonical metadata qua Media Service;
+4. kiểm public CDN hoặc private download ngắn hạn thực sự truy cập được;
+5. delete bằng exact Media `fileId`;
+6. trong `finally`, retry exact asset locator và sweep exact context `file_id` trên `image`/`video`/`raw`, sau đó xác nhận context rỗng.
+
+Preset audit yêu cầu Admin API trả rõ `unsigned=false`, `allowed_formats`, `max_file_size` và `type`; các giá trị phải khớp chính xác policy. Runner không tạo/sửa/xóa preset, không xóa theo folder/prefix và không ghi secret, signature, private URL hoặc nội dung fixture ra log.
+
+Ngoài Cloudinary credential, sáu preset và ba internal key Profile/Company/Chat, cấu hình:
+
+```dotenv
+CLOUDINARY_LIVE_SMOKE=1
+CLOUDINARY_LIVE_SMOKE_CONFIRM_CLOUD=<exact CLOUDINARY_CLOUD_NAME>
+CLOUDINARY_LIVE_SMOKE_MEDIA_BASE_URL=https://media.staging.example
+CLOUDINARY_LIVE_SMOKE_PDF_PATH=/absolute/path/smoke.pdf
+CLOUDINARY_LIVE_SMOKE_IMAGE_PATH=/absolute/path/smoke.png
+CLOUDINARY_LIVE_SMOKE_VIDEO_PATH=/absolute/path/smoke.mp4
+```
+
+Base URL phải là direct Media origin, không phải public gateway; HTTP chỉ được chấp nhận cho loopback. PDF phải có magic `%PDF-`, ảnh là JPG/PNG/WEBP hợp lệ và video là MP4 hợp lệ có duration dương. Fixture phải là regular file không rỗng và không vượt giới hạn policy. Một PDF được dùng cho CV/chat, một ảnh cho avatar/logo/company image và một MP4 cho company video.
+
+Sau khi build, chạy với environment được inject từ secret manager hoặc shell:
+
+```bash
+npm run build
+npm run test:cloudinary:live
+```
+
+Runtime image cũng chứa runner và compiled `dist`, nên có thể chạy cùng package command trong staging nếu fixture được mount read-only và các biến môi trường được inject. Không chạy task này trên production cloud. Nếu bất kỳ bước chính hoặc cleanup nào lỗi, lệnh trả exit code khác 0; lỗi cleanup không che lỗi ban đầu.
+
 ## Cấu hình và chạy local
 
 Node.js 24 LTS và PostgreSQL 16 được hỗ trợ. Khi chạy trực tiếp, tạo `.env` từ `.env.example` rồi thay toàn bộ placeholder, đặc biệt phải ghi `DATABASE_URL` thành URL PostgreSQL hoàn chỉnh. Sáu internal key phải khác nhau và mỗi key dài ít nhất 32 byte.
@@ -222,7 +259,7 @@ docker compose -p recruitment-media-test-local -f compose.test.yml down -v --rem
 docker compose -p recruitment-media-test-local -f compose.test.yml up --build --abort-on-container-exit --exit-code-from media-tests
 ```
 
-Kết quả xác nhận gần nhất: **17/17 unit + 26/26 TAP integration test**. Integration test dùng PostgreSQL 16 thật và `FakeStorageProvider` deterministic; Cloudinary adapter được unit-test bằng SDK/fetch mock. Đây không phải live Cloudinary integration test.
+Kết quả xác nhận gần nhất: **26/26 unit + 26/26 TAP integration test**. Integration test dùng PostgreSQL 16 thật và `FakeStorageProvider` deterministic; Cloudinary adapter được unit-test bằng SDK/fetch mock. Đây không phải live Cloudinary integration test.
 
 Phạm vi test gồm:
 
