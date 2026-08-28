@@ -167,6 +167,10 @@ services:
       APPLICATION_SERVICE_ALLOWED_HOSTS: application-service
       APPLICATION_REQUEST_TIMEOUT_MS: ${INTERVIEW_APPLICATION_REQUEST_TIMEOUT_MS:-2000}
       APPLICATION_INTERNAL_API_KEY: ${APPLICATION_INTERNAL_API_KEY_INTERVIEW:?APPLICATION_INTERNAL_API_KEY_INTERVIEW is required}
+      COMPANY_SERVICE_URL: http://company-service:3000
+      COMPANY_SERVICE_ALLOWED_HOSTS: company-service
+      COMPANY_REQUEST_TIMEOUT_MS: ${INTERVIEW_COMPANY_REQUEST_TIMEOUT_MS:-2000}
+      INTERVIEW_CURSOR_HMAC_KEY: ${INTERVIEW_CURSOR_HMAC_KEY:?INTERVIEW_CURSOR_HMAC_KEY is required}
       JWT_ISSUER: ${JWT_ISSUER:-https://auth.recruitment.local}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-recruitment-api}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
@@ -181,6 +185,8 @@ services:
       postgres:
         condition: service_healthy
       application-service:
+        condition: service_started
+      company-service:
         condition: service_started
       kafka-init:
         condition: service_completed_successfully
