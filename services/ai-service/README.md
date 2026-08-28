@@ -1,13 +1,13 @@
 # AI Service
 
-FastAPI service for CV-to-job semantic matching and candidate-facing Job
+FastAPI service for CV-to-job semantic matching and consent-scoped
 recommendations. This vertical slice owns the pgvector schema, the internal
 `POST /match` provider used by Application Service and the scoped
-`POST /recommend/jobs` provider used by Job Search Service. Dedicated non-root
+`POST /recommend/jobs` and `POST /recommend/candidates` providers used by Job
+Search Service. Dedicated non-root
 workers consume `job-events` and `cv-events`, generate pinned 384-dimensional
 CPU embeddings and persist only vectors, hashes and filtering metadata.
-Recruiter-facing candidate recommendations and chatbot implementation remain
-separate tasks.
+Chatbot implementation remains a separate task.
 
 ## Internal match API
 
@@ -67,9 +67,10 @@ Both vector columns are fixed at 384 dimensions. Job vectors retain a partial
 HNSW cosine index for a future benchmarked ANN strategy; recommendation v1
 forces an exact scan for complete, deterministic cursor pages. Only vectors,
 hashes, model identity and minimal filtering metadata are stored; original
-CV/job text is intentionally absent. A CV nearest-neighbor index is deferred
-until the recommend-candidates consent/authorization contract and its
-filtering/load profile are implemented. Job salary filtering columns use
+CV/job text is intentionally absent. The Candidate consent/authorization
+contract now keeps v1 on an exact selected-CV allowlist; a CV nearest-neighbor
+index remains deferred until that bounded filter/load profile is benchmarked.
+Job salary filtering columns use
 `NUMERIC(15,2)`, matching the Job source of truth.
 
 Run migrations from this directory:
@@ -231,9 +232,7 @@ must be explicitly reviewed before enabling the producer.
 Job Search Service. It accepts a CV ID plus bounded `location`, `salary_min`
 and `job_type` filters, and returns only Job IDs, normalized scores, an opaque
 cursor and a stable empty-result reason. It never returns vectors, source text,
-CV metadata or Job content. Candidate recommendations are deliberately not an
-HTTP surface yet; they require a separately reviewed candidate visibility,
-consent and recruiter/company/job capability contract.
+CV metadata or Job content.
 
 The endpoint requires both `X-Internal-Service: job-search-service` and the
 direction-scoped `X-Internal-Api-Key` configured as
@@ -258,6 +257,30 @@ mode. The exact scan is intentionally correctness-first; query-load and
 rate-limit benchmarks plus a filter-aware ANN strategy remain follow-up work
 before raising limits.
 
+## Recruiter-facing Candidate recommendation provider
+
+`POST /recommend/candidates` is also internal-only. It receives one Job ID and
+a sorted, duplicate-free snapshot of at most 500 Profile-authorized entries.
+Each entry binds a Candidate to the exact active CV selected in the separate
+Recruiter-discovery consent plus the current discovery/Profile versions. AI
+ranks only those exact CV IDs; it never treats job-preference consent, a
+default CV or every active CV as permission. The response contains only
+Candidate IDs, normalized scores, an opaque cursor and a stable empty reason.
+
+The route uses the distinct
+`INTERNAL_API_KEY_JOB_SEARCH_CANDIDATES` credential. It cannot be called with
+the `/match` or `/recommend/jobs` key. Its HMAC cursor is bound to the complete
+Candidate/CV/version scope, Job embedding state and transactional CV target
+generation, so any visibility, Profile or selected-CV snapshot change makes a
+continuation stale. Repository results outside the authorized Candidate set
+fail closed.
+
+AI does not return Profile or CV data. Job Search must first authorize the
+Recruiter, verified Company and active owned Job, then obtain the visibility
+snapshot from Profile. After ranking it must synchronously revalidate the
+returned entries with Profile before exposing its minimal card. This second
+gate handles withdrawal races; there is no latest-Candidate fallback.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and set at least:
@@ -266,6 +289,8 @@ Copy `.env.example` to `.env` and set at least:
 - `INTERNAL_API_KEY` — exactly the same secret as Application Service
 - `INTERNAL_API_KEY_JOB_SEARCH` — distinct scoped Job Search-to-AI secret,
   32–512 printable ASCII bytes
+- `INTERNAL_API_KEY_JOB_SEARCH_CANDIDATES` — a second distinct scoped key for
+  the consent-sensitive Candidate-ranking direction
 - `DATABASE_CONNECT_TIMEOUT_SECONDS` (default 2)
 - `DATABASE_STATEMENT_TIMEOUT_MS` (default 2000)
 - `KAFKA_BROKERS`, the Job/CV topics, consumer groups and client IDs
@@ -323,16 +348,16 @@ idempotency, retry/DLQ behavior, strict CV/Media/parser contracts, scoped auth,
 signed/stale cursors, exact filtered pagination and transactional generation
 triggers. Real Kafka tests cover publish → consume → pgvector, duplicate
 delivery, source rejection followed by delete, hash-only malformed DLQ and
-committed offsets. The current suite collects 297 unit tests and 50
-PostgreSQL/Kafka integration tests (347 total). The production worker image
+committed offsets. The current suite collects **319 unit/non-integration tests
+and 51 PostgreSQL/Kafka integration tests (370 total)**. The production worker image
 also successfully generated a normalized 384-dimensional vector with the
 pinned model revision.
 
 ## Current boundary
 
-`/match` and `/recommend/jobs` read precomputed vectors and never load the
-embedding model in a request. Job and CV embeddings are populated
-asynchronously by their dedicated workers. Full producer-to-Media-to-AI staging
-E2E, recruiter-facing `/recommend/candidates` pending consent/capability rules,
-recommendation load/rate-limit benchmarking and chatbot APIs remain outside
-this service task.
+`/match`, `/recommend/jobs` and `/recommend/candidates` read precomputed vectors
+and never load the embedding model in a request. Job and CV embeddings are
+populated asynchronously by their dedicated workers. Full
+producer-to-Media-to-AI staging E2E, CV ANN/filter/load benchmarking,
+distributed recommendation rate limiting and chatbot APIs remain outside this
+service task.

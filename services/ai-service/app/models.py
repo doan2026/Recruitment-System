@@ -10,7 +10,11 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.job_events import JobType
-from app.recommendation import JobRecommendationReason
+from app.recommendation import (
+    CANDIDATE_RECOMMENDATION_MAXIMUM_SCOPE,
+    CandidateRecommendationReason,
+    JobRecommendationReason,
+)
 
 
 class StrictModel(BaseModel):
@@ -105,6 +109,64 @@ class RecommendJobsData(StrictModel):
 
 class RecommendJobsResponse(StrictModel):
     data: RecommendJobsData
+    meta: None = None
+
+
+class CandidateRecommendationEligibility(StrictModel):
+    candidate_id: UUID
+    cv_id: UUID
+    discovery_version: int = Field(ge=1, le=2_147_483_647, strict=True)
+    profile_version: int = Field(ge=1, le=2_147_483_647, strict=True)
+
+
+class RecommendCandidatesRequest(StrictModel):
+    job_id: UUID
+    eligible_candidates: list[CandidateRecommendationEligibility] = Field(
+        min_length=1,
+        max_length=CANDIDATE_RECOMMENDATION_MAXIMUM_SCOPE,
+    )
+    limit: int = Field(default=10, ge=1, le=50, strict=True)
+    cursor: str | None = Field(default=None, min_length=1, max_length=1024)
+
+    @model_validator(mode="after")
+    def require_canonical_unique_scope(self) -> RecommendCandidatesRequest:
+        candidate_ids = [
+            str(candidate.candidate_id) for candidate in self.eligible_candidates
+        ]
+        cv_ids = [str(candidate.cv_id) for candidate in self.eligible_candidates]
+        if (
+            candidate_ids != sorted(candidate_ids)
+            or len(set(candidate_ids)) != len(candidate_ids)
+            or len(set(cv_ids)) != len(cv_ids)
+        ):
+            raise ValueError(
+                "eligible_candidates must be sorted and contain unique Candidate/CV ids"
+            )
+        return self
+
+
+class CandidateRecommendationItem(StrictModel):
+    candidate_id: UUID
+    score: float = Field(ge=0.0, le=1.0)
+
+
+class RecommendCandidatesData(StrictModel):
+    job_id: UUID
+    items: list[CandidateRecommendationItem]
+    next_cursor: str | None = Field(default=None, max_length=1024)
+    reason: CandidateRecommendationReason | None = None
+
+    @model_validator(mode="after")
+    def require_items_or_reason(self) -> RecommendCandidatesData:
+        if bool(self.items) == (self.reason is not None):
+            raise ValueError("exactly one of items or reason must be provided")
+        if not self.items and self.next_cursor is not None:
+            raise ValueError("an empty result cannot have a next cursor")
+        return self
+
+
+class RecommendCandidatesResponse(StrictModel):
+    data: RecommendCandidatesData
     meta: None = None
 
 

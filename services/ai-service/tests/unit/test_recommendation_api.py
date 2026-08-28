@@ -27,6 +27,7 @@ from app.recommendation import (
 
 MATCH_KEY = "legacy-match-key"
 SCOPED_KEY = "job-search-scoped-internal-key-000001"
+CANDIDATE_SCOPED_KEY = "job-search-candidate-scoped-key-000001"
 CV_ID = UUID("10000000-0000-0000-0000-000000000001")
 JOB_1 = UUID("20000000-0000-0000-0000-000000000001")
 JOB_2 = UUID("20000000-0000-0000-0000-000000000002")
@@ -438,7 +439,7 @@ def test_openapi_exposes_jobs_only_and_scoped_security() -> None:
         schema = client.get("/openapi.json").json()
 
     assert "/recommend/jobs" in schema["paths"]
-    assert "/recommend/candidates" not in schema["paths"]
+    assert "/recommend/candidates" in schema["paths"]
     operation = schema["paths"]["/recommend/jobs"]["post"]
     assert operation["security"] == [{"JobSearchInternalApiKey": []}]
     assert set(operation["responses"]) == {"200", "401", "409", "422", "503"}
@@ -459,6 +460,7 @@ def make_client(
                 database_url="postgresql://unused-for-unit-tests",
                 internal_api_key=MATCH_KEY,
                 internal_api_key_job_search=SCOPED_KEY,
+                internal_api_key_job_search_candidates=CANDIDATE_SCOPED_KEY,
             ),
             match_repository=UnusedMatchRepository(),
             recommendation_repository=repository,

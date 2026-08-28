@@ -17,6 +17,7 @@ from psycopg import Cursor
 
 from app.recommendation import (
     RECOMMENDATION_MAXIMUM_PAGES,
+    CandidateRecommendationFilters,
     CandidateRecommendationReason,
     JobRecommendationFilters,
     JobRecommendationReason,
@@ -168,6 +169,7 @@ class PsycopgRecommendationRepository:
     def recommend_candidates(
         self,
         job_id: UUID,
+        filters: CandidateRecommendationFilters,
         *,
         limit: int,
         boundary: RecommendationBoundary | None,
@@ -212,6 +214,11 @@ class PsycopgRecommendationRepository:
                             CandidateRecommendationReason.JOB_EMBEDDING_INACTIVE,
                         )
 
+                    eligible_cv_ids = [
+                        candidate.cv_id for candidate in filters.eligible_candidates
+                    ]
+                    if not eligible_cv_ids:
+                        raise RecommendationStoreUnavailable
                     target_stats = cursor.execute(
                         """
                         SELECT
@@ -225,8 +232,9 @@ class PsycopgRecommendationRepository:
                                 WHERE target_type = 'CVS'
                             )
                         FROM ai.cv_embeddings
+                        WHERE cv_id = ANY(%s::uuid[])
                         """,
-                        (model_name,),
+                        (model_name, eligible_cv_ids),
                     ).fetchone()
                     if target_stats is None:
                         raise RecommendationStoreUnavailable
@@ -266,6 +274,7 @@ class PsycopgRecommendationRepository:
                         cursor,
                         source_vector=source_vector,
                         model_name=model_name,
+                        eligible_cv_ids=eligible_cv_ids,
                         limit=limit,
                         boundary=boundary,
                     )
@@ -351,12 +360,14 @@ class PsycopgRecommendationRepository:
         *,
         source_vector: str,
         model_name: str,
+        eligible_cv_ids: Sequence[UUID],
         limit: int,
         boundary: RecommendationBoundary | None,
     ) -> Sequence[tuple[UUID, float]]:
         parameters: dict[str, object] = {
             "source_vector": source_vector,
             "model_name": model_name,
+            "eligible_cv_ids": list(eligible_cv_ids),
             "result_limit": limit + 1,
         }
         cursor_predicate = ""
@@ -382,6 +393,7 @@ class PsycopgRecommendationRepository:
                 FROM ai.cv_embeddings AS c
                 WHERE c.is_active
                   AND c.model_name = %(model_name)s
+                  AND c.cv_id = ANY(%(eligible_cv_ids)s::uuid[])
             ),
             best_per_candidate AS (
                 SELECT DISTINCT ON (candidate_id)

@@ -22,6 +22,7 @@ JOB_ID = UUID("20000000-0000-0000-0000-000000000001")
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 INTERNAL_API_KEY = "integration-test-internal-key"
 SCOPED_JOB_KEY = "integration-job-search-key-00000001"
+SCOPED_CANDIDATE_KEY = "integration-candidate-key-00000000001"
 
 
 def test_migration_creates_versioned_private_vector_store(
@@ -224,6 +225,7 @@ def test_match_endpoint_uses_real_pgvector_result(database_url: str) -> None:
             database_url=database_url,
             internal_api_key=INTERNAL_API_KEY,
             internal_api_key_job_search=SCOPED_JOB_KEY,
+            internal_api_key_job_search_candidates=SCOPED_CANDIDATE_KEY,
         )
     )
 

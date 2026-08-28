@@ -11,17 +11,26 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
+from app.recommendation import (
+    CandidateEligibility,
+    CandidateRecommendationFilters,
+)
 from app.recommendation_repository import PsycopgRecommendationRepository
 
 pytestmark = pytest.mark.integration
 
 MATCH_KEY = "integration-test-internal-key"
 SCOPED_KEY = "integration-job-search-key-00000001"
+CANDIDATE_SCOPED_KEY = "integration-candidate-key-00000000001"
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 CV_ID = UUID("10000000-0000-0000-0000-000000000001")
 USER_ID = UUID("11000000-0000-0000-0000-000000000001")
 AUTH_HEADERS = {
     "X-Internal-Api-Key": SCOPED_KEY,
+    "X-Internal-Service": "job-search-service",
+}
+CANDIDATE_AUTH_HEADERS = {
+    "X-Internal-Api-Key": CANDIDATE_SCOPED_KEY,
     "X-Internal-Service": "job-search-service",
 }
 
@@ -230,7 +239,7 @@ def test_job_generation_tracks_real_mutations_but_not_zero_rows_or_rollback(
     assert _generation(database_url, "JOBS") == start + 4
 
 
-def test_private_candidate_query_returns_each_users_best_cv_once(
+def test_private_candidate_query_uses_only_selected_cvs_once_per_user(
     database_url: str,
 ) -> None:
     job_id = _job_id(1)
@@ -252,13 +261,81 @@ def test_private_candidate_query_returns_each_users_best_cv_once(
 
     page = _repository(database_url).recommend_candidates(
         job_id,
+        CandidateRecommendationFilters(
+            (
+                CandidateEligibility(USER_ID, CV_ID, 1, 1),
+                CandidateEligibility(
+                    other_user,
+                    UUID("10000000-0000-0000-0000-000000000003"),
+                    1,
+                    1,
+                ),
+            )
+        ),
         limit=10,
         boundary=None,
         expected_source_fingerprint=None,
     )
 
-    assert [item.item_id for item in page.items] == [USER_ID, other_user]
+    # The better second CV for USER_ID was not selected by consent and must
+    # not influence the ranking.
+    assert [item.item_id for item in page.items] == [other_user, USER_ID]
     assert page.reason is None
+
+
+def test_recommend_candidates_http_ranks_only_exact_selected_cvs(
+    database_url: str,
+) -> None:
+    job_id = _job_id(1)
+    candidate_b = UUID("11000000-0000-0000-0000-000000000002")
+    candidate_c = UUID("11000000-0000-0000-0000-000000000003")
+    cv_a_unselected = UUID("10000000-0000-0000-0000-000000000002")
+    cv_b = UUID("10000000-0000-0000-0000-000000000003")
+    cv_c = UUID("10000000-0000-0000-0000-000000000004")
+    _insert_job(database_url, job_id)
+    _insert_cv(database_url, CV_ID, USER_ID, vector=_vector(1.0, 0.5))
+    _insert_cv(
+        database_url,
+        cv_a_unselected,
+        USER_ID,
+        vector=_vector(1.0, 0.0),
+    )
+    _insert_cv(database_url, cv_b, candidate_b, vector=_vector(1.0, 0.2))
+    _insert_cv(database_url, cv_c, candidate_c, vector=_vector(1.0, 0.0))
+
+    with _client(database_url) as client:
+        response = client.post(
+            "/recommend/candidates",
+            headers=CANDIDATE_AUTH_HEADERS,
+            json={
+                "job_id": str(job_id),
+                "eligible_candidates": [
+                    {
+                        "candidate_id": str(USER_ID),
+                        "cv_id": str(CV_ID),
+                        "discovery_version": 1,
+                        "profile_version": 1,
+                    },
+                    {
+                        "candidate_id": str(candidate_b),
+                        "cv_id": str(cv_b),
+                        "discovery_version": 1,
+                        "profile_version": 1,
+                    },
+                ],
+                "limit": 10,
+            },
+        )
+
+    assert response.status_code == 200
+    assert [
+        UUID(item["candidate_id"]) for item in response.json()["data"]["items"]
+    ] == [candidate_b, USER_ID]
+    assert candidate_c not in {
+        UUID(item["candidate_id"]) for item in response.json()["data"]["items"]
+    }
+    assert response.json()["data"]["next_cursor"] is None
+    assert response.json()["data"]["reason"] is None
 
 
 def _client(database_url: str) -> TestClient:
@@ -268,6 +345,7 @@ def _client(database_url: str) -> TestClient:
                 database_url=database_url,
                 internal_api_key=MATCH_KEY,
                 internal_api_key_job_search=SCOPED_KEY,
+                internal_api_key_job_search_candidates=CANDIDATE_SCOPED_KEY,
             )
         )
     )
