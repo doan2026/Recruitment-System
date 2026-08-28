@@ -112,6 +112,37 @@ test('environment rejects placeholder cursor secrets and insecure JWKS', () => {
   );
 });
 
+test('environment requires a valid replay cutoff for an enabled consumer', () => {
+  const base = {
+    DATABASE_URL: 'postgresql://notification:notification@db/test',
+    JWT_ISSUER: 'https://auth.recruitment.local',
+    JWT_AUDIENCE: 'recruitment-api',
+    JWT_PUBLIC_KEY: 'public-key',
+    NOTIFICATION_CURSOR_HMAC_KEY: CURSOR_KEY,
+    NOTIFICATION_KAFKA_CONSUMER_ENABLED: 'true',
+    KAFKA_BROKERS: 'kafka:9092',
+  };
+  assert.throws(
+    () => validateEnvironment(base),
+    /NOTIFICATION_APPLICATION_REPLAY_AFTER is required/,
+  );
+  assert.throws(
+    () =>
+      validateEnvironment({
+        ...base,
+        NOTIFICATION_APPLICATION_REPLAY_AFTER: '2026-02-31T00:00:00Z',
+      }),
+    /valid UTC instant/,
+  );
+  assert.equal(
+    validateEnvironment({
+      ...base,
+      NOTIFICATION_APPLICATION_REPLAY_AFTER: '2026-08-28T00:00:00Z',
+    }).NOTIFICATION_APPLICATION_REPLAY_AFTER,
+    '2026-08-28T00:00:00.000Z',
+  );
+});
+
 test('strict verifier accepts a complete RS256 token', async () => {
   const fixture = signingFixture();
   const config = jwtConfig(fixture.publicPem);

@@ -30,6 +30,7 @@ const PIPELINE_EVENT_ID = '51000000-0000-4000-8000-000000000002';
 const LEGACY_EVENT_ID = '51000000-0000-4000-8000-000000000003';
 const LEGACY_WITHDRAWN_EVENT_ID =
   '51000000-0000-4000-8000-000000000004';
+const HISTORICAL_EVENT_ID = '51000000-0000-4000-8000-000000000005';
 const TOPIC = process.env.KAFKA_APPLICATION_TOPIC ?? 'application-events';
 
 const { privateKey, publicKey } = generateKeyPairSync('rsa', {
@@ -52,6 +53,8 @@ process.env.JWT_AUDIENCE = AUDIENCE;
 process.env.NOTIFICATION_CURSOR_HMAC_KEY =
   'notification-integration-cursor-key-000000000001';
 process.env.NOTIFICATION_EVENT_MAX_BYTES = '65536';
+process.env.NOTIFICATION_APPLICATION_REPLAY_AFTER =
+  '2026-08-27T00:00:00.000Z';
 process.env.NOTIFICATION_KAFKA_CONSUMER_ENABLED = 'true';
 process.env.KAFKA_NOTIFICATION_GROUP_ID =
   `notification-integration-${randomUUID()}`;
@@ -103,12 +106,13 @@ const event = (overrides = {}) => ({
   ...overrides,
 });
 
-const publish = async (payload, key = APPLICATION_ID) => {
+const publish = async (payload, key = APPLICATION_ID, timestamp) => {
   await producer.send({
     topic: TOPIC,
     messages: [
       {
         key,
+        ...(timestamp ? { timestamp: String(timestamp) } : {}),
         value:
           typeof payload === 'string' ? payload : JSON.stringify(payload),
       },
@@ -166,6 +170,14 @@ before(async () => {
   });
   await admin.disconnect();
   await producer.connect();
+  // The group intentionally starts at the retained beginning, but records
+  // older than the explicit first-rollout cutoff are ledgered without
+  // generating a fresh unread inbox item.
+  await publish(
+    event({ event_id: HISTORICAL_EVENT_ID }),
+    APPLICATION_ID,
+    Date.parse('2026-08-26T23:59:59.999Z'),
+  );
   // Publish before the new group joins. A v1 projection must not lose this
   // backlog even when Application Service starts before Notification Service.
   await publish(event());
@@ -220,6 +232,20 @@ test('Kafka duplicate is idempotent and event-id collision is quarantined', asyn
   assert.ok(
     notification.createdAt < new Date(payload.occurred_at),
     'inbox ordering must use trusted database receive time',
+  );
+  assert.equal(
+    await prisma.processedEvent.count({
+      where: { eventId: HISTORICAL_EVENT_ID },
+    }),
+    1,
+    'historical record must be durably ledgered',
+  );
+  assert.equal(
+    await prisma.notification.count({
+      where: { sourceEventId: HISTORICAL_EVENT_ID },
+    }),
+    0,
+    'historical record before rollout cutoff must not become unread',
   );
 });
 

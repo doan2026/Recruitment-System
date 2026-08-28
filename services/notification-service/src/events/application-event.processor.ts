@@ -17,6 +17,7 @@ export interface KafkaRecord {
   topic: string;
   partition: number;
   offset: string;
+  timestamp: string;
   key: Buffer | null;
   value: Buffer | null;
 }
@@ -28,6 +29,7 @@ export class EventCollisionError extends Error {
 @Injectable()
 export class ApplicationEventProcessor {
   private readonly maxBytes: number;
+  private readonly replayAfterEpochMillis: number;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -36,6 +38,10 @@ export class ApplicationEventProcessor {
     this.maxBytes = Number(
       config.getOrThrow<string>('NOTIFICATION_EVENT_MAX_BYTES'),
     );
+    this.replayAfterEpochMillis = new Date(
+      config.get<string>('NOTIFICATION_APPLICATION_REPLAY_AFTER') ??
+        '1970-01-01T00:00:00.000Z',
+    ).valueOf();
   }
 
   parse(record: KafkaRecord): ApplicationEvent {
@@ -45,9 +51,22 @@ export class ApplicationEventProcessor {
   async process(
     record: KafkaRecord,
     event: ApplicationEvent,
-  ): Promise<'CREATED' | 'DUPLICATE' | 'NO_RECIPIENT'> {
+  ): Promise<
+    | 'CREATED'
+    | 'DUPLICATE'
+    | 'NO_RECIPIENT'
+    | 'SKIPPED_BEFORE_REPLAY_CUTOFF'
+  > {
     const hash = sha256(record.value);
-    const draft = mapApplicationNotification(event);
+    const recordTimestamp = Number(record.timestamp);
+    if (!Number.isSafeInteger(recordTimestamp) || recordTimestamp < 0) {
+      throw new Error('Kafka record timestamp is invalid');
+    }
+    const beforeReplayCutoff =
+      recordTimestamp < this.replayAfterEpochMillis;
+    const draft = beforeReplayCutoff
+      ? null
+      : mapApplicationNotification(event);
     try {
       return await this.prisma.$transaction(async (transaction) => {
         const existing = await transaction.processedEvent.findUnique({
@@ -99,6 +118,9 @@ export class ApplicationEventProcessor {
             schemaVersion: event.schemaVersion,
           },
         });
+        if (beforeReplayCutoff) {
+          return 'SKIPPED_BEFORE_REPLAY_CUTOFF' as const;
+        }
         return draft ? ('CREATED' as const) : ('NO_RECIPIENT' as const);
       });
     } catch (error) {

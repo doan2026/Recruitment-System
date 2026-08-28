@@ -126,6 +126,7 @@ export class ApplicationEventConsumer
               topic: batch.topic,
               partition: batch.partition,
               offset: message.offset,
+              timestamp: message.timestamp,
               key: message.key,
               value: message.value,
             };

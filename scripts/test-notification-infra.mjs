@@ -74,6 +74,7 @@ assert.match(runtime, /KAFKA_APPLICATION_TOPIC/);
 assert.match(runtime, /KAFKA_NOTIFICATION_GROUP_ID/);
 assert.match(runtime, /NOTIFICATION_KAFKA_CONSUMER_ENABLED/);
 assert.match(runtime, /NOTIFICATION_EVENT_MAX_BYTES/);
+assert.match(runtime, /NOTIFICATION_APPLICATION_REPLAY_AFTER/);
 assert.match(runtime, /NOTIFICATION_CURSOR_HMAC_KEY/);
 assert.match(runtime, /JWT_JWKS_URI: ""/);
 assert.doesNotMatch(runtime, /JWT_JWKS_URI: http:/);
@@ -108,5 +109,10 @@ assert.ok(
   ),
   'Notification package-lock.json is required for npm ci',
 );
+const dockerignore = read('services/notification-service/.dockerignore');
+assert.match(dockerignore, /^node_modules$/m);
+assert.match(dockerignore, /^dist$/m);
+assert.match(dockerignore, /^\.env\.\*$/m);
+assert.match(dockerignore, /^!\.env\.example$/m);
 
 console.log('Notification infrastructure static checks passed.');

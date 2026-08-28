@@ -8,7 +8,8 @@ canonical `application-events` v1 topic and projects safe in-app notifications.
 
 - Canonical Application event v1 parser with a bounded legacy dual-read path.
 - Kafka consumer group `notification-application-inbox-v1` with manual offset
-  commit, first-join backlog replay, durable idempotency and poison quarantine.
+  commit, bounded first-join backlog replay, durable idempotency and poison
+  quarantine.
 - Atomic `ProcessedEvent` + `Notification` + `IN_APP` delivery-log writes.
 - Candidate/Recruiter recipient mapping for application submission, pipeline,
   withdrawal, Offer sent, accepted and declined events.
@@ -44,12 +45,17 @@ CV content and contact data. Notification payloads retain only IDs, target
 status and a local deep link.
 
 Delivery is at least once. A fresh v1 group starts from the retained beginning
-so service startup order cannot lose events; `(topic,event_id)` and the payload
-hash make replay idempotent and detect event-ID collisions. Invalid events and
-collisions store only hashes, Kafka position and a safe error code before the
-offset is committed. Transient database/broker errors do not commit the
-offset. Inbox `created_at` is trusted database receive time, never the producer
-clock, so a skewed event cannot corrupt pagination or read-all cutoffs.
+so service startup order cannot lose events, but a required, stable
+`NOTIFICATION_APPLICATION_REPLAY_AFTER` cutoff prevents older retained Kafka
+records from becoming fresh unread items. Records before the cutoff are still
+ledgered and committed; records at/after it are projected. Set the cutoff once
+to the reviewed first-rollout UTC instant and never move it forward for the
+same consumer group. `(topic,event_id)` and the payload hash make replay
+idempotent and detect event-ID collisions. Invalid events and collisions store
+only hashes, Kafka position and a safe error code before the offset is
+committed. Transient database/broker errors do not commit the offset. Inbox
+`created_at` is trusted database receive time, never the producer clock, so a
+skewed event cannot corrupt pagination or read-all cutoffs.
 
 ## HTTP API
 
@@ -97,6 +103,7 @@ Required settings:
 | `KAFKA_APPLICATION_TOPIC` | Defaults to `application-events` |
 | `KAFKA_NOTIFICATION_GROUP_ID` | Dedicated v1 projection group |
 | `NOTIFICATION_EVENT_MAX_BYTES` | Event cap, 1024–262144 bytes |
+| `NOTIFICATION_APPLICATION_REPLAY_AFTER` | Required first-rollout UTC cutoff for retained Kafka record timestamps |
 | `NOTIFICATION_CURSOR_HMAC_KEY` | Distinct non-placeholder secret, at least 32 bytes |
 | `JWT_PUBLIC_KEY_PATH` or `JWT_PUBLIC_KEY` | Static Auth public key |
 | `JWT_JWKS_URI` | Optional HTTPS JWKS alternative |
@@ -131,9 +138,10 @@ docker compose -f compose.test.yml up \
 docker compose -f compose.test.yml down -v --remove-orphans
 ```
 
-The verified suite passes 26 unit tests and 6 PostgreSQL/Kafka integration
-tests. Coverage includes pre-start backlog delivery, duplicate/collision,
-poison continuation, legacy withdrawal routing, DB receive-time ordering,
-strict JWT/JWKS behavior, owner isolation, HMAC pagination and cutoff read-all.
+The verified suite passes 27 unit tests and 6 PostgreSQL/Kafka integration
+tests. Coverage includes bounded pre-start backlog delivery, old-record
+cutoff/ledgering, duplicate/collision, poison continuation, legacy withdrawal
+routing, DB receive-time ordering, strict JWT/JWKS behavior, owner isolation,
+HMAC pagination and cutoff read-all.
 KafkaJS 2.2.4 can emit a Node 24 `TimeoutNegativeWarning`; it is an upstream
 timer warning and does not change the passing delivery assertions.

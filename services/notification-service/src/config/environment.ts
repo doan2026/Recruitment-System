@@ -1,4 +1,6 @@
 const PLACEHOLDER = /replace-with|changeme|placeholder/i;
+const UTC_INSTANT =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 
 const required = (
   environment: Record<string, unknown>,
@@ -70,6 +72,26 @@ export const validateEnvironment = (
     )) {
       throw new Error('KAFKA_APPLICATION_TOPIC is invalid');
     }
+    const replayAfter = required(
+      environment,
+      'NOTIFICATION_APPLICATION_REPLAY_AFTER',
+    );
+    if (!UTC_INSTANT.test(replayAfter)) {
+      throw new Error(
+        'NOTIFICATION_APPLICATION_REPLAY_AFTER must be an exact UTC instant',
+      );
+    }
+    const replayAfterDate = new Date(replayAfter);
+    if (
+      Number.isNaN(replayAfterDate.valueOf()) ||
+      replayAfterDate.toISOString().slice(0, 19) !== replayAfter.slice(0, 19)
+    ) {
+      throw new Error(
+        'NOTIFICATION_APPLICATION_REPLAY_AFTER must be a valid UTC instant',
+      );
+    }
+    environment.NOTIFICATION_APPLICATION_REPLAY_AFTER =
+      replayAfterDate.toISOString();
   }
   const maxPayload = Number(
     environment.NOTIFICATION_EVENT_MAX_BYTES ?? '65536',

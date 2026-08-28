@@ -44,8 +44,7 @@ export const configureApplication = (app: INestApplication): void => {
         .setDescription('Private notification inbox API.')
         .setVersion('1.0')
         .addBearerAuth()
-        .addServer('/notifications', 'API Gateway')
-        .addServer('/', 'Direct service access')
+        .addServer('/', 'API Gateway or direct service root')
         .build(),
     );
     SwaggerModule.setup('docs', app, document);
