@@ -163,6 +163,7 @@ class ApplicationOfferPostgresIT {
                 application.bookmarks,
                 application.application_cv_usage,
                 application.cv_submission_gates,
+                application.application_profile_skill_snapshots,
                 application.applications
             CASCADE
             """
@@ -245,7 +246,7 @@ class ApplicationOfferPostgresIT {
         );
 
         assertThat(appliedVersions)
-            .containsExactly("1", "2", "3", "4", "5", "6", "7");
+            .containsExactly("1", "2", "3", "4", "5", "6", "7", "8");
         assertThat(tables).contains("offers");
         assertThat(columnTypes)
             .containsEntry("salary", "numeric")

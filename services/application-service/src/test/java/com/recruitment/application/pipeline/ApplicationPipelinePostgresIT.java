@@ -149,6 +149,7 @@ class ApplicationPipelinePostgresIT {
                 application.bookmarks,
                 application.application_cv_usage,
                 application.cv_submission_gates,
+                application.application_profile_skill_snapshots,
                 application.applications
             CASCADE
             """
@@ -200,9 +201,10 @@ class ApplicationPipelinePostgresIT {
         );
 
         assertThat(appliedVersions)
-            .containsExactly("1", "2", "3", "4", "5", "6", "7");
+            .containsExactly("1", "2", "3", "4", "5", "6", "7", "8");
         assertThat(tables).contains(
             "applications",
+            "application_profile_skill_snapshots",
             "application_history",
             "application_event_outbox",
             "bookmarks",
@@ -425,6 +427,355 @@ class ApplicationPipelinePostgresIT {
     }
 
     @Test
+    void skillFilterUsesCaseInsensitiveExactAnySemanticsWithoutDuplicates() {
+        UUID bothSkills = saveCapturedApplication(
+            OWNER_JOB_ID,
+            COMPANY_ID,
+            RECRUITER_ID,
+            Instant.parse("2026-08-24T04:00:00Z"),
+            "Java",
+            "Kotlin"
+        );
+        UUID javaOnly = saveCapturedApplication(
+            OWNER_JOB_ID,
+            COMPANY_ID,
+            RECRUITER_ID,
+            Instant.parse("2026-08-24T03:00:00Z"),
+            "java"
+        );
+        UUID kotlinOnly = saveCapturedApplication(
+            OWNER_JOB_ID,
+            COMPANY_ID,
+            RECRUITER_ID,
+            Instant.parse("2026-08-24T02:00:00Z"),
+            "KOTLIN"
+        );
+        saveCapturedApplication(
+            OWNER_JOB_ID,
+            COMPANY_ID,
+            RECRUITER_ID,
+            Instant.parse("2026-08-24T01:00:00Z"),
+            "JavaScript",
+            "Kotlin Multiplatform"
+        );
+
+        RecruiterApplicationPageResponse firstPage =
+            pipeline.listForRecruiter(
+                RECRUITER_ID,
+                AUTHORIZATION,
+                null,
+                null,
+                null,
+                null,
+                List.of(" JAVA ", "kOtLiN"),
+                ApplicationSort.APPLIED_AT_DESC,
+                0,
+                2
+            );
+        RecruiterApplicationPageResponse secondPage =
+            pipeline.listForRecruiter(
+                RECRUITER_ID,
+                AUTHORIZATION,
+                null,
+                null,
+                null,
+                null,
+                List.of("java", "KOTLIN"),
+                ApplicationSort.APPLIED_AT_DESC,
+                1,
+                2
+            );
+
+        assertThat(firstPage.items())
+            .extracting(RecruiterApplicationItemResponse::id)
+            .containsExactly(bothSkills, javaOnly);
+        assertThat(secondPage.items())
+            .extracting(RecruiterApplicationItemResponse::id)
+            .containsExactly(kotlinOnly);
+        assertThat(firstPage.totalElements()).isEqualTo(3L);
+        assertThat(firstPage.totalPages()).isEqualTo(2);
+        assertThat(secondPage.totalElements()).isEqualTo(3L);
+        assertThat(secondPage.totalPages()).isEqualTo(2);
+    }
+
+    @Test
+    void skillFilterCombinesWithJobStatusAndInclusiveAppliedRange() {
+        Instant appliedFrom = Instant.parse("2026-08-24T01:00:00Z");
+        Instant appliedTo = Instant.parse("2026-08-24T03:00:00Z");
+        UUID matching = saveCapturedApplication(
+            OWNER_JOB_ID,
+            COMPANY_ID,
+            RECRUITER_ID,
+            Instant.parse("2026-08-24T02:00:00Z"),
+            "Java"
+        );
+        UUID wrongJob = saveCapturedApplication(
+            MEMBER_JOB_ID,
+            COMPANY_ID,
+            RECRUITER_ID,
+            Instant.parse("2026-08-24T02:00:00Z"),
+            "Java"
+        );
+        saveCapturedApplication(
+            OWNER_JOB_ID,
+            COMPANY_ID,
+            RECRUITER_ID,
+            Instant.parse("2026-08-24T02:00:00Z"),
+            "Java"
+        );
+        UUID tooEarly = saveCapturedApplication(
+            OWNER_JOB_ID,
+            COMPANY_ID,
+            RECRUITER_ID,
+            Instant.parse("2026-08-24T00:59:59Z"),
+            "Java"
+        );
+        UUID tooLate = saveCapturedApplication(
+            OWNER_JOB_ID,
+            COMPANY_ID,
+            RECRUITER_ID,
+            Instant.parse("2026-08-24T03:00:01Z"),
+            "Java"
+        );
+        UUID wrongSkill = saveCapturedApplication(
+            OWNER_JOB_ID,
+            COMPANY_ID,
+            RECRUITER_ID,
+            Instant.parse("2026-08-24T02:00:00Z"),
+            "Go"
+        );
+        markReviewing(matching);
+        markReviewing(wrongJob);
+        markReviewing(tooEarly);
+        markReviewing(tooLate);
+        markReviewing(wrongSkill);
+
+        RecruiterApplicationPageResponse page = pipeline.listForRecruiter(
+            RECRUITER_ID,
+            AUTHORIZATION,
+            OWNER_JOB_ID,
+            ApplicationStatus.REVIEWING,
+            appliedFrom,
+            appliedTo,
+            List.of("JAVA"),
+            ApplicationSort.APPLIED_AT_ASC,
+            0,
+            20
+        );
+
+        assertThat(page.items())
+            .extracting(RecruiterApplicationItemResponse::id)
+            .containsExactly(matching);
+        assertThat(page.totalElements()).isEqualTo(1L);
+    }
+
+    @Test
+    void skillFilterExcludesLegacyAndCapturedEmptyOnlyWhenActive() {
+        UUID matching = saveCapturedApplication(
+            OWNER_JOB_ID,
+            COMPANY_ID,
+            RECRUITER_ID,
+            Instant.parse("2026-08-24T04:00:00Z"),
+            "Java"
+        );
+        UUID capturedEmpty = saveCapturedApplication(
+            OWNER_JOB_ID,
+            COMPANY_ID,
+            RECRUITER_ID,
+            Instant.parse("2026-08-24T03:00:00Z")
+        );
+        UUID legacy = saveAppliedApplication(
+            OWNER_JOB_ID,
+            COMPANY_ID,
+            RECRUITER_ID,
+            Instant.parse("2026-08-24T02:00:00Z")
+        );
+        UUID otherCompany = saveCapturedApplication(
+            OTHER_COMPANY_JOB_ID,
+            OTHER_COMPANY_ID,
+            OUTSIDE_RECRUITER_ID,
+            Instant.parse("2026-08-24T05:00:00Z"),
+            "Java"
+        );
+
+        RecruiterApplicationPageResponse unfiltered =
+            pipeline.listForRecruiter(
+                RECRUITER_ID,
+                AUTHORIZATION,
+                null,
+                null,
+                null,
+                null,
+                List.of(),
+                ApplicationSort.APPLIED_AT_DESC,
+                0,
+                20
+            );
+        RecruiterApplicationPageResponse filtered =
+            pipeline.listForRecruiter(
+                RECRUITER_ID,
+                AUTHORIZATION,
+                null,
+                null,
+                null,
+                null,
+                List.of("java"),
+                ApplicationSort.APPLIED_AT_DESC,
+                0,
+                20
+            );
+
+        assertThat(unfiltered.items())
+            .extracting(RecruiterApplicationItemResponse::id)
+            .containsExactly(matching, capturedEmpty, legacy)
+            .doesNotContain(otherCompany);
+        assertThat(unfiltered.totalElements()).isEqualTo(3L);
+        assertThat(filtered.items())
+            .extracting(RecruiterApplicationItemResponse::id)
+            .containsExactly(matching)
+            .doesNotContain(otherCompany, capturedEmpty, legacy);
+        assertThat(filtered.totalElements()).isEqualTo(1L);
+    }
+
+    @Test
+    void skillFilterPaginationIsDeterministicForEverySortWhenValuesTie() {
+        Instant appliedAt = Instant.parse("2026-08-24T02:00:00Z");
+        UUID first = UUID.fromString(
+            "40000000-0000-0000-0000-000000000001"
+        );
+        UUID second = UUID.fromString(
+            "40000000-0000-0000-0000-000000000002"
+        );
+        UUID third = UUID.fromString(
+            "40000000-0000-0000-0000-000000000003"
+        );
+        saveCapturedApplication(
+            first,
+            OWNER_JOB_ID,
+            COMPANY_ID,
+            RECRUITER_ID,
+            appliedAt,
+            "Java"
+        );
+        saveCapturedApplication(
+            second,
+            OWNER_JOB_ID,
+            COMPANY_ID,
+            RECRUITER_ID,
+            appliedAt,
+            "Java"
+        );
+        saveCapturedApplication(
+            third,
+            OWNER_JOB_ID,
+            COMPANY_ID,
+            RECRUITER_ID,
+            appliedAt,
+            "Java"
+        );
+
+        RecruiterApplicationPageResponse pageZero =
+            pipeline.listForRecruiter(
+                RECRUITER_ID,
+                AUTHORIZATION,
+                null,
+                null,
+                null,
+                null,
+                List.of("Java"),
+                ApplicationSort.APPLIED_AT_DESC,
+                0,
+                2
+            );
+        RecruiterApplicationPageResponse pageOne =
+            pipeline.listForRecruiter(
+                RECRUITER_ID,
+                AUTHORIZATION,
+                null,
+                null,
+                null,
+                null,
+                List.of("Java"),
+                ApplicationSort.APPLIED_AT_DESC,
+                1,
+                2
+            );
+        RecruiterApplicationPageResponse ascendingPageZero =
+            pipeline.listForRecruiter(
+                RECRUITER_ID,
+                AUTHORIZATION,
+                null,
+                null,
+                null,
+                null,
+                List.of("Java"),
+                ApplicationSort.APPLIED_AT_ASC,
+                0,
+                2
+            );
+        RecruiterApplicationPageResponse ascendingPageOne =
+            pipeline.listForRecruiter(
+                RECRUITER_ID,
+                AUTHORIZATION,
+                null,
+                null,
+                null,
+                null,
+                List.of("Java"),
+                ApplicationSort.APPLIED_AT_ASC,
+                1,
+                2
+            );
+        RecruiterApplicationPageResponse matchPageZero =
+            pipeline.listForRecruiter(
+                RECRUITER_ID,
+                AUTHORIZATION,
+                null,
+                null,
+                null,
+                null,
+                List.of("Java"),
+                ApplicationSort.MATCH_SCORE_DESC,
+                0,
+                2
+            );
+        RecruiterApplicationPageResponse matchPageOne =
+            pipeline.listForRecruiter(
+                RECRUITER_ID,
+                AUTHORIZATION,
+                null,
+                null,
+                null,
+                null,
+                List.of("Java"),
+                ApplicationSort.MATCH_SCORE_DESC,
+                1,
+                2
+            );
+
+        assertThat(pageZero.items())
+            .extracting(RecruiterApplicationItemResponse::id)
+            .containsExactly(third, second);
+        assertThat(pageOne.items())
+            .extracting(RecruiterApplicationItemResponse::id)
+            .containsExactly(first);
+        assertThat(ascendingPageZero.items())
+            .extracting(RecruiterApplicationItemResponse::id)
+            .containsExactly(first, second);
+        assertThat(ascendingPageOne.items())
+            .extracting(RecruiterApplicationItemResponse::id)
+            .containsExactly(third);
+        assertThat(matchPageZero.items())
+            .extracting(RecruiterApplicationItemResponse::id)
+            .containsExactly(third, second);
+        assertThat(matchPageOne.items())
+            .extracting(RecruiterApplicationItemResponse::id)
+            .containsExactly(first);
+        assertThat(pageZero.totalElements()).isEqualTo(3L);
+        assertThat(pageOne.totalElements()).isEqualTo(3L);
+    }
+
+    @Test
     void outboxFailureRollsBackStatusAndHistory() {
         UUID applicationId = saveAppliedApplication();
         jdbc.execute(
@@ -639,6 +990,79 @@ class ApplicationPipelinePostgresIT {
             appliedAt
         ));
         return applicationId;
+    }
+
+    private UUID saveCapturedApplication(
+        UUID jobId,
+        UUID companyId,
+        UUID jobOwnerRecruiterId,
+        Instant appliedAt,
+        String... skills
+    ) {
+        return saveCapturedApplication(
+            UUID.randomUUID(),
+            jobId,
+            companyId,
+            jobOwnerRecruiterId,
+            appliedAt,
+            skills
+        );
+    }
+
+    private UUID saveCapturedApplication(
+        UUID applicationId,
+        UUID jobId,
+        UUID companyId,
+        UUID jobOwnerRecruiterId,
+        Instant appliedAt,
+        String... skills
+    ) {
+        TransactionTemplate transaction = new TransactionTemplate(
+            transactionManager
+        );
+        transaction.executeWithoutResult(status -> {
+            applicationRepository.saveAndFlush(ApplicationEntity.applied(
+                applicationId,
+                jobId,
+                companyId,
+                UUID.randomUUID(),
+                jobOwnerRecruiterId,
+                UUID.randomUUID(),
+                "Backend Engineer",
+                "I would like to apply",
+                ApplicationSource.SEARCH,
+                1,
+                7L,
+                skills.length,
+                appliedAt
+            ));
+            for (String skill : skills) {
+                jdbc.update(
+                    """
+                    INSERT INTO application.application_profile_skill_snapshots (
+                        application_id,
+                        skill_name
+                    ) VALUES (?, ?)
+                    """,
+                    applicationId,
+                    skill
+                );
+            }
+        });
+        return applicationId;
+    }
+
+    private void markReviewing(UUID applicationId) {
+        pipeline.changeStatus(
+            applicationId,
+            RECRUITER_ID,
+            AUTHORIZATION,
+            new ChangeApplicationStatusRequest(
+                ApplicationStatus.REVIEWING,
+                "Ready for review",
+                0L
+            )
+        );
     }
 
     @TestConfiguration

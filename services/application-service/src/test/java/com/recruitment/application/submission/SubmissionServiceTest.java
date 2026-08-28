@@ -1,6 +1,7 @@
 package com.recruitment.application.submission;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -10,6 +11,8 @@ import com.recruitment.application.api.BusinessException;
 import com.recruitment.application.client.JobClient;
 import com.recruitment.application.client.JobClient.JobAvailability;
 import com.recruitment.application.client.ProfileClient;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,13 +40,21 @@ class SubmissionServiceTest {
     @Test
     void submitsAfterJobAndCvValidation() {
         JobAvailability job = availableJob();
+        ProfileSkillSnapshot snapshot = new ProfileSkillSnapshot(
+            1,
+            7,
+            List.of("Java", "PostgreSQL")
+        );
         when(jobs.getAvailability(jobId)).thenReturn(job);
-        when(profiles.candidateOwnsCv(candidateId, cvId, "Bearer token"))
-            .thenReturn(true);
+        when(profiles.verifyCandidateCvForSubmission(
+            candidateId,
+            cvId,
+            "Bearer token"
+        )).thenReturn(Optional.of(snapshot));
 
         service.submit(candidateId, "Bearer token", request);
 
-        verify(transactions).create(candidateId, request, job);
+        verify(transactions).create(candidateId, request, job, snapshot);
     }
 
     @Test
@@ -68,7 +79,7 @@ class SubmissionServiceTest {
             .isInstanceOf(BusinessException.class)
             .extracting("code")
             .isEqualTo("JOB_NOT_ACCEPTING_APPLICATIONS");
-        verify(profiles, never()).candidateOwnsCv(
+        verify(profiles, never()).verifyCandidateCvForSubmission(
             candidateId,
             cvId,
             "Bearer token"
@@ -78,8 +89,11 @@ class SubmissionServiceTest {
     @Test
     void rejectsACvThatDoesNotBelongToCandidate() {
         when(jobs.getAvailability(jobId)).thenReturn(availableJob());
-        when(profiles.candidateOwnsCv(candidateId, cvId, "Bearer token"))
-            .thenReturn(false);
+        when(profiles.verifyCandidateCvForSubmission(
+            candidateId,
+            cvId,
+            "Bearer token"
+        )).thenReturn(Optional.empty());
 
         assertThatThrownBy(() ->
             service.submit(candidateId, "Bearer token", request)
@@ -87,11 +101,7 @@ class SubmissionServiceTest {
             .isInstanceOf(BusinessException.class)
             .extracting("code")
             .isEqualTo("CV_NOT_AVAILABLE");
-        verify(transactions, never()).create(
-            candidateId,
-            request,
-            availableJob()
-        );
+        verify(transactions, never()).create(any(), any(), any(), any());
     }
 
     private JobAvailability availableJob() {

@@ -300,4 +300,24 @@ class ApplicationPipelineServiceTest {
             .isEqualTo("INVALID_PAGINATION");
         verify(companies, never()).getRecruiterMembership(any(), any());
     }
+
+    @Test
+    void rejectsInvalidSkillFilterBeforeCallingCompanyService() {
+        assertThatThrownBy(() -> service.listForRecruiter(
+            recruiterId,
+            "Bearer token",
+            null,
+            null,
+            null,
+            null,
+            List.of("Java", "java"),
+            ApplicationSort.APPLIED_AT_DESC,
+            0,
+            20
+        ))
+            .isInstanceOf(BusinessException.class)
+            .extracting("code")
+            .isEqualTo("INVALID_SKILL_FILTER");
+        verify(companies, never()).getRecruiterMembership(any(), any());
+    }
 }

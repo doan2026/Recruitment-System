@@ -7,10 +7,12 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -33,7 +35,7 @@ public class ApplicationPipelineController {
     @GetMapping
     @PreAuthorize("hasRole('RECRUITER')")
     @Operation(summary = "Filter applications belonging to recruiter company")
-    public ApiResponse<RecruiterApplicationPageResponse> list(
+    public ResponseEntity<ApiResponse<RecruiterApplicationPageResponse>> list(
         JwtAuthenticationToken authentication,
         @RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
         @RequestParam(name = "job_id", required = false) UUID jobId,
@@ -44,22 +46,28 @@ public class ApplicationPipelineController {
         @RequestParam(required = false)
         @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
         Instant appliedTo,
+        @RequestParam(name = "skills", required = false)
+        List<String> skills,
         @RequestParam(defaultValue = "APPLIED_AT_DESC")
         ApplicationSort sort,
         @RequestParam(defaultValue = "0") int page,
         @RequestParam(defaultValue = "20") int size
     ) {
-        return ApiResponse.of(pipeline.listForRecruiter(
-            subject(authentication),
-            authorization,
-            jobId,
-            status,
-            appliedFrom,
-            appliedTo,
-            sort,
-            page,
-            size
-        ));
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+            .header(HttpHeaders.VARY, HttpHeaders.AUTHORIZATION)
+            .body(ApiResponse.of(pipeline.listForRecruiter(
+                subject(authentication),
+                authorization,
+                jobId,
+                status,
+                appliedFrom,
+                appliedTo,
+                skills,
+                sort,
+                page,
+                size
+            )));
     }
 
     @PatchMapping("/{applicationId}/status")

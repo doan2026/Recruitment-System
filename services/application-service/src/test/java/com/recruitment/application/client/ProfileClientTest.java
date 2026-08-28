@@ -11,7 +11,9 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.recruitment.application.api.BusinessException;
+import com.recruitment.application.submission.ProfileSkillSnapshot;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -69,6 +71,218 @@ class ProfileClientTest {
             CV_ID,
             AUTHORIZATION
         )).isTrue();
+        server.verify();
+    }
+
+    @Test
+    void verifiesSubmissionCvAndReturnsImmutableProfileSkillSnapshot() {
+        expectVerifyV2().andRespond(withSuccess(
+            """
+            {
+              "data": {
+                "candidateId": "%s",
+                "cvId": "%s",
+                "available": true,
+                "cv": %s,
+                "profileSkillSnapshot": {
+                  "schemaVersion": 1,
+                  "profileAggregateVersion": 7,
+                  "skills": [" Ｊａｖａ ", "PostgreSQL"]
+                }
+              },
+              "meta": null
+            }
+            """.formatted(CANDIDATE_ID, CV_ID, cvJson(false)),
+            MediaType.APPLICATION_JSON
+        ));
+
+        Optional<ProfileSkillSnapshot> result =
+            client.verifyCandidateCvForSubmission(
+                CANDIDATE_ID,
+                CV_ID,
+                AUTHORIZATION
+            );
+
+        assertThat(result).contains(new ProfileSkillSnapshot(
+            1,
+            7,
+            java.util.List.of("Java", "PostgreSQL")
+        ));
+        assertThatThrownBy(() ->
+            result.orElseThrow().skills().add("Kotlin")
+        ).isInstanceOf(UnsupportedOperationException.class);
+        server.verify();
+    }
+
+    @Test
+    void unavailableSubmissionCvReturnsEmptyOnlyForCoherentResponse() {
+        expectVerifyV2().andRespond(withSuccess(
+            """
+            {
+              "data": {
+                "candidateId": "%s",
+                "cvId": "%s",
+                "available": false,
+                "cv": null,
+                "profileSkillSnapshot": null
+              },
+              "meta": null
+            }
+            """.formatted(CANDIDATE_ID, CV_ID),
+            MediaType.APPLICATION_JSON
+        ));
+
+        assertThat(client.verifyCandidateCvForSubmission(
+            CANDIDATE_ID,
+            CV_ID,
+            AUTHORIZATION
+        )).isEmpty();
+        server.verify();
+        server.reset();
+
+        expectVerifyV2().andRespond(withSuccess(
+            """
+            {
+              "data": {
+                "candidateId": "%s",
+                "cvId": "%s",
+                "available": false,
+                "cv": null,
+                "profileSkillSnapshot": {
+                  "schemaVersion": 1,
+                  "profileAggregateVersion": 7,
+                  "skills": []
+                }
+              },
+              "meta": null
+            }
+            """.formatted(CANDIDATE_ID, CV_ID),
+            MediaType.APPLICATION_JSON
+        ));
+
+        assertInvalid(() -> client.verifyCandidateCvForSubmission(
+            CANDIDATE_ID,
+            CV_ID,
+            AUTHORIZATION
+        ));
+        server.verify();
+    }
+
+    @Test
+    void submissionVerificationRejectsMalformedSkillSnapshots() {
+        String valid = """
+            {
+              "data": {
+                "candidateId": "%s",
+                "cvId": "%s",
+                "available": true,
+                "cv": %s,
+                "profileSkillSnapshot": %s
+              },
+              "meta": null
+            }
+            """;
+        String[] malformedSnapshots = {
+            "null",
+            """
+            {"schemaVersion":2,"profileAggregateVersion":7,"skills":[]}
+            """,
+            """
+            {"schemaVersion":1,"profileAggregateVersion":0,"skills":[]}
+            """,
+            """
+            {"schemaVersion":1,"profileAggregateVersion":7,"skills":["Java","java"]}
+            """,
+            """
+            {"schemaVersion":1,"profileAggregateVersion":7,"skills":["Java","ｊａｖａ"]}
+            """,
+            """
+            {"schemaVersion":1,"profileAggregateVersion":7,"skills":["Java\\u0007Script"]}
+            """,
+            """
+            {"schemaVersion":1,"profileAggregateVersion":7,"skills":["\\tJava"]}
+            """,
+            """
+            {"schemaVersion":1,"profileAggregateVersion":7,"skills":["Java\\n"]}
+            """,
+            """
+            {"schemaVersion":1,"profileAggregateVersion":7,"skills":["%s"]}
+            """.formatted("😀".repeat(121)),
+            """
+            {"schemaVersion":1,"profileAggregateVersion":7,"skills":[],"unexpected":true}
+            """
+        };
+
+        for (String malformedSnapshot : malformedSnapshots) {
+            expectVerifyV2().andRespond(withSuccess(
+                valid.formatted(
+                    CANDIDATE_ID,
+                    CV_ID,
+                    cvJson(false),
+                    malformedSnapshot
+                ),
+                MediaType.APPLICATION_JSON
+            ));
+
+            assertInvalid(() -> client.verifyCandidateCvForSubmission(
+                CANDIDATE_ID,
+                CV_ID,
+                AUTHORIZATION
+            ));
+            server.verify();
+            server.reset();
+        }
+    }
+
+    @Test
+    void submissionVerificationRejectsUnknownTopLevelFieldsAndBadEcho() {
+        UUID otherCv = UUID.randomUUID();
+        expectVerifyV2().andRespond(withSuccess(
+            """
+            {
+              "data": {
+                "candidateId": "%s",
+                "cvId": "%s",
+                "available": true,
+                "cv": %s,
+                "profileSkillSnapshot": {
+                  "schemaVersion": 1,
+                  "profileAggregateVersion": 7,
+                  "skills": []
+                },
+                "unexpected": true
+              },
+              "meta": null
+            }
+            """.formatted(CANDIDATE_ID, otherCv, cvJson(false)),
+            MediaType.APPLICATION_JSON
+        ));
+
+        assertInvalid(() -> client.verifyCandidateCvForSubmission(
+            CANDIDATE_ID,
+            CV_ID,
+            AUTHORIZATION
+        ));
+        server.verify();
+    }
+
+    @Test
+    void submissionVerificationClassifiesProfileFailuresFailClosed() {
+        expectVerifyV2().andRespond(withStatus(HttpStatus.BAD_REQUEST));
+        assertInvalid(() -> client.verifyCandidateCvForSubmission(
+            CANDIDATE_ID,
+            CV_ID,
+            AUTHORIZATION
+        ));
+        server.verify();
+        server.reset();
+
+        expectVerifyV2().andRespond(withStatus(HttpStatus.UNAUTHORIZED));
+        assertUnavailable(() -> client.verifyCandidateCvForSubmission(
+            CANDIDATE_ID,
+            CV_ID,
+            AUTHORIZATION
+        ));
         server.verify();
     }
 
@@ -454,6 +668,18 @@ class ProfileClientTest {
 
     private org.springframework.test.web.client.ResponseActions expectVerify() {
         return server.expect(requestTo(BASE_URL + "/internal/v1/cvs/verify"))
+            .andExpect(method(HttpMethod.POST))
+            .andExpect(header("X-Internal-Service", "application-service"))
+            .andExpect(header("X-Internal-Api-Key", INTERNAL_KEY))
+            .andExpect(header(HttpHeaders.AUTHORIZATION, AUTHORIZATION))
+            .andExpect(content().json(
+                "{\"candidateId\":\"" + CANDIDATE_ID +
+                    "\",\"cvId\":\"" + CV_ID + "\"}"
+            ));
+    }
+
+    private org.springframework.test.web.client.ResponseActions expectVerifyV2() {
+        return server.expect(requestTo(BASE_URL + "/internal/v2/cvs/verify"))
             .andExpect(method(HttpMethod.POST))
             .andExpect(header("X-Internal-Service", "application-service"))
             .andExpect(header("X-Internal-Api-Key", INTERNAL_KEY))
