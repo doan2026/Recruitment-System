@@ -48,14 +48,29 @@ def test_migration_creates_versioned_private_vector_store(
               AND table_name IN ('cv_embeddings', 'job_embeddings')
             """
         ).fetchall()
-        index_definition = connection.execute(
+        index_definitions = connection.execute(
             """
-            SELECT indexdef
-            FROM pg_indexes
-            WHERE schemaname = 'ai'
-              AND indexname = 'job_embeddings_active_vector_hnsw_idx'
+            SELECT
+                index_relation.relname,
+                pg_get_indexdef(index_state.indexrelid),
+                index_state.indisvalid,
+                index_state.indisready,
+                access_method.amname
+            FROM pg_index AS index_state
+            JOIN pg_class AS index_relation
+              ON index_relation.oid = index_state.indexrelid
+            JOIN pg_namespace AS index_namespace
+              ON index_namespace.oid = index_relation.relnamespace
+            JOIN pg_am AS access_method
+              ON access_method.oid = index_relation.relam
+            WHERE index_namespace.nspname = 'ai'
+              AND index_relation.relname IN (
+                'cv_embeddings_active_vector_hnsw_idx',
+                'job_embeddings_active_vector_hnsw_idx'
+              )
+            ORDER BY index_relation.relname
             """
-        ).fetchone()
+        ).fetchall()
         migration_version = connection.execute(
             "SELECT version_num FROM ai.alembic_version"
         ).fetchone()
@@ -88,7 +103,7 @@ def test_migration_creates_versioned_private_vector_store(
         "job_embeddings",
         "recommendation_generations",
     }
-    assert migration_version == ("20260828_05",)
+    assert migration_version == ("20260829_06",)
     assert [target for target, _ in recommendation_generations] == ["CVS", "JOBS"]
     assert all(generation > 0 for _, generation in recommendation_generations)
     assert recommendation_triggers == [
@@ -97,9 +112,19 @@ def test_migration_creates_versioned_private_vector_store(
         ("job_embeddings_recommendation_generation", "O", 29, True),
         ("job_embeddings_recommendation_truncate", "O", 32, True),
     ]
-    assert index_definition is not None
-    assert "USING hnsw" in index_definition[0]
-    assert "WHERE is_active" in index_definition[0]
+    assert [name for name, *_ in index_definitions] == [
+        "cv_embeddings_active_vector_hnsw_idx",
+        "job_embeddings_active_vector_hnsw_idx",
+    ]
+    for _, definition, is_valid, is_ready, access_method in index_definitions:
+        assert is_valid is True
+        assert is_ready is True
+        assert access_method == "hnsw"
+        assert "USING hnsw" in definition
+        assert "vector_cosine_ops" in definition
+        assert "WHERE is_active" in definition
+    assert "m='16'" in index_definitions[0][1]
+    assert "ef_construction='64'" in index_definitions[0][1]
     forbidden_columns = {"content", "content_json", "description", "raw_text"}
     assert forbidden_columns.isdisjoint({column for _, column in columns})
 
@@ -118,6 +143,63 @@ def test_migration_can_be_run_again_at_head(database_url: str) -> None:
             "SELECT count(*) FROM ai.alembic_version"
         ).fetchone()
     assert versions == (1,)
+
+
+def test_cv_ann_migration_replaces_wrong_leftover_index(
+    database_url: str,
+) -> None:
+    previous_url = os.environ.get("DATABASE_URL")
+    os.environ["DATABASE_URL"] = database_url
+    config = Config(str(SERVICE_ROOT / "alembic.ini"))
+    try:
+        command.downgrade(config, "20260828_05")
+        with psycopg.connect(database_url) as connection:
+            connection.execute(
+                """
+                CREATE INDEX cv_embeddings_active_vector_hnsw_idx
+                ON ai.cv_embeddings (cv_id)
+                WHERE is_active
+                """
+            )
+        command.upgrade(config, "head")
+    finally:
+        if previous_url is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = previous_url
+
+    with psycopg.connect(database_url) as connection:
+        version = connection.execute(
+            "SELECT version_num FROM ai.alembic_version"
+        ).fetchone()
+        index_state = connection.execute(
+            """
+            SELECT
+                pg_get_indexdef(index_catalog.indexrelid),
+                index_catalog.indisvalid,
+                index_catalog.indisready,
+                access_method.amname
+            FROM pg_index AS index_catalog
+            JOIN pg_class AS index_relation
+              ON index_relation.oid = index_catalog.indexrelid
+            JOIN pg_namespace AS index_namespace
+              ON index_namespace.oid = index_relation.relnamespace
+            JOIN pg_am AS access_method
+              ON access_method.oid = index_relation.relam
+            WHERE index_namespace.nspname = 'ai'
+              AND index_relation.relname =
+                'cv_embeddings_active_vector_hnsw_idx'
+            """
+        ).fetchone()
+
+    assert version == ("20260829_06",)
+    assert index_state is not None
+    definition, is_valid, is_ready, access_method = index_state
+    assert is_valid is True
+    assert is_ready is True
+    assert access_method == "hnsw"
+    assert "USING hnsw" in definition
+    assert "vector_cosine_ops" in definition
 
 
 @pytest.mark.parametrize(

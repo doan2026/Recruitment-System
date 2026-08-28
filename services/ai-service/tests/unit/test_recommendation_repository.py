@@ -89,9 +89,12 @@ def test_candidate_query_joins_parallel_candidate_cv_scope_exactly() -> None:
 
     assert rows == []
     query, parameters = cursor.calls[-1]
+    assert "eligible_scope(candidate_id, cv_id) AS MATERIALIZED" in query
+    assert "eligible_vectors AS MATERIALIZED" in query
     assert "c.user_id = eligible.candidate_id" in query
     assert "c.cv_id = eligible.cv_id" in query
     assert "c.cv_id = ANY" not in query
+    assert "enable_indexscan" not in query
     assert parameters["eligible_candidate_ids"] == [CANDIDATE_ID]
     assert parameters["eligible_cv_ids"] == [SOURCE_ID]
 
