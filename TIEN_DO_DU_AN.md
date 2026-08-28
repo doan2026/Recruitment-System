@@ -2,7 +2,7 @@
 
 > Ngày cập nhật: 29/08/2026
 > Nhánh đối chiếu chính: `develop`
-> Pull Request lần cập nhật: PR #60 từ `feature/company-service/invitation-auth-binding` vào `develop`
+> Pull Request lần cập nhật: PR #61 từ `feature/ai-service/secure-chatbot` vào `develop`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -723,9 +723,9 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Full Company đạt **13/13 suite, 306/306 Jest test** và build PASS. PostgreSQL 16 gate PASS upgrade đủ sáu migration, deploy lần hai, drift/ledger/data/constraint, backup/restore tách database, rollback candidate và corrupt-archive rejection; offline harness guard/syntax/diff đều PASS.
 - Real Auth–Company Docker gate lấy **9 JWT** qua `/auth/login`, tạo **7 invitation**, chứng minh stolen-token no-mutation, intended replay, **4** durable identity failure, **8** accept đồng thời hội tụ một membership và Auth outage trả sanitized `503` không write; final counts `1|3|2|5`, tài nguyên tạm được cleanup. Đây là point-in-time Auth recheck, chưa phải atomic cross-service identity fence; muốn loại TOCTOU còn lại cần contract version/fencing mới từ Auth.
 
-## 2.36 Secure AI Chatbot v1 — đang hoàn thiện trên `feature/ai-service/secure-chatbot` (PR pending)
+## 2.36 Secure AI Chatbot v1 — hoàn thành qua PR #61
 
-> Task chỉ thuộc AI Service của Người 2. Backend chatbot v1 đang được hoàn thiện trên nhánh `feature/ai-service/secure-chatbot`; PR chưa tạo/chưa merge nên dòng Pull Request đầu báo cáo vẫn giữ mốc PR #60. Task không sửa frontend chatbot widget của Người 3, shared gateway/Compose hoặc service ngoài phạm vi.
+> Task chỉ thuộc AI Service của Người 2, được bàn giao từ `feature/ai-service/secure-chatbot` vào `develop` qua PR #61 ngày 29/08/2026. Task không sửa frontend chatbot widget của Người 3, shared gateway/Compose hoặc service ngoài phạm vi.
 
 - Chốt Anthropic Claude theo tài liệu kiến trúc và pin `anthropic==0.120.2`; bỏ ranh giới lựa chọn Gemini trước đây. Runtime chatbot dùng thêm `PyJWT==2.13.0` và `redis==7.4.1`, cấu hình model/timeout/max output hữu hạn và không tự retry request LLM.
 - Candidate-only `POST /chat` xác minh access token RS256 qua JWKS, khóa issuer/audience/`typ`/`kid`, UUID claims và exact role. Request khóa session UUID v4, message Unicode/byte/control-character bound; response/error đều làm sạch, không trả prompt, token, Redis key, history hoặc lỗi provider và ép `Cache-Control: no-store`.
