@@ -63,15 +63,19 @@ table. The ledger and DLQ store hashes and Kafka metadata, never raw payloads,
 CV text or job descriptions. Source event/version/timestamp provenance is kept
 with each embedding.
 
-Both vector columns are fixed at 384 dimensions. Job vectors retain a partial
-HNSW cosine index for a future benchmarked ANN strategy; recommendation v1
-forces an exact scan for complete, deterministic cursor pages. Only vectors,
-hashes, model identity and minimal filtering metadata are stored; original
-CV/job text is intentionally absent. The Candidate consent/authorization
-contract now keeps v1 on an exact selected-CV allowlist; a CV nearest-neighbor
-index remains deferred until that bounded filter/load profile is benchmarked.
-Job salary filtering columns use
-`NUMERIC(15,2)`, matching the Job source of truth.
+Both vector columns are fixed at 384 dimensions and retain partial active-row
+HNSW cosine indexes. Job recommendation v1 forces an exact target scan for
+complete cursor pages. Candidate recommendation first materializes the exact
+authorized allowlist of at most 500 `(candidate_id, cv_id)` pairs, resolves
+those rows through the CV primary/B-tree indexes, and only then calculates and
+sorts exact cosine distances. A global HNSW scan is deliberately not used for
+that dynamic allowlist because post-filtering can omit authorized nearest
+neighbors and make stateless cursor pages incomplete. The CV HNSW is therefore
+an advisory/future index with storage and ingestion cost, not a readiness
+dependency or a production Candidate-ranking path. Only vectors, hashes, model
+identity and minimal filtering metadata are stored; original CV/job text is
+intentionally absent. Job salary filtering columns use `NUMERIC(15,2)`,
+matching the Job source of truth.
 
 Run migrations from this directory:
 
@@ -81,7 +85,11 @@ alembic upgrade head
 
 The container runs the same command before Uvicorn starts. PostgreSQL must use
 the pgvector image/extension and `DATABASE_URL` must be a normal libpq URL,
-without Prisma's unsupported `?schema=ai` query parameter.
+without Prisma's unsupported `?schema=ai` query parameter. Revision
+`20260829_06` builds the CV HNSW with `CREATE INDEX CONCURRENTLY` and removes a
+same-name invalid/leftover index before retrying. Production must run Alembic
+through one migration job before rolling API replicas; multiple API startup
+migrators must not race on this index.
 
 ## Job embedding worker
 
@@ -253,9 +261,11 @@ For pagination correctness, v1 forces an exact target scan only for the final
 ranked vector query. Source lookup and generation checks still use normal
 indexes. The generation triggers update in the same transaction as embedding
 mutations; `/ready` verifies their rows, function, event shape and enabled
-mode. The exact scan is intentionally correctness-first; query-load and
-rate-limit benchmarks plus a filter-aware ANN strategy remain follow-up work
-before raising limits.
+mode. For this Candidate-facing `/recommend/jobs` direction, the full-target
+exact scan is intentionally correctness-first; query-load and rate-limit
+benchmarks plus a filter-aware ANN strategy remain follow-up work before
+raising limits. This pending work is separate from the bounded
+`/recommend/candidates` allowlist gate below.
 
 ## Recruiter-facing Candidate recommendation provider
 
@@ -279,6 +289,14 @@ selected-CV snapshot change makes a continuation stale. Target statistics and
 ranking join every authorized `(candidate_id, cv_id)` pair exactly; a selected
 CV ID can never authorize its actual owner under a mismatched Candidate ID.
 Repository results outside the authorized Candidate set fail closed.
+
+The controlled 100,000-CV gate confirms that production exact plans for scopes
+1/100/500 use the CV primary/B-tree indexes, never a CV sequential scan or
+HNSW, and traverse 1/2/10 pages with zero mismatch, duplicate or privacy leak.
+An intentionally forced advisory HNSW experiment reached recall@100 `1.0`, but
+global top-500 followed by the dynamic 500-CV allowlist found none of that
+allowlist's exact top 50. Enabling that plan would therefore trade away result
+completeness even when global ANN recall looks perfect.
 
 AI does not return Profile or CV data. Job Search must first authorize the
 Recruiter, verified Company and active owned Job, then obtain the visibility
@@ -355,15 +373,36 @@ signed/stale cursors, exact filtered pagination and transactional generation
 triggers. Real Kafka tests cover publish → consume → pgvector, duplicate
 delivery, source rejection followed by delete, hash-only malformed DLQ and
 committed offsets. The current suite collects **331 unit/non-integration tests
-and 54 PostgreSQL/Kafka integration tests (385 total)**. The production worker image
-also successfully generated a normalized 384-dimensional vector with the
+and 55 PostgreSQL/Kafka integration tests (386 total)**. The production worker
+image also successfully generated a normalized 384-dimensional vector with the
 pinned model revision.
+
+Run the isolated Candidate index/filter/repository load gate separately:
+
+```bash
+./scripts/verify-candidate-recommendation-benchmark.sh
+```
+
+The guarded runner refuses external database/Docker targets, uses digest-pinned
+Python and PostgreSQL/pgvector images, opens no host port and cleans only its
+run-labelled resources. Its deterministic fixture contains 80,000 active
+same-model, 10,000 inactive same-model and 10,000 active wrong-model CVs.
+Revision `20260829_06` upgraded the populated 100,000-row database in
+`5,284.159 ms`; the valid/ready HNSW occupied `184,328,192` bytes. The
+repository gate then completed 10,000 calls at concurrency 32 with zero errors
+or source mismatch: `323.129` requests/second, p95 `130.089 ms`, p99
+`149.503 ms`, and maximum `183.722 ms` under the production 2-second statement
+timeout. These are controlled local PostgreSQL/repository results using
+synthetic 2D-in-384 vectors; they are not an HTTP, deployed, real-model
+Vietnamese relevance or production SLO claim. The populated migration run did
+not measure a simultaneous writer.
 
 ## Current boundary
 
 `/match`, `/recommend/jobs` and `/recommend/candidates` read precomputed vectors
 and never load the embedding model in a request. Job and CV embeddings are
 populated asynchronously by their dedicated workers. Full
-producer-to-Media-to-AI staging E2E, CV ANN/filter/load benchmarking,
+producer-to-Media-to-AI staging E2E, HTTP/deployed recommendation load,
+real-model Vietnamese relevance, concurrent-writer rollout observation,
 distributed recommendation rate limiting and chatbot APIs remain outside this
 service task.

@@ -13,7 +13,8 @@ COPY requirements-dev.txt .
 RUN pip install --no-cache-dir -r requirements-dev.txt
 COPY pyproject.toml .
 COPY tests tests
-CMD ["sh", "-c", "ruff check app tests migrations && ruff format --check app tests migrations && python -m pytest -q"]
+COPY scripts scripts
+CMD ["sh", "-c", "ruff check app tests migrations scripts && ruff format --check app tests migrations scripts && python -m pytest -q"]
 
 FROM base AS runtime
 USER app
@@ -35,4 +36,3 @@ ENV EMBEDDING_MODEL_CACHE=/models \
     XDG_CACHE_HOME=/models/.cache
 USER app
 CMD ["python", "-m", "app.worker_main"]
-

@@ -275,7 +275,6 @@ class PsycopgRecommendationRepository:
                             source_fingerprint,
                         )
 
-                    self._force_exact_vector_plan(cursor)
                     rows = self._candidate_rows(
                         cursor,
                         source_vector=source_vector,
@@ -391,41 +390,7 @@ class PsycopgRecommendationRepository:
             parameters["cursor_distance"] = boundary.distance
             parameters["cursor_id"] = boundary.item_id
 
-        query = f"""
-            WITH eligible_scope(candidate_id, cv_id) AS (
-                SELECT *
-                FROM unnest(
-                    %(eligible_candidate_ids)s::uuid[],
-                    %(eligible_cv_ids)s::uuid[]
-                )
-            ),
-            scored AS (
-                SELECT
-                    c.user_id AS candidate_id,
-                    c.cv_id,
-                    (
-                        c.vector <=> %(source_vector)s::vector
-                    )::double precision AS distance
-                FROM eligible_scope AS eligible
-                JOIN ai.cv_embeddings AS c
-                  ON c.user_id = eligible.candidate_id
-                 AND c.cv_id = eligible.cv_id
-                WHERE c.is_active
-                  AND c.model_name = %(model_name)s
-            ),
-            best_per_candidate AS (
-                SELECT DISTINCT ON (candidate_id)
-                    candidate_id,
-                    distance
-                FROM scored
-                ORDER BY candidate_id ASC, distance ASC, cv_id ASC
-            )
-            SELECT candidate_id, distance
-            FROM best_per_candidate
-            {cursor_predicate}
-            ORDER BY distance ASC, candidate_id ASC
-            LIMIT %(result_limit)s
-        """
+        query = _candidate_rows_query(cursor_predicate)
         return cursor.execute(query, parameters).fetchall()
 
     def _connect(self) -> psycopg.Connection[Any]:
@@ -444,6 +409,45 @@ class PsycopgRecommendationRepository:
     def _force_exact_vector_plan(self, cursor: Cursor[Any]) -> None:
         cursor.execute("SET LOCAL enable_indexscan = off")
         cursor.execute("SET LOCAL enable_bitmapscan = off")
+
+
+def _candidate_rows_query(cursor_predicate: str) -> str:
+    # Materialize the authorized Candidate/CV pairs before ordering by distance.
+    # A global HNSW scan with this dynamic allowlist can omit eligible neighbors,
+    # which would make stateless cursor pages incomplete and non-deterministic.
+    return f"""
+        WITH eligible_scope(candidate_id, cv_id) AS MATERIALIZED (
+            SELECT *
+            FROM unnest(
+                %(eligible_candidate_ids)s::uuid[],
+                %(eligible_cv_ids)s::uuid[]
+            )
+        ),
+        eligible_vectors AS MATERIALIZED (
+            SELECT
+                c.user_id AS candidate_id,
+                c.vector
+            FROM eligible_scope AS eligible
+            JOIN ai.cv_embeddings AS c
+              ON c.cv_id = eligible.cv_id
+             AND c.user_id = eligible.candidate_id
+            WHERE c.is_active
+              AND c.model_name = %(model_name)s
+        ),
+        scored AS (
+            SELECT
+                candidate_id,
+                (
+                    vector <=> %(source_vector)s::vector
+                )::double precision AS distance
+            FROM eligible_vectors
+        )
+        SELECT candidate_id, distance
+        FROM scored
+        {cursor_predicate}
+        ORDER BY distance ASC, candidate_id ASC
+        LIMIT %(result_limit)s
+    """
 
 
 def _candidate_scope_arrays(
