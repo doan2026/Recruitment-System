@@ -45,6 +45,7 @@ clients:
 
 internal:
   profile-api-key: ${INTERNAL_API_KEY_PROFILE}
+  interview-api-key: ${INTERNAL_API_KEY_INTERVIEW}
 
 application-events:
   topic: ${KAFKA_APPLICATION_TOPIC:application-events}
