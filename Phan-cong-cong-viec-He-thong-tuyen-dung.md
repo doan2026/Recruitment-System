@@ -108,9 +108,13 @@ Ba luồng có tổng điểm bằng nhau. Rủi ro lệch lớn nhất nằm �
                                                                  status, occurred_at, schema_version,
                                                                  aggregate_version, requirements, salary_min,
                                                                  salary_max, job_type }
- Kafka interview-events      Người 3          Người 3           { event_id, action, interview_id, application_id,
-                                              (Notification)    candidate_id, recruiter_id, scheduled_at,
-                                                                room_url }
+ Kafka interview-events      Người 3          Người 3           key=interview_id; foundation v1 đúng 15 trường
+                                              (Notification)    { schema_version, event_id, action, interview_id,
+                                                                application_id, candidate_id, interviewer_id,
+                                                                actor_id, round_number, schedule_revision,
+                                                                scheduled_start_at, scheduled_end_at, status,
+                                                                aggregate_version, occurred_at }; không chứa
+                                                                location/notes/room URL/token/contact/CV data
  Kafka chat-events           Người 3          Người 3           { event_id, message_id, conversation_id,
                                               (Notification)    sender_id, receiver_id, preview }
  REST duyệt công ty / tin    Người 2          Người 1           PATCH /companies/:id/verify, PATCH
@@ -158,7 +162,7 @@ Người 1 sở hữu toàn bộ luồng "một người bước vào hệ thố
  Ưu tiên                     Cao nhất — phải hoàn thành trong 3–5 ngày đầu
 ```
 
-Trạng thái 28/08/2026: Scheduling foundation v1 đã hoàn thành qua PR #51. Recruiter có thể đặt lịch OFFLINE cho chính mình; Application xác minh MEMBER/OWNER và trả authoritative snapshot tối thiểu; PostgreSQL khóa active round và chống overlap Candidate/interviewer bằng khoảng `[start,end)`. Strict JWT, idempotency, UTC/IANA timezone, Nginx/Compose/readiness và test PostgreSQL concurrency thật đã có. Phần còn lại của C1 gồm interviewer/panel tùy chọn, list/calendar, confirm/reschedule/cancel/no-show, `InterviewFeedback`, Jitsi, `interview-events`, Notification/reminder và frontend/E2E vẫn pending.
+Trạng thái 28/08/2026: Scheduling foundation v1 đã hoàn thành qua PR #51; transactional `SCHEDULED interview-events` v1 và Candidate in-app projection đã hoàn thành qua PR #52. Recruiter có thể đặt lịch OFFLINE cho chính mình; Application xác minh MEMBER/OWNER và trả authoritative snapshot tối thiểu; PostgreSQL khóa active round, chống overlap và ghi Interview + outbox atomically. Phần còn lại của C1 gồm interviewer/panel tùy chọn, list/calendar, confirm/reschedule/cancel/no-show, `InterviewFeedback`, Jitsi, các lifecycle event/reminder và frontend/deployed E2E vẫn pending.
 
 
 ### 1. Luồng hoạt động các chức năng
@@ -1089,8 +1093,8 @@ Người 3 sở hữu tất cả những gì xảy ra SAU khi hồ sơ được 
 
 
 ### 2.4. Sự kiện Kafka
-- PRODUCE topic interview-events khi: lịch được tạo, xác nhận, đổi, huỷ, hoặc trước giờ hẹn 1 tiếng (nhắc lịch).
-- Payload gợi ý: { event_id, action: SCHEDULED|CONFIRMED|RESCHEDULED|CANCELLED|REMINDER, interview_id, application_id, candidate_id, recruiter_id, scheduled_at, room_url, occurred_at }.
+- Đã triển khai foundation `SCHEDULED` qua transactional outbox, Kafka key là exact lowercase `interview_id`; delivery at-least-once và consumer dedupe theo stable `event_id`.
+- V1 có đúng 15 trường như bảng hợp đồng dùng chung; không chứa location, notes, room URL/token hoặc dữ liệu liên hệ/CV. `CONFIRMED|RESCHEDULED|CANCELLED|REMINDER` chỉ được bổ sung khi lifecycle tương ứng tồn tại.
 - Consumer: Notification Service (cùng Người 3 — thuận lợi vì không phải chốt hợp đồng liên người).
 ### 2.5. Phụ thuộc giữa các service
 - Phụ thuộc REST: Application Service (Người 2) để xác thực application_id và gợi ý chuyển trạng thái đơn.
@@ -1211,12 +1215,12 @@ Người 3 sở hữu tất cả những gì xảy ra SAU khi hồ sơ được 
  Phụ thuộc                   Kafka (application-events, interview-events, chat-events)
 ```
 
-Trạng thái 28/08/2026: vertical slice `application-events` v1 → private in-app inbox đã hoàn thành với PostgreSQL/Kafka thật. Consumer Interview/Chat, BullMQ, FCM, SMTP, device/settings API và reminder vẫn là backlog.
+Trạng thái 28/08/2026: `application-events` v1 và `SCHEDULED interview-events` v1 → private in-app inbox đã hoàn thành với PostgreSQL/Kafka thật. Các phần Interview lifecycle còn lại, Chat, BullMQ, FCM, SMTP, device/settings API và reminder vẫn là backlog.
 
 
 ### 1. Luồng hoạt động các chức năng
 #### Luồng 1: Tiếp nhận sự kiện và đưa vào hàng đợi
-1. Mục tiêu đầy đủ là consumer ba topic; vertical slice hiện tại consume `application-events` bằng dedicated group và replay retained backlog khi group join lần đầu.
+1. Mục tiêu đầy đủ là consumer ba topic; hiện tại `application-events` và `interview-events` dùng hai dedicated group/cutoff độc lập, replay retained backlog khi group join lần đầu.
 2. Kiểm strict key/payload/version/size, rồi đối chiếu `(topic,event_id)`, event key và payload hash để chống trùng/collision.
 3. Ánh xạ event sang notification type/template và người nhận Candidate/Recruiter; không gửi lại cho actor khi actor trùng recipient.
 4. Ghi `ProcessedEvent + Notification + IN_APP NotificationLog` trong cùng một PostgreSQL transaction. Duplicate cùng hash/key là no-op; collision hoặc event sai contract đi vào poison ledger không chứa raw payload. Record cũ hơn cutoff rollout vẫn được ledger/commit nhưng không sinh unread item mới.
@@ -1279,7 +1283,7 @@ Trạng thái 28/08/2026: vertical slice `application-events` v1 → private in-
 ### 2.4. Sự kiện Kafka
 - CONSUME: application-events (Người 2), interview-events (Người 3), chat-events (Người 3).
 - Không produce event.
-- Đã triển khai: APPLICATION_RECEIVED, APPLICATION_STATUS_CHANGED, OFFER_RECEIVED, OFFER_ACCEPTED, OFFER_DECLINED. Interview/Chat/Recommendation types còn pending theo consumer tương ứng.
+- Đã triển khai: APPLICATION_RECEIVED, APPLICATION_STATUS_CHANGED, OFFER_RECEIVED, OFFER_ACCEPTED, OFFER_DECLINED và INTERVIEW_SCHEDULED. Các type Interview lifecycle còn lại/Chat/Recommendation vẫn pending theo consumer tương ứng.
 ### 2.5. Phụ thuộc giữa các service
 - Phụ thuộc mạnh vào schema event của Người 2 (application-events) — chốt sớm nhất có thể.
 - Cần tài khoản Firebase và SMTP dùng chung của nhóm.
