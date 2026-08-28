@@ -13,7 +13,13 @@ export class RecommendationResponseError extends Error {
   }
 }
 
-export async function readBoundedJson(response: Response): Promise<unknown> {
+export async function readBoundedJson(
+  response: Response,
+  maximumBytes = RECOMMENDATION_RESPONSE_MAX_BYTES,
+): Promise<unknown> {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
+    throw new RecommendationResponseError();
+  }
   if (!JSON_CONTENT_TYPE.test(response.headers.get('content-type') ?? '')) {
     await response.body?.cancel().catch(() => undefined);
     throw new RecommendationResponseError();
@@ -22,7 +28,7 @@ export async function readBoundedJson(response: Response): Promise<unknown> {
   if (
     contentLength !== null &&
     (!/^(0|[1-9][0-9]*)$/.test(contentLength) ||
-      Number(contentLength) > RECOMMENDATION_RESPONSE_MAX_BYTES)
+      Number(contentLength) > maximumBytes)
   ) {
     await response.body?.cancel().catch(() => undefined);
     throw new RecommendationResponseError();
@@ -37,7 +43,7 @@ export async function readBoundedJson(response: Response): Promise<unknown> {
       const { done, value } = await reader.read();
       if (done) break;
       byteLength += value.byteLength;
-      if (byteLength > RECOMMENDATION_RESPONSE_MAX_BYTES) {
+      if (byteLength > maximumBytes) {
         throw new RecommendationResponseError();
       }
       chunks.push(value);
@@ -65,7 +71,10 @@ export async function readBoundedJson(response: Response): Promise<unknown> {
 
 export function configuredTimeout(
   config: ConfigService,
-  key: 'PROFILE_REQUEST_TIMEOUT_MS' | 'AI_REQUEST_TIMEOUT_MS',
+  key:
+    | 'PROFILE_REQUEST_TIMEOUT_MS'
+    | 'AI_REQUEST_TIMEOUT_MS'
+    | 'COMPANY_REQUEST_TIMEOUT_MS',
 ): number {
   const raw = config.get<string>(key);
   if (raw === undefined || raw.trim() === '') {
@@ -87,10 +96,11 @@ export function configuredTimeout(
 
 export function configuredServiceUrl(
   config: ConfigService,
-  key: 'PROFILE_SERVICE_URL' | 'AI_SERVICE_URL',
+  key: 'PROFILE_SERVICE_URL' | 'AI_SERVICE_URL' | 'COMPANY_SERVICE_URL',
   allowedHostsKey:
     | 'PROFILE_SERVICE_ALLOWED_HOSTS'
-    | 'AI_SERVICE_ALLOWED_HOSTS',
+    | 'AI_SERVICE_ALLOWED_HOSTS'
+    | 'COMPANY_SERVICE_ALLOWED_HOSTS',
   fallback: string,
 ): string {
   const raw = config.get<string>(key)?.trim() || fallback;

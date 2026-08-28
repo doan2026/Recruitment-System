@@ -24,6 +24,14 @@ interface CommittedJobChange {
   eventId: string;
 }
 
+export interface CandidateRecommendationJobAuthorization {
+  jobId: string;
+  companyId: string;
+  recruiterId: string;
+  memberRole: RecruiterCompany['memberRole'];
+  aggregateVersion: number;
+}
+
 const JOB_EXPIRY_BATCH_SIZE = 100;
 const BULK_DETAIL_VISIBLE_STATUSES: JobStatus[] = [
   JobStatus.PUBLISHED,
@@ -39,6 +47,10 @@ export class JobService {
     private readonly indexing: JobIndexingService,
     private readonly events: JobEventPublisherService,
   ) {}
+
+  isCandidateRecommendationCompanyConfigured(): boolean {
+    return this.companies.isRecommendationConfigured();
+  }
 
   async create(
     recruiterId: string,
@@ -91,6 +103,82 @@ export class JobService {
       orderBy: { createdAt: 'desc' },
     });
     return jobs.map((job) => this.toDto(job));
+  }
+
+  async authorizeCandidateRecommendation(
+    recruiterId: string,
+    authorization: string,
+    jobId: string,
+    now = new Date(),
+  ): Promise<CandidateRecommendationJobAuthorization> {
+    const company = await this.companies
+      .getRecruiterCompanyForRecommendation(recruiterId, authorization);
+    if (company.verifiedStatus !== 'VERIFIED') {
+      throw new ApiException(
+        'COMPANY_NOT_VERIFIED',
+        'Candidate recommendations require a VERIFIED company',
+        HttpStatus.FORBIDDEN,
+        { verifiedStatus: company.verifiedStatus },
+      );
+    }
+    const job = await this.prisma.job.findUnique({ where: { id: jobId } });
+    this.requireManagePermission(job, company, recruiterId);
+    if (this.availabilityReason(job, now) !== null) {
+      throw new ApiException(
+        'JOB_NOT_RECOMMENDABLE',
+        'Candidate recommendations require a current PUBLISHED job',
+        HttpStatus.CONFLICT,
+      );
+    }
+    return {
+      jobId: job.id,
+      companyId: job.companyId,
+      recruiterId,
+      memberRole: company.memberRole,
+      aggregateVersion: job.aggregateVersion,
+    };
+  }
+
+  async revalidateCandidateRecommendation(
+    context: CandidateRecommendationJobAuthorization,
+    bearer: string,
+    now?: Date,
+  ): Promise<void> {
+    let company: RecruiterCompany;
+    try {
+      company = await this.companies
+        .getRecruiterCompanyForRecommendation(context.recruiterId, bearer);
+    } catch (error) {
+      if (error instanceof ApiException && error.code === 'COMPANY_NOT_FOUND') {
+        throw this.candidateRecommendationContextStale();
+      }
+      throw error;
+    }
+    if (
+      company.companyId !== context.companyId ||
+      company.verifiedStatus !== 'VERIFIED' ||
+      company.memberRole !== context.memberRole
+    ) {
+      throw this.candidateRecommendationContextStale();
+    }
+    const today = new Date(now ?? new Date());
+    today.setUTCHours(0, 0, 0, 0);
+    const current = await this.prisma.job.findFirst({
+      where: {
+        id: context.jobId,
+        companyId: context.companyId,
+        aggregateVersion: context.aggregateVersion,
+        status: JobStatus.PUBLISHED,
+        deadline: { gte: today },
+        ...(company.memberRole === 'MEMBER'
+          ? { createdBy: context.recruiterId }
+          : {}),
+      },
+      select: { id: true },
+    });
+    if (!current) {
+      throw this.candidateRecommendationContextStale();
+    }
   }
 
   async getPublic(jobId: string): Promise<JobDto> {
@@ -721,5 +809,13 @@ export class JobService {
     return job.deadline.getTime() < today.getTime()
       ? JobAvailabilityReason.DEADLINE_PASSED
       : null;
+  }
+
+  private candidateRecommendationContextStale(): ApiException {
+    return new ApiException(
+      'JOB_RECOMMENDATION_CONTEXT_STALE',
+      'Recruiter authorization or Job changed while recommendations were resolved',
+      HttpStatus.CONFLICT,
+    );
   }
 }

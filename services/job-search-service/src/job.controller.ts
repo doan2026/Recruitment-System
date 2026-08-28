@@ -62,6 +62,12 @@ import {
   JobRecommendationResultDto,
 } from './job-recommendation.dto';
 import { JobRecommendationService } from './job-recommendation.service';
+import {
+  RecruiterCandidateRecommendationItemDto,
+  RecruiterCandidateRecommendationQueryDto,
+  RecruiterCandidateRecommendationResultDto,
+} from './recruiter-candidate-recommendation.dto';
+import { RecruiterCandidateRecommendationService } from './recruiter-candidate-recommendation.service';
 import { JobSearchService } from './job-search.service';
 import { JobIndexFailure, JobIndexingService } from './job-indexing.service';
 import { JobService } from './job.service';
@@ -114,6 +120,13 @@ const recommendationEnvelope = {
     meta: { type: 'object', nullable: true },
   },
 };
+const candidateRecommendationEnvelope = {
+  type: 'object',
+  properties: {
+    data: { $ref: getSchemaPath(RecruiterCandidateRecommendationResultDto) },
+    meta: { type: 'object', nullable: true },
+  },
+};
 const availabilityEnvelope = {
   type: 'object',
   properties: {
@@ -147,6 +160,8 @@ const bulkJobDetailEnvelope = {
   JobSearchResultDto,
   JobRecommendationItemDto,
   JobRecommendationResultDto,
+  RecruiterCandidateRecommendationItemDto,
+  RecruiterCandidateRecommendationResultDto,
 )
 @Controller()
 export class JobController {
@@ -155,6 +170,7 @@ export class JobController {
     private readonly jobSearch: JobSearchService,
     private readonly recommendations: JobRecommendationService,
     private readonly indexing: JobIndexingService,
+    private readonly candidateRecommendations: RecruiterCandidateRecommendationService,
   ) {}
   @Public()
   @Get('health')
@@ -164,16 +180,21 @@ export class JobController {
     status: string;
     searchIndexReady: boolean;
     recommendationConfigured: boolean;
+    candidateRecommendationConfigured: boolean;
   } {
     const searchIndexReady = this.indexing.isSearchReady();
     const recommendationConfigured = this.recommendations.isConfigured();
+    const candidateRecommendationConfigured =
+      this.candidateRecommendations.isConfigured();
     return {
       service: 'job-search-service',
-      status: searchIndexReady && recommendationConfigured
+      status: searchIndexReady && recommendationConfigured &&
+        candidateRecommendationConfigured
         ? 'UP'
         : 'DEGRADED',
       searchIndexReady,
       recommendationConfigured,
+      candidateRecommendationConfigured,
     };
   }
   @Post()
@@ -291,6 +312,58 @@ export class JobController {
     return this.recommendations.recommend(
       user.id,
       request.headers.authorization,
+      query,
+    );
+  }
+
+  @Get(':jobId/recommended-candidates')
+  @Roles(SystemRole.RECRUITER)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get consented AI-ranked Candidates for a manageable active Job',
+  })
+  @ApiParam({ name: 'jobId', format: 'uuid' })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    schema: { type: 'integer', minimum: 1, maximum: 50, default: 10 },
+  })
+  @ApiQuery({
+    name: 'cursor',
+    required: false,
+    schema: { type: 'string', minLength: 1, maxLength: 1024 },
+  })
+  @ApiOkResponse({
+    schema: candidateRecommendationEnvelope,
+    headers: {
+      'Cache-Control': {
+        schema: { type: 'string', example: 'private, no-store' },
+      },
+      Vary: {
+        schema: { type: 'string', example: 'Authorization' },
+      },
+    },
+  })
+  @ApiConflictResponse({
+    description: 'Job, cursor, or Candidate discovery scope changed',
+  })
+  @ApiServiceUnavailableResponse({
+    description: 'Company, Profile, or AI dependency cannot be trusted',
+  })
+  recommendedCandidates(
+    @CurrentUser() user: AuthUser,
+    @Headers('authorization') authorization: string,
+    @Param('jobId', JOB_ID_PIPE) jobId: string,
+    @Query() query: RecruiterCandidateRecommendationQueryDto,
+    @Res({ passthrough: true }) response: HeaderResponse,
+  ): Promise<RecruiterCandidateRecommendationResultDto> {
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.setHeader('Pragma', 'no-cache');
+    response.setHeader('Vary', 'Authorization');
+    return this.candidateRecommendations.recommend(
+      user.id,
+      authorization,
+      jobId,
       query,
     );
   }

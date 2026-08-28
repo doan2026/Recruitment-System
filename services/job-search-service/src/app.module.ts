@@ -16,6 +16,9 @@ import { JobIndexingService } from './job-indexing.service';
 import { AiRecommendationClientService } from './ai-recommendation-client.service';
 import { JobRecommendationService } from './job-recommendation.service';
 import { ProfileRecommendationClientService } from './profile-recommendation-client.service';
+import { AiCandidateRecommendationClientService } from './ai-candidate-recommendation-client.service';
+import { ProfileCandidateDiscoveryClientService } from './profile-candidate-discovery-client.service';
+import { RecruiterCandidateRecommendationService } from './recruiter-candidate-recommendation.service';
 import { JobSearchService } from './job-search.service';
 import { JobService } from './job.service';
 import { PrismaService } from './prisma.service';
@@ -37,6 +40,9 @@ import { PrismaService } from './prisma.service';
     JobRecommendationService,
     AiRecommendationClientService,
     ProfileRecommendationClientService,
+    AiCandidateRecommendationClientService,
+    ProfileCandidateDiscoveryClientService,
+    RecruiterCandidateRecommendationService,
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_INTERCEPTOR, useClass: ApiResponseInterceptor },

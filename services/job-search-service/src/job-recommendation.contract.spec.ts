@@ -15,6 +15,7 @@ import { JobSearchService } from './job-search.service';
 import { JobController } from './job.controller';
 import { JobService } from './job.service';
 import { SystemRole } from './common';
+import { RecruiterCandidateRecommendationService } from './recruiter-candidate-recommendation.service';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 
@@ -96,6 +97,7 @@ describe('Job recommendation HTTP contract', () => {
       {} as JobSearchService,
       { recommend } as unknown as JobRecommendationService,
       {} as JobIndexingService,
+      {} as RecruiterCandidateRecommendationService,
     );
     const setHeader = jest.fn();
     const query = { limit: 10 } as JobRecommendationQueryDto;
@@ -138,6 +140,9 @@ describe('Job recommendation HTTP contract', () => {
       {} as JobSearchService,
       { isConfigured: () => false } as unknown as JobRecommendationService,
       { isSearchReady: () => true } as unknown as JobIndexingService,
+      {
+        isConfigured: () => true,
+      } as unknown as RecruiterCandidateRecommendationService,
     );
 
     expect(controller.health()).toEqual({
@@ -145,6 +150,28 @@ describe('Job recommendation HTTP contract', () => {
       status: 'DEGRADED',
       searchIndexReady: true,
       recommendationConfigured: false,
+      candidateRecommendationConfigured: true,
+    });
+  });
+
+  it('degrades health when recruiter Candidate recommendation is unconfigured',
+  () => {
+    const controller = new JobController(
+      {} as JobService,
+      {} as JobSearchService,
+      { isConfigured: () => true } as unknown as JobRecommendationService,
+      { isSearchReady: () => true } as unknown as JobIndexingService,
+      {
+        isConfigured: () => false,
+      } as unknown as RecruiterCandidateRecommendationService,
+    );
+
+    expect(controller.health()).toEqual({
+      service: 'job-search-service',
+      status: 'DEGRADED',
+      searchIndexReady: true,
+      recommendationConfigured: true,
+      candidateRecommendationConfigured: false,
     });
   });
 
@@ -213,6 +240,7 @@ const AUTHORIZATION = 'Bearer candidate.jwt.token';
     { provide: JobSearchService, useValue: {} },
     { provide: JobRecommendationService, useValue: {} },
     { provide: JobIndexingService, useValue: {} },
+    { provide: RecruiterCandidateRecommendationService, useValue: {} },
   ],
 })
 class RecommendationContractModule {}
