@@ -22,7 +22,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 | User/Profile Service | Người 1 | 🟡 Persistence, Candidate CRUD/completion, hai consent aggregate tách biệt cho Job preferences và Recruiter discovery, Media, Application CV contract v1, skill snapshot contract v2, lifecycle, backend Builder, deletion fence, transactional `cv-events` và controlled historical CV baseline đã hoàn thành; baseline chưa execute trên dữ liệu thật, frontend Builder/PDF renderer cùng consent/preferences UI còn pending |
 | File/Media Service | Người 1 | 🟡 Core signed upload/confirm, Profile consumer, AI private-download consumer contract, durable cleanup/reconciliation và guarded six-policy Cloudinary smoke runner đã hoàn thành; live staging execution, Offer letter, các consumer khác và production hardening còn pending |
 | Admin & Statistics Service | Người 1 | ⏳ Scaffold |
-| Company Service | Người 2 | ✅ Nghiệp vụ chính đã merge |
+| Company Service | Người 2 | 🟡 Nghiệp vụ chính và ownership logo/ảnh/video qua Media đã hoàn thành; real multi-service E2E, migration backup/restore, audit và load public search còn pending |
 | Job & Search Service | Người 2 | 🟡 CRUD/search, transactional `job-events`, controlled historical Job baseline, Redis/BullMQ/Elasticsearch integration, Candidate job recommendation và consent-scoped Recruiter candidate recommendation đã hoàn thành; load/quality/deep-pagination benchmark còn thiếu |
 | Application Service | Người 2 | 🟡 Các luồng từ Submission đến AI Match, canonical Profile CV contract, durable usage/deletion gate, Application-time skill snapshot và canonical `application-events` v1 đã hoàn thành; còn P17 deployed E2E/load/production rollout |
 | AI Service | Người 2 | 🟡 Provider `/match`, consumer `job-events`, strict `cv-events` private-PDF embedding worker cùng internal `/recommend/jobs` và `/recommend/candidates` đã hoàn thành; source-side baseline chưa chạy trên dữ liệu thật, còn ANN/load/distributed-rate-limit benchmark và chatbot |
@@ -77,10 +77,10 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 - **Mục tiêu:** quản lý hồ sơ doanh nghiệp, quy trình xác minh và recruiter thuộc công ty.
 - **Công nghệ:** NestJS, TypeScript, Prisma, PostgreSQL, JWT RS256, Swagger.
-- **Luồng hoạt động:** tạo hồ sơ công ty; cập nhật; gửi duyệt và Admin xác minh; hiển thị trang công khai; mời, chấp nhận, xóa và chuyển quyền thành viên.
-- **Chức năng chính:** profile CRUD, trạng thái `PENDING/VERIFIED/REJECTED`, ownership, invitation token, public company page và endpoint tra cứu membership cho service khác.
+- **Luồng hoạt động:** tạo hồ sơ công ty; OWNER xin chữ ký/confirm upload và gắn media đã xác minh; cập nhật; gửi duyệt và Admin xác minh; hiển thị trang công khai; mời, chấp nhận, xóa và chuyển quyền thành viên.
+- **Chức năng chính:** profile CRUD, logo/ảnh/video Media-backed, trạng thái `PENDING/VERIFIED/REJECTED`, ownership, invitation token, public company page và endpoint tra cứu membership cho service khác.
 - **Phụ thuộc:** Auth, File/Media và Admin.
-- **Trạng thái:** nghiệp vụ chính đã merge vào `develop` qua ba feature branch.
+- **Trạng thái:** nghiệp vụ chính và Company–Media ownership đã merge vào `develop` qua PR #54; các gate P06 còn lại giữ nguyên pending.
 
 ## T06 — Job & Search Service
 
@@ -158,7 +158,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Mục tiêu:** chứng minh các luồng xuyên service chạy thật, ổn định và có thể triển khai.
 - **Công nghệ/công cụ:** unit/integration/E2E test, Docker Compose, CI/CD, Swagger/OpenAPI, logging/metrics/tracing.
 - **Đầu ra:** test contract REST/Kafka; migration sạch; test concurrency/idempotency; security test; smoke test; tài liệu môi trường; backup/restore; monitoring.
-- **Trạng thái:** đã có unit/integration test tập trung ở Company, Job/Search, Application, AI, Profile, Media, Interview và Notification. Profile hiện đạt **62/62 unit + 89/89 PostgreSQL/Kafka integration test**, Media **26 + 26**, Job/Search **292 + 19**, AI **331 unit/non-integration + 54 integration (385 tổng)**, Application **260 unit + 63 PostgreSQL/Kafka integration**, Interview **143/143 unit/WebMvc/security/client/event/query + 16/16 PostgreSQL/Kafka integration**, Notification **51 unit + 7 PostgreSQL/Kafka integration** với migration deploy lặp sạch. Đây là bằng chứng service-level, không đồng nghĩa deployed E2E toàn hệ thống và P17 vẫn pending.
+- **Trạng thái:** đã có unit/integration test tập trung ở Company, Job/Search, Application, AI, Profile, Media, Interview và Notification. Company hiện đạt **139/139 unit test + build** cho profile/member/JWT/Media client/upload-intent guard/saga reconciler; Profile đạt **62/62 unit + 89/89 PostgreSQL/Kafka integration test**, Media **26 + 26**, Job/Search **292 + 19**, AI **331 unit/non-integration + 54 integration (385 tổng)**, Application **260 unit + 63 PostgreSQL/Kafka integration**, Interview **143/143 unit/WebMvc/security/client/event/query + 16/16 PostgreSQL/Kafka integration**, Notification **51 unit + 7 PostgreSQL/Kafka integration** với migration deploy lặp sạch. Đây là bằng chứng service-level, không đồng nghĩa deployed E2E toàn hệ thống và P17 vẫn pending.
 
 ---
 
@@ -189,6 +189,17 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Chuyển quyền OWNER an toàn trong transaction.
 - Endpoint `by-user/:userId` phục vụ kiểm tra quyền liên service.
 - Mã nguồn hiện có 32 ca unit test cho JWT, profile, verification và membership.
+
+### Company Media Ownership & Lifecycle — PR #54
+
+- Chuyển sang luồng hai pha: tạo Company trước, sau đó OWNER gọi `POST /:id/media/signature`, upload trực tiếp và `POST /:id/media/confirm`; public Recruiter không thể tự khai owner Company. Company lưu upload-intent bền vững và chỉ confirm exact `company + requester + type + file + expiry + cleanupAt`, chặn confused-deputy trước khi Media đổi trạng thái.
+- `PUT /:id` chỉ nhận `fileId` cùng type/order nghiệp vụ, không nhận URL. Company gọi direct Media origin bằng key riêng, kiểm exact `ACTIVE + COMPANY + companyId + COMPANY_LOGO|COMPANY_IMAGE|COMPANY_VIDEO`, public delivery và canonical HTTPS URL trước khi bind.
+- Prisma bổ sung `aggregate_version`, upload-intent, reference UUID cho logo/gallery và durable `company_media_operations`. Attach được stage trước HTTP, bind trước domain commit; transaction Serializable/CAS xóa ATTACH operation và tạo DETACH cleanup atomically.
+- Foreground request giữ lease token, heartbeat toàn batch và fence tới transactional delete; worker chỉ nhận sau khi lease hết và lease đủ ngân sách bốn HTTP call. Mỗi lần attach logo dùng binding generation UUID mới nên stale cleanup không thể release reference vừa gắn lại.
+- Reconciler có grace, compare-and-set lease, fencing, bounded batch và exponential backoff; crash sau bind được recover bằng bind idempotent rồi release/delete, cleanup cũ không xóa file đã reattach và mỗi vòng detach giữ operation UUID riêng. Signature đồng thời stage cleanup deterministic; upload đã confirm nhưng bị bỏ dở được xoá sau grace để trả quota, còn attach thành công consume intent/cleanup trong cùng transaction.
+- Legacy `fileId/url` chưa có Media reference bị ẩn khỏi owner/public response thay vì tiếp tục tin dữ liệu cũ. Migration giữ nguyên row legacy để backfill/quarantine có kiểm soát; không tự nhận chúng là canonical.
+- Client fail closed với origin/key/timeout, redirect deny, response 64 KiB, exact envelope/field/echo validation và status mapping không tin error body. Full Company đạt **139/139 unit test**, build PASS; migration đã được áp dụng lặp trên PostgreSQL 16 sạch, schema drift bằng 0 và legacy fixture không mất dữ liệu. Real Auth/Admin/Media deployed E2E, live Cloudinary preset và backup/restore vẫn thuộc các gate pending riêng.
+- Media quota hiện là 1 logo, 10 ảnh, 1 video ACTIVE mỗi Company. Upload confirm bị bỏ dở được reconciler thu hồi tự động sau intent expiry + grace 900 giây. Khi slot đang được profile sử dụng, thay thế vẫn dùng remove → cleanup/delete → upload → attach và có display gap; atomic replacement cần contract Media mới nên không được tuyên bố hoàn thành trong task này.
 
 ## 2.2 Job & Search Service — đã merge vào `develop`
 
@@ -727,7 +738,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 ## P06 — Hoàn thiện Company Service
 
 - [ ] Chạy integration test với Auth/Admin/File Service thật.
-- [ ] Xác minh ownership của logo, ảnh và video qua File/Media thay vì chỉ nhận reference.
+- [x] Xác minh ownership của logo, ảnh và video qua File/Media thay vì chỉ nhận reference; dùng upload/confirm OWNER-only với durable exact upload-intent guard, abandoned-upload quota cleanup, canonical verify, generation bind-before-commit và leased attach/detach reconciliation.
 - [ ] Chạy Prisma migration trên database sạch và kiểm tra rollback/backup.
 - [ ] Bổ sung audit log cho duyệt công ty và thay đổi OWNER nếu yêu cầu nghiệm thu.
 - [ ] Kiểm tra phân trang/tìm kiếm trang công ty công khai ở tải lớn.

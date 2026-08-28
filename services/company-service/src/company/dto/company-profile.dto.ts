@@ -63,6 +63,9 @@ export class CompanyProfileDto {
   @ApiPropertyOptional({ nullable: true })
   rejectReason!: string | null;
 
+  @ApiProperty({ minimum: 0 })
+  aggregateVersion!: number;
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
 
