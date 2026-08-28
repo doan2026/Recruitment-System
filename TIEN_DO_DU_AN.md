@@ -80,7 +80,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** tạo hồ sơ công ty; OWNER xin chữ ký/confirm upload và gắn media đã xác minh; cập nhật; gửi duyệt và Admin xác minh; hiển thị trang công khai; mời, chấp nhận, xóa và chuyển quyền thành viên.
 - **Chức năng chính:** profile CRUD, logo/ảnh/video Media-backed, trạng thái `PENDING/VERIFIED/REJECTED`, ownership, invitation token, public company page và endpoint tra cứu membership cho service khác.
 - **Phụ thuộc:** Auth, File/Media và Admin.
-- **Trạng thái:** nghiệp vụ chính đã merge qua ba feature branch; task Company–Media ownership đang được bàn giao từ `feature/company-service/media-ownership-verification`, còn các gate P06 khác giữ nguyên pending.
+- **Trạng thái:** nghiệp vụ chính và Company–Media ownership đã merge vào `develop` qua PR #54; các gate P06 còn lại giữ nguyên pending.
 
 ## T06 — Job & Search Service
 
@@ -190,7 +190,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Endpoint `by-user/:userId` phục vụ kiểm tra quyền liên service.
 - Mã nguồn hiện có 32 ca unit test cho JWT, profile, verification và membership.
 
-### Company Media Ownership & Lifecycle — PR #TBD
+### Company Media Ownership & Lifecycle — PR #54
 
 - Chuyển sang luồng hai pha: tạo Company trước, sau đó OWNER gọi `POST /:id/media/signature`, upload trực tiếp và `POST /:id/media/confirm`; public Recruiter không thể tự khai owner Company. Company lưu upload-intent bền vững và chỉ confirm exact `company + requester + type + file + expiry + cleanupAt`, chặn confused-deputy trước khi Media đổi trạng thái.
 - `PUT /:id` chỉ nhận `fileId` cùng type/order nghiệp vụ, không nhận URL. Company gọi direct Media origin bằng key riêng, kiểm exact `ACTIVE + COMPANY + companyId + COMPANY_LOGO|COMPANY_IMAGE|COMPANY_VIDEO`, public delivery và canonical HTTPS URL trước khi bind.
