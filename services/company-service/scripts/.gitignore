@@ -1,0 +1,6 @@
+# Verification artifacts must never be committed.
+*.backup
+*.dump
+*.restore
+*.sql
+*.log

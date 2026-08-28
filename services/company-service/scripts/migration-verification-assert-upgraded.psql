@@ -1,0 +1,70 @@
+DO $$
+DECLARE
+  kinds text[];
+  assets text[];
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'company' AND table_name = 'companies'
+      AND column_name = 'aggregate_version' AND is_nullable = 'NO' AND column_default = '0'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'company' AND table_name = 'companies'
+      AND column_name = 'logo_media_reference_id' AND udt_name = 'uuid'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'company' AND table_name = 'company_media'
+      AND column_name = 'media_reference_id' AND udt_name = 'uuid'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'company' AND table_name = 'company_media_upload_intents'
+      AND column_name = 'cleanup_at' AND is_nullable = 'NO'
+  ) OR to_regclass('company.company_media_operations') IS NULL
+     OR to_regclass('company.company_media_upload_intents') IS NULL THEN
+    RAISE EXCEPTION 'upgraded media columns/tables are incomplete';
+  END IF;
+
+  SELECT array_agg(e.enumlabel ORDER BY e.enumsortorder)
+  INTO kinds
+  FROM pg_type t
+  JOIN pg_namespace n ON n.oid = t.typnamespace
+  JOIN pg_enum e ON e.enumtypid = t.oid
+  WHERE n.nspname = 'company' AND t.typname = 'CompanyMediaOperationKind';
+  SELECT array_agg(e.enumlabel ORDER BY e.enumsortorder)
+  INTO assets
+  FROM pg_type t
+  JOIN pg_namespace n ON n.oid = t.typnamespace
+  JOIN pg_enum e ON e.enumtypid = t.oid
+  WHERE n.nspname = 'company' AND t.typname = 'CompanyMediaAssetType';
+  IF kinds IS DISTINCT FROM ARRAY['ATTACH_COMPENSATION', 'DETACH_CLEANUP', 'UPLOAD_INTENT_CLEANUP']
+     OR assets IS DISTINCT FROM ARRAY['COMPANY_LOGO', 'COMPANY_IMAGE', 'COMPANY_VIDEO'] THEN
+    RAISE EXCEPTION 'media enum contract mismatch';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE schemaname = 'company' AND indexname = 'companies_logo_media_reference_id_key'
+      AND indexdef LIKE 'CREATE UNIQUE INDEX%'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE schemaname = 'company' AND indexname = 'company_media_media_reference_id_key'
+      AND indexdef LIKE 'CREATE UNIQUE INDEX%'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_constraint con
+    JOIN pg_class c ON c.oid = con.conrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'company' AND c.relname = 'company_media_upload_intents'
+      AND con.conname = 'company_media_upload_intents_company_id_fkey'
+      AND con.contype = 'f' AND con.confdeltype = 'c'
+  ) THEN
+    RAISE EXCEPTION 'media unique/FK contract mismatch';
+  END IF;
+
+  IF (SELECT count(*) FROM company.companies
+      WHERE aggregate_version = 0 AND logo_media_reference_id IS NULL) <> 2
+     OR (SELECT count(*) FROM company.company_media WHERE media_reference_id IS NULL) <> 2
+     OR (SELECT count(*) FROM company.company_media_operations) <> 0
+     OR (SELECT count(*) FROM company.company_media_upload_intents) <> 0 THEN
+    RAISE EXCEPTION 'legacy defaults changed during upgrade';
+  END IF;
+END $$;

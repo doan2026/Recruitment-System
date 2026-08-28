@@ -144,7 +144,16 @@ Checks:
 ```bash
 npm test
 npm run build
+./scripts/verify-postgres-migration.sh
 ```
+
+The migration verifier creates only disposable PostgreSQL 16 resources and
+checks a clean two-migration baseline, upgrade idempotency, schema drift,
+custom-format backup integrity, separate-database restore and the
+restore-based rollback candidate. See
+[`scripts/README.md`](scripts/README.md) for its safety guards and the
+production rollback runbook. It does not certify mixed old/new writers on an
+upgraded database.
 
 Swagger is available at `/docs` internally and `/companies/docs` through
 the gateway. A Postman collection is in `postman/`.
