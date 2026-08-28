@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -33,6 +34,7 @@ public class ApplicationClient {
     private final ObjectMapper strictMapper;
     private final String internalApiKey;
 
+    @Autowired
     public ApplicationClient(
         ObjectMapper mapper,
         @Value("${interview.application-client.base-url}") String baseUrl,

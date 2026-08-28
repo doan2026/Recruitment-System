@@ -36,6 +36,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class InterviewOutboxStorePostgresIT {
     private static final String INTERNAL_KEY =
         "interview-outbox-store-integration-key-000000000001";
+    private static final String CURSOR_KEY =
+        "interview-query-cursor-outbox-key-00000000000001";
     private static final Path PUBLIC_KEY = createPublicKey();
 
     @Container
@@ -72,6 +74,7 @@ class InterviewOutboxStorePostgresIT {
             "interview.application-client.internal-api-key",
             () -> INTERNAL_KEY
         );
+        registry.add("INTERVIEW_CURSOR_HMAC_KEY", () -> CURSOR_KEY);
         registry.add("interview-events.publisher-enabled", () -> "false");
     }
 

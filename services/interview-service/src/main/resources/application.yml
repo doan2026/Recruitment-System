@@ -57,6 +57,12 @@ interview:
     allowed-hosts: ${APPLICATION_SERVICE_ALLOWED_HOSTS:application-service}
     request-timeout-ms: ${APPLICATION_REQUEST_TIMEOUT_MS:2000}
     internal-api-key: ${APPLICATION_INTERNAL_API_KEY}
+  company-client:
+    base-url: ${COMPANY_SERVICE_URL:http://company-service:3000}
+    allowed-hosts: ${COMPANY_SERVICE_ALLOWED_HOSTS:company-service}
+    request-timeout-ms: ${COMPANY_REQUEST_TIMEOUT_MS:2000}
+  query:
+    cursor-hmac-key: ${INTERVIEW_CURSOR_HMAC_KEY}
 
 interview-events:
   topic: ${KAFKA_INTERVIEW_TOPIC:interview-events}

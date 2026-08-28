@@ -53,6 +53,8 @@ class InterviewOutboxKafkaIT {
     private static final String TOPIC = "interview-events-it";
     private static final String INTERNAL_KEY =
         "interview-kafka-integration-key-000000000000000001";
+    private static final String CURSOR_KEY =
+        "interview-query-cursor-kafka-key-000000000000000001";
     private static final Path PUBLIC_KEY = createPublicKey();
 
     @Container
@@ -95,6 +97,7 @@ class InterviewOutboxKafkaIT {
             "interview.application-client.internal-api-key",
             () -> INTERNAL_KEY
         );
+        registry.add("INTERVIEW_CURSOR_HMAC_KEY", () -> CURSOR_KEY);
         registry.add("interview-events.topic", () -> TOPIC);
         registry.add(
             "interview-events.publish-initial-delay-ms",

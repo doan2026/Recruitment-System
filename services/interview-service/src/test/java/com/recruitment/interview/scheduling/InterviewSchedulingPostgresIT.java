@@ -46,6 +46,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class InterviewSchedulingPostgresIT {
     private static final String INTERNAL_KEY =
         "interview-to-application-integration-key-000000000001";
+    private static final String CURSOR_KEY =
+        "interview-query-cursor-integration-key-000000000001";
     private static final Path PUBLIC_KEY = createPublicKey();
 
     @Container
@@ -83,6 +85,7 @@ class InterviewSchedulingPostgresIT {
             "interview.application-client.internal-api-key",
             () -> INTERNAL_KEY
         );
+        registry.add("INTERVIEW_CURSOR_HMAC_KEY", () -> CURSOR_KEY);
         registry.add(
             "interview-events.publisher-enabled",
             () -> "false"
@@ -110,7 +113,7 @@ class InterviewSchedulingPostgresIT {
     void cleanMigrationJpaValidationAndSecondFlywayRunAreStable() {
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(flyway.info().current().getVersion().getVersion())
-            .isEqualTo("2");
+            .isEqualTo("3");
         assertThat(flyway.migrate().migrationsExecuted).isZero();
         assertThat(jdbc.queryForObject(
             "SELECT COUNT(*) FROM pg_extension WHERE extname = 'btree_gist'",
