@@ -42,6 +42,38 @@ PENDING.
 Public responses omit workflow fields and raw Media Service file identifiers.
 Owner responses include review status and rejection reason.
 
+## Company domain audit ledger
+
+Company stores append-only evidence for three committed domain actions:
+
+- an ADMIN approves a PENDING Company;
+- an ADMIN rejects a PENDING Company, including the trimmed reason;
+- the current OWNER transfers ownership to an existing MEMBER.
+
+The actor is always the authenticated JWT subject. The Company/status or two
+membership changes, aggregate-version increment and audit insert run in the
+same Serializable transaction. A failed audit insert therefore rolls back the
+business mutation, while an identical review retry/no-op creates no new audit
+row. The database restricts action/field combinations, requires a positive
+resulting aggregate version, rejects duplicate Company/version evidence and
+prevents ordinary `UPDATE`, `DELETE` and `TRUNCATE` operations through triggers.
+An audit FK also prevents hard deletion of a Company that has audit history.
+
+This ledger starts at the audit migration; no unknown historical actor is
+backfilled. It is deliberately not a complete Company status event stream:
+creation, invitations, member removal, profile/media changes, owner resubmit
+and a critical owner edit that resets VERIFIED to PENDING are not recorded.
+There is no audit query API. Admin Service remains responsible for its separate
+global operational AuditLog; Company Service does not read or write `admin-db`.
+
+The partial unique database index guarantees at most one OWNER per Company.
+Company APIs additionally prevent deleting/demoting the current OWNER and make
+transfer atomic, but the index alone is not a direct-SQL guarantee that every
+Company has at least one OWNER. The append-only triggers protect ordinary DML,
+not a database superuser or table owner that can disable them. Production
+should separate migrator and runtime roles and grant the runtime only the
+required read/insert privileges on `company_audit_logs`.
+
 
 ## Member invitations
 
@@ -54,9 +86,16 @@ to at most one company. Removing the OWNER is blocked until ownership has been
 transferred to an existing MEMBER.
 ## Authentication
 
-Set `JWT_JWKS_URI` to the Auth Service JWKS endpoint for production. Keys are
-selected by `kid`, cached, and restricted to RS256. For local development,
-`JWT_PUBLIC_KEY` or `JWT_PUBLIC_KEY_PATH` can be used as a fallback.
+`JWT_ISSUER` and `JWT_AUDIENCE` are mandatory. Set `JWT_JWKS_URI` to the Auth
+Service JWKS endpoint for production. Keys are selected by `kid`, cached, and
+restricted to RSA/RS256 signing keys whose RFC 7638 thumbprint matches that
+`kid`. For local development, `JWT_PUBLIC_KEY` or `JWT_PUBLIC_KEY_PATH` can be
+used as a fallback; the token `kid` must match that key's thumbprint.
+
+Accepted access tokens must also have `typ=JWT`, UUID v4 `sub` and `jti`,
+integer `iat/exp`, and an exact uppercase `CANDIDATE`, `RECRUITER` or `ADMIN`
+role. Company does not normalize a non-canonical role. This contract is
+required because Company uses the verified `sub` as the audit actor.
 
 ## Media boundary
 
@@ -148,9 +187,10 @@ npm run build
 ```
 
 The migration verifier creates only disposable PostgreSQL 16 resources and
-checks a clean two-migration baseline, upgrade idempotency, schema drift,
-custom-format backup integrity, separate-database restore and the
-restore-based rollback candidate. See
+checks a clean two-migration baseline, Media and audit upgrade idempotency,
+schema drift, append-only/transaction/OWNER constraints, custom-format backup
+integrity, separate-database restore and the restore-based rollback candidate.
+See
 [`scripts/README.md`](scripts/README.md) for its safety guards and the
 production rollback runbook. It does not certify mixed old/new writers on an
 upgraded database.
