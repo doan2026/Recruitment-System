@@ -88,10 +88,14 @@ Ba luồng có tổng điểm bằng nhau. Rủi ro lệch lớn nhất nằm �
  JWT RS256 + public key      Người 1          Người 2, 3        Payload: sub (user_id), role, iat, exp; endpoint
                                                                 JWKS; mẫu code verify cho NestJS, Node thuần
                                                                 và FastAPI
- Kafka cv-events             Người 1          Người 2 (AI)      { event_id, action, cv_id, user_id, file_url,
-                             (Profile)                          occurred_at }
- REST File/Media             Người 1          Người 2, 3        POST /files/signature, POST /files; quy ước lưu
-                                                                file_id + url ở phía service nghiệp vụ
+ Kafka cv-events             Người 1          Người 2 (AI)      key=cv_id; schema v1 flat snake_case đúng 9 trường
+                             (Profile)                          { event_id, action, cv_id, candidate_id, file_id,
+                                                                cv_type, occurred_at, schema_version,
+                                                                aggregate_version }; action = UPSERTED |
+                                                                DEACTIVATED | DELETED; không chứa URL/nội dung CV
+ REST File/Media             Người 1          Người 2, 3        POST /files/signature, POST /files; service nghiệp vụ
+                                                                lưu file_id canonical; URL ổn định chỉ cho public media,
+                                                                private media dùng signed URL ngắn hạn theo request
  Kafka application-events    Người 2          Người 3           { event_id, action, application_id, job_id,
                                               (Notification),   job_title, candidate_id, recruiter_id,
                                               Người 1           from_status, to_status, occurred_at }
@@ -111,8 +115,9 @@ Ba luồng có tổng điểm bằng nhau. Rủi ro lệch lớn nhất nằm �
                                               (Admin)           /jobs/:id/approve — định dạng body và mã lỗi
  REST khoá tài khoản         Người 1 (Auth)   Người 1           PATCH /auth/users/:id/lock — kèm revoke
                                               (Admin)           refresh token
- REST danh sách CV           Người 1          Người 2           GET /profile/cv?user_id= — trả cv_id, title,
-                             (Profile)        (Application)     file_url, is_default
+ REST danh sách CV           Người 1          Người 2           REST nội bộ versioned — trả cv_id, title, type,
+                             (Profile)        (Application)     file_id, is_default, aggregate_version; tải private
+                                                                qua endpoint download được phân quyền riêng
  REST AI Match              Người 2 (AI)    Người 2           POST /ai/match; X-Internal-Api-Key; body
                                              (Application)     { cv_id, job_id }; response { data: { cv_id,
                                                                job_id, score, reason }, meta }
@@ -271,13 +276,16 @@ Người 1 sở hữu toàn bộ luồng "một người bước vào hệ thố
 3. Thêm từng khối dữ liệu độc lập: Học vấn, Kinh nghiệm làm việc, Kỹ năng, Chứng chỉ, Dự án cá nhân. Mỗi khối là một API CRUD riêng để frontend lưu từng phần, không phải submit cả trang.
 4. Thêm liên kết ngoài: Github, LinkedIn, Portfolio (validate đúng định dạng URL và đúng domain tương ứng).
 5. Hệ thống tính % hoàn thiện hồ sơ theo trọng số các khối và hiển thị gợi ý bổ sung phần còn thiếu.
-6. Mỗi lần lưu thay đổi trọng yếu (kỹ năng, kinh nghiệm) → cân nhắc publish cv-events để AI tính lại embedding hồ sơ.
+6. Thay đổi kỹ năng/kinh nghiệm của Profile không tự phát `cv-events`: embedding bám theo immutable
+   PDF snapshot. Candidate phải xuất một revision CV/file mới thì Profile mới publish `UPSERTED`.
 #### Luồng 2: Upload CV dạng file PDF
 1. Candidate chọn file PDF ở màn quản lý CV.
 2. Frontend gọi File/Media Service để lấy signed upload params (type = CV).
 3. Frontend upload file trực tiếp lên Cloudinary (không đi qua backend nghiệp vụ).
-4. Cloudinary trả về public_id + url; frontend gửi metadata này về Profile Service.
-5. Profile Service kiểm tra số CV hiện có (tối đa 5), tạo bản ghi CV(type = UPLOAD, file_url, is_default).
+4. Frontend xác nhận upload với File/Media Service và chỉ gửi `file_id` canonical về Profile Service;
+   CV là private delivery nên không lưu URL lâu dài.
+5. Profile Service xác minh owner/type/trạng thái, kiểm tra số CV hiện có (tối đa 5), bind Media
+   reference và tạo bản ghi CV(type = UPLOAD, file_id, is_default).
 6. Nếu đây là CV đầu tiên → tự động đặt is_default = true.
 7. Publish sự kiện lên topic Kafka cv-events để AI Service tính embedding.
 #### Luồng 3: Tạo CV online bằng CV Builder
@@ -286,7 +294,8 @@ Người 1 sở hữu toàn bộ luồng "một người bước vào hệ thố
 3. Candidate chỉnh sửa nội dung, sắp xếp thứ tự các mục, xem trước.
 4. Bấm "Xuất PDF" → render PDF (thư viện phía server hoặc client tuỳ thống nhất).
 5. File PDF được đẩy lên Cloudinary qua File/Media Service.
-6. Tạo bản ghi CV(type = ONLINE, template_id, content_json, file_url) — giữ cả content_json để lần sau mở lại chỉnh sửa tiếp.
+6. Tạo immutable snapshot CV(type = ONLINE, template_id, content_json, file_id) — giữ `content_json`
+   để clone revision, còn AI luôn đọc đúng PDF private đã export qua Media.
 7. Publish cv-events.
 #### Luồng 4: Quản lý danh sách CV
 1. Xem danh sách CV kèm ngày tạo, loại, trạng thái mặc định.
@@ -299,7 +308,8 @@ Người 1 sở hữu toàn bộ luồng "một người bước vào hệ thố
 #### Luồng 5: Phục vụ dữ liệu cho service khác
 1. Application Service gọi GET /profile/cv?user_id= để lấy danh sách CV khả dụng khi ứng viên bấm Apply.
 2. Application Service gọi GET /profile/cv/:id để hiển thị CV cho recruiter xem.
-3. AI Service không gọi trực tiếp, chỉ nhận cv-events và tải file theo url trong event.
+3. AI Service nhận `cv-events`, sau đó gọi trực tiếp Media API nội bộ bằng `file_id` cùng
+   `candidate_id`/type expectation để lấy URL tải private ngắn hạn; event không mang URL.
 
 ### 2. Tài liệu nghiệp vụ
 ### 2.1. Quy tắc nghiệp vụ (business rules)
@@ -317,7 +327,7 @@ Người 1 sở hữu toàn bộ luồng "một người bước vào hệ thố
 - Skill(id, profile_id, name, level)
 - Certificate(id, profile_id, name, issuer, issued_at, credential_url)
 - Project(id, profile_id, name, role, description, url)
-- CV(id, user_id, title, type[UPLOAD|ONLINE], file_url, file_id, template_id, content_json, is_default, is_deleted, created_at)
+- CV(id, user_id, title, type[UPLOAD|ONLINE], file_id, media_reference_id, template_id, content_json, is_default, is_deleted, aggregate_version, created_at)
 ### 2.3. API chính
 ```text
  Endpoint                             Mô tả                                          Quyền truy cập
@@ -345,9 +355,13 @@ Người 1 sở hữu toàn bộ luồng "một người bước vào hệ thố
 
 
 ### 2.4. Sự kiện Kafka
-- PRODUCE topic cv-events khi: CV được tạo, cập nhật nội dung, hoặc xoá.
-- Payload gợi ý: { event_id, action: CREATED|UPDATED|DELETED, cv_id, user_id, file_url, occurred_at }.
-- Consumer: AI Service (Người 2) — cần thống nhất schema này với Người 2 ngay tuần đầu.
+- PRODUCE topic `cv-events` bằng transactional outbox khi snapshot được tạo, deactivate hoặc xoá cứng.
+- Contract v1: Kafka key=`cv_id`; value flat snake_case đúng 9 trường
+  `{ event_id, action, cv_id, candidate_id, file_id, cv_type, occurred_at, schema_version, aggregate_version }`.
+- `UPSERTED` tải/ghi vector; `DEACTIVATED` giữ vector cho match lịch sử nhưng loại khỏi recommendation;
+  `DELETED` xoá vector và đặt tombstone. Không event cho rename/default vì PDF không đổi.
+- Không publish `file_url`, signed URL, `content_json`, title hay `media_reference_id` nội bộ của Profile. Consumer lấy PDF qua
+  Media nội bộ bằng `file_id` và exact owner/type expectation.
 ### 2.5. Phụ thuộc giữa các service
 - Phụ thuộc: Auth Service (JWT), File/Media Service (upload).
 - Được phụ thuộc bởi: Application Service (Người 2) — chọn CV khi nộp đơn; AI Service (Người 2) — qua cv-events.
@@ -364,8 +378,8 @@ Người 1 sở hữu toàn bộ luồng "một người bước vào hệ thố
  Người phụ trách             Người 1
  Công nghệ                   NestJS (TypeScript) + Prisma, Cloudinary Node SDK
  Database                    PostgreSQL container riêng: file-db (chỉ lưu metadata)
- Vai trò trong hệ thống      Nơi DUY NHẤT giữ Cloudinary API secret. Mọi service khác chỉ lưu file_id/url tham
-                             chiếu.
+ Vai trò trong hệ thống      Nơi DUY NHẤT giữ Cloudinary API secret. Service nghiệp vụ chỉ lưu file_id
+                             canonical; signed URL ngắn hạn chỉ lấy theo request và không persist.
  Phụ thuộc                   Auth Service (JWT)
 ```
 
@@ -881,13 +895,17 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 ### 1. Luồng hoạt động các chức năng
 #### Luồng 1: Cập nhật embedding CV
 1. Consumer lắng nghe topic cv-events.
-2. Nhận event CREATED/UPDATED → tải file CV theo file_url.
-3. Trích xuất text từ PDF (pdfplumber hoặc PyMuPDF); nếu là CV online thì lấy trực tiếp content_json.
+2. Parse contract v1/key/version. Với `UPSERTED`, gọi Media nội bộ để verify `file_id`, owner
+   `candidate_id`, type `CV`, rồi lấy URL HTTPS ngắn hạn; không nhận URL từ Kafka.
+3. Tải streaming có timeout/redirect-off/host allowlist và hard cap 5 MiB; trích xuất text từ PDF
+   trong parser bị giới hạn. CV online cũng dùng PDF immutable, không đưa `content_json` qua Kafka.
 4. Làm sạch text (bỏ ký tự thừa, chuẩn hoá khoảng trắng), cắt còn phần nội dung có nghĩa.
 5. Sinh vector bằng all-MiniLM-L6-v2 (384 chiều, chạy được trên CPU).
 6. Upsert vào bảng CvEmbedding (khoá là cv_id) trong PostgreSQL + pgvector.
-7. Nhận event DELETED → xoá vector tương ứng.
-8. Lỗi (file hỏng, không đọc được text) → retry 3 lần, sau đó ghi vào bảng dead-letter kèm lý do.
+7. `DEACTIVATED` đặt vector inactive nhưng vẫn cho `/ai/match` lịch sử; `DELETED` xoá vector và đặt
+   aggregate tombstone để event cũ không thể phục hồi dữ liệu.
+8. Lỗi hạ tầng Media/model/database không commit để retry; source đã mất hoặc PDF hỏng/rỗng trở
+   thành terminal dead-letter chỉ chứa hash/mã lỗi để partition tiếp tục tới event mới hơn.
 #### Luồng 2: Cập nhật embedding Job
 1. Consumer lắng nghe topic `job-events`, bắt buộc Kafka key trùng `job_id`.
 2. Ghép tiêu đề + mô tả + yêu cầu + danh sách kỹ năng từ contract v1 để tạo nội dung embedding.
@@ -927,7 +945,8 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 - Thiếu embedding trả HTTP 200 với `score: null`; sai key trả 401, request sai trả 422, database/model chưa sẵn sàng trả 503. Không clamp score ngoài `0..1`.
 - API key của Claude chỉ nằm trong biến môi trường của service này.
 ### 2.2. Mô hình dữ liệu
-- CvEmbedding(cv_id, user_id, vector vector(384), text_hash, model_name, updated_at)
+- CvEmbedding(cv_id, user_id, vector vector(384), text_hash, model_name, is_active, source_event_id, source_version, updated_at)
+- CvAggregateOwner(cv_id, user_id, created_at) — registry bất biến, giữ lại cả sau DLQ/tombstone để chặn đổi owner
 - JobEmbedding(job_id, vector vector(384), text_hash, model_name, location, salary_min NUMERIC(15,2), salary_max NUMERIC(15,2), job_type, is_active, updated_at)
 - ChatSession(session_id, user_id, history_json, updated_at) — lưu chính ở Redis, đồng bộ xuống Postgres nếu cần phân tích
 - EmbeddingEventLedger(event_id, topic, partition, offset, aggregate_id, version, payload_hash, state_hash, outcome, processed_at)
@@ -947,6 +966,9 @@ Người 2 sở hữu trục nghiệp vụ chính của sản phẩm: doanh nghi
 
 ### 2.4. Sự kiện Kafka
 - CONSUME: cv-events (Người 1), job-events (Người 2).
+- Contract `cv-events` v1: key=`cv_id`; value đúng 9 trường `event_id, action, cv_id, candidate_id,
+  file_id, cv_type, occurred_at, schema_version, aggregate_version`; action là
+  `UPSERTED|DEACTIVATED|DELETED` và không chứa URL/nội dung CV.
 - Contract `job-events` v1: key=`job_id`; value flat snake_case gồm đúng 16 trường `event_id, action, job_id, company_id, title, description, skills, location, status, occurred_at, schema_version, aggregate_version, requirements, salary_min, salary_max, job_type`.
 - Consumer xử lý at-least-once theo `event_id` và từ chối state cũ dựa trên `aggregate_version`; salary nhận chuỗi thập phân hai chữ số hoặc `null` rồi lưu bằng `NUMERIC(15,2)`.
 - Không produce event. Kết quả gợi ý được lấy qua REST khi cần.
