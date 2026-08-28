@@ -277,7 +277,7 @@ Chức năng chi tiết
 Data model gợi ý
        •   Profile(id, user_id, headline, summary)
        •   Education / Experience / Skill / Certificate (liên kết profile_id)
-       •   CV(id, user_id, file_url, is_default)
+       •   CV(id, user_id, file_id, type, is_default, is_deleted, aggregate_version)
 
 API / event chính
        •   GET /profile/:userId
@@ -286,8 +286,13 @@ API / event chính
        •   GET /profile/cv/:id
 
 Giao tiếp với service khác
-Publish sự kiện lên topic Kafka 'cv-events' khi ứng viên upload/sửa CV để AI Service tính embedding
-matching; cung cấp dữ liệu hồ sơ cho Application Service khi ứng viên chọn CV nộp đơn.
+Ghi transactional outbox và publish sự kiện versioned lên topic Kafka `cv-events` khi một PDF CV
+được tạo, ngừng hoạt động hoặc xoá cứng. Kafka key là `cv_id`; payload flat snake_case có đúng chín
+trường `event_id`, `action`, `cv_id`, `candidate_id`, `file_id`, `cv_type`, `occurred_at`,
+`schema_version`, `aggregate_version`. Payload không chứa URL ký, nội dung CV hoặc
+`media_reference_id` nội bộ của Profile. AI Service dùng `file_id` cùng owner/type expectation để
+lấy URL tải riêng tư ngắn hạn từ Media Service; Application Service lấy CV qua REST nội bộ khi ứng
+viên chọn CV nộp đơn.
 
 3. Company Service
        •   Công nghệ cố định: NestJS (TypeScript) · PostgreSQL (container riêng: company-db) +
@@ -510,8 +515,9 @@ API / event chính
         •   DELETE /files/:id
 
 Giao tiếp với service khác
-Mọi service khác (Profile, Company, Chat) chỉ lưu file_id/url tham chiếu tới service này; service này
-là nơi duy nhất giữ Cloudinary API secret.
+Mọi service khác chỉ lưu `file_id` và metadata nghiệp vụ tối thiểu. URL công khai chỉ áp dụng cho
+loại media có public delivery; CV dùng private delivery và phải lấy URL ký ngắn hạn theo từng lần
+tải. Media Service là nơi duy nhất giữ Cloudinary API secret.
 
 10. Admin & Statistics Service
         •   Công nghệ cố định: Spring Boot 3 (Java 21) · Spring Data JPA · PostgreSQL (container
@@ -560,7 +566,7 @@ Chức năng chi tiết
         •   Chatbot: trả lời câu hỏi thường gặp, hướng dẫn thao tác, dùng Claude API với system
             prompt chứa ngữ cảnh nghiệp vụ tuyển dụng; lưu lịch sử hội thoại ngắn hạn trong Redis
             theo session
-        •   Recommendation: khi CV được upload (event từ File/Profile Service) hoặc job mới đăng
+        •   Recommendation: khi CV được upload (event từ Profile Service) hoặc job mới đăng
             (event từ Job & Search Service), tính embedding bằng sentence-transformers rồi lưu vào
             PostgreSQL (pgvector)
         •   Khi cần gợi ý, tính cosine similarity giữa vector CV và vector các job đang mở, trả về
@@ -568,7 +574,9 @@ Chức năng chi tiết
         •   Expose kết quả gợi ý để Job & Search Service hiển thị mục 'Việc làm phù hợp với bạn'
 
 Data model gợi ý
-        •   CvEmbedding(cv_id, vector, updated_at)
+        •   CvEmbedding(cv_id, user_id, vector, text_hash, model_name, is_active,
+            source_event_id, source_version, updated_at)
+        •   CvAggregateOwner(cv_id, user_id, created_at) — ownership bất biến qua DLQ/tombstone
         •   JobEmbedding(job_id, vector, location, salary_min NUMERIC(15,2),
             salary_max NUMERIC(15,2), job_type, updated_at)
         •   ChatSession(session_id, user_id, history_json)
@@ -579,9 +587,12 @@ API / event chính
         •   POST /ai/embeddings/refresh
 
 Giao tiếp với service khác
-Subscribe topic Kafka 'job-events' và 'cv-events' để tự động cập nhật embedding; không lưu trữ dữ
-liệu CV/Job gốc, chỉ lưu vector và kết quả xử lý. Consumer job-events chống trùng theo `event_id`,
-không cho `aggregate_version` cũ ghi đè state mới và đọc đầy đủ metadata của contract v1.
+Subscribe topic Kafka `job-events` và `cv-events` để tự động cập nhật embedding; không lưu trữ dữ
+liệu CV/Job gốc, signed URL hoặc raw Kafka payload, chỉ lưu vector, hash, provenance và metadata tối
+thiểu. Cả hai consumer chống trùng theo `event_id`, không cho `aggregate_version` cũ ghi đè state
+mới. `cv-events` phân biệt `UPSERTED`, `DEACTIVATED` và `DELETED`: soft-deleted snapshot vẫn giữ
+vector cho lịch sử Application nhưng không dùng cho recommendation, còn hard delete xoá vector và
+đặt tombstone vĩnh viễn.
 
 
 5. Lý do gộp service

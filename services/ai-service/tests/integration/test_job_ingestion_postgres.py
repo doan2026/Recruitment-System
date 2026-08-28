@@ -29,6 +29,8 @@ pytestmark = pytest.mark.integration
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
 
 JOB_ID = UUID("20000000-0000-0000-0000-000000000001")
+MIGRATION_CV_ID = UUID("20000000-0000-0000-0000-000000000099")
+MIGRATION_CANDIDATE_ID = UUID("30000000-0000-0000-0000-000000000099")
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 BASE_TIME = datetime(2026, 8, 26, 1, 0, tzinfo=UTC)
 
@@ -129,12 +131,26 @@ def test_event_state_migration_downgrades_and_upgrades_cleanly(
                 SELECT
                     to_regclass('ai.embedding_event_ledger') IS NULL,
                     to_regclass('ai.embedding_aggregate_cursors') IS NULL,
-                    to_regclass('ai.embedding_dead_letters') IS NULL
+                    to_regclass('ai.embedding_dead_letters') IS NULL,
+                    to_regclass('ai.cv_aggregate_owners') IS NULL
                 """
             ).fetchone()
+            connection.execute(
+                """
+                INSERT INTO ai.cv_embeddings (
+                    cv_id, user_id, vector, text_hash, model_name
+                ) VALUES (
+                    %s, %s,
+                    ('[' || repeat('0,', 383) || '0]')::vector,
+                    repeat('a', 64),
+                    'migration-backfill-test'
+                )
+                """,
+                (MIGRATION_CV_ID, MIGRATION_CANDIDATE_ID),
+            )
         assert downgraded_version == ("20260825_01",)
         assert downgraded_salary == (14, 2)
-        assert downgraded_tables == (True, True, True)
+        assert downgraded_tables == (True, True, True, True)
     finally:
         try:
             command.upgrade(config, "head")
@@ -162,12 +178,22 @@ def test_event_state_migration_downgrades_and_upgrades_cleanly(
             SELECT
                 to_regclass('ai.embedding_event_ledger') IS NOT NULL,
                 to_regclass('ai.embedding_aggregate_cursors') IS NOT NULL,
-                to_regclass('ai.embedding_dead_letters') IS NOT NULL
+                to_regclass('ai.embedding_dead_letters') IS NOT NULL,
+                to_regclass('ai.cv_aggregate_owners') IS NOT NULL
             """
         ).fetchone()
-    assert upgraded_version == ("20260826_03",)
+        backfilled_owner = connection.execute(
+            """
+            SELECT user_id
+            FROM ai.cv_aggregate_owners
+            WHERE cv_id = %s
+            """,
+            (MIGRATION_CV_ID,),
+        ).fetchone()
+    assert upgraded_version == ("20260828_04",)
     assert upgraded_salary == (15, 2)
-    assert upgraded_tables == (True, True, True)
+    assert upgraded_tables == (True, True, True, True)
+    assert backfilled_owner == (MIGRATION_CANDIDATE_ID,)
 
 
 def test_upsert_commits_embedding_cursor_and_ledger_atomically(

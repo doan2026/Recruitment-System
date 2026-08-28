@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   Cv,
   CvDeletionState,
+  CvEventAction,
   CvMediaCleanupStatus,
   CvType,
   Prisma,
@@ -22,6 +23,7 @@ import { ApiException } from '../common/http/api-exception';
 import { PrismaService } from '../prisma/prisma.service';
 import { DeletedCvResponseDto } from './dto/profile-media-response.dto';
 import { CvMediaCleanupService } from './cv-media-cleanup.service';
+import { CvEventPublisherService } from './cv-event-publisher.service';
 import { ProfileService } from './profile.service';
 
 const DEFAULT_RECONCILE_INTERVAL_MS = 30_000;
@@ -64,6 +66,7 @@ export class CvDeletionService
     private readonly profiles: ProfileService,
     private readonly application: ApplicationCvUsageClient,
     private readonly cleanup: CvMediaCleanupService,
+    private readonly events: CvEventPublisherService,
     config: ConfigService,
   ) {
     this.options = this.readOptions(config);
@@ -301,7 +304,7 @@ export class CvDeletionService
     decision: ApplicationCvDeletionFence,
   ): Promise<DeletedCvResponseDto> {
     const firstUsedAt = this.validateUsedDecision(snapshot, decision);
-    const workflow = await this.profiles.runMutation(
+    const result = await this.profiles.runMutation(
       async (transaction) => {
         await this.lockExistingProfile(
           transaction,
@@ -317,7 +320,7 @@ export class CvDeletionService
             current,
             firstUsedAt,
           );
-          return current;
+          return { workflow: current, eventAppended: false };
         }
         if (current.state !== CvDeletionState.PENDING_FENCE) {
           throw this.invalidDeletionState();
@@ -341,13 +344,18 @@ export class CvDeletionService
         ) {
           throw this.invalidDeletionState();
         }
-        if (cv.firstUsedAt === null) {
-          await transaction.cv.update({
+        const retainedCv = cv.firstUsedAt === null
+          ? await transaction.cv.update({
             where: { id: cv.id },
             data: { firstUsedAt },
-          });
-        }
-        return transaction.cvDeletionWorkflow.update({
+          })
+          : cv;
+        await this.events.append(
+          transaction,
+          retainedCv,
+          CvEventAction.DEACTIVATED,
+        );
+        const workflow = await transaction.cvDeletionWorkflow.update({
           where: { cvId: current.cvId },
           data: {
             state: CvDeletionState.SOFT_RETAINED,
@@ -359,9 +367,11 @@ export class CvDeletionService
           },
           include: { cleanup: true },
         });
+        return { workflow, eventAppended: true };
       },
     );
-    return this.toWorkflowResponse(workflow);
+    if (result.eventAppended) this.events.wake();
+    return this.toWorkflowResponse(result.workflow);
   }
 
   private async finalizeHard(
@@ -370,7 +380,7 @@ export class CvDeletionService
   ): Promise<DeletedCvResponseDto> {
     const fencedAt = this.validateFencedDecision(snapshot, decision);
     const cleanupJobId = randomUUID();
-    const workflow = await this.profiles.runMutation(
+    const result = await this.profiles.runMutation(
       async (transaction) => {
         await this.lockExistingProfile(
           transaction,
@@ -382,7 +392,7 @@ export class CvDeletionService
             include: { cleanup: true },
           });
         if (current.state === CvDeletionState.HARD_DELETED) {
-          return current;
+          return { workflow: current, eventAppended: false };
         }
         if (current.state !== CvDeletionState.PENDING_FENCE) {
           throw this.invalidDeletionState();
@@ -452,6 +462,11 @@ export class CvDeletionService
             },
           });
         }
+        await this.events.append(
+          transaction,
+          cv,
+          CvEventAction.DELETED,
+        );
         await transaction.cv.delete({ where: { id: cv.id } });
         const completed =
           await transaction.cvDeletionWorkflow.update({
@@ -460,10 +475,11 @@ export class CvDeletionService
             include: { cleanup: true },
           });
         await this.assertCvDefaultInvariant(transaction);
-        return completed;
+        return { workflow: completed, eventAppended: true };
       },
     );
-    return this.cleanupAndRespond(workflow);
+    if (result.eventAppended) this.events.wake();
+    return this.cleanupAndRespond(result.workflow);
   }
 
   private async cleanupAndRespond(

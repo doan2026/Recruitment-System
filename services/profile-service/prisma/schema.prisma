@@ -32,6 +32,14 @@ enum CvMediaCleanupStatus {
   @@map("cv_media_cleanup_status")
 }
 
+enum CvEventAction {
+  UPSERTED
+  DEACTIVATED
+  DELETED
+
+  @@map("cv_event_action")
+}
+
 model Profile {
   id                     String               @id @default(uuid()) @db.Uuid
   userId                 String               @unique(map: "profiles_user_id_key") @map("user_id") @db.Uuid
@@ -235,4 +243,31 @@ model CvMediaCleanupJob {
 
   @@index([status, nextAttemptAt, leaseUntil, id], map: "cv_media_cleanup_job_due_idx")
   @@map("cv_media_cleanup_job")
+}
+
+/// Durable immutable Kafka intent. It intentionally has no relation to Cv or
+/// Profile because DELETED events must outlive an unused CV hard-delete.
+model CvEventOutbox {
+  id               String        @id @default(uuid()) @map("event_id") @db.Uuid
+  cvId             String        @map("cv_id") @db.Uuid
+  candidateId      String        @map("candidate_id") @db.Uuid
+  fileId           String        @map("file_id") @db.Uuid
+  cvType           CvType        @map("cv_type")
+  aggregateVersion Int           @map("aggregate_version")
+  action           CvEventAction
+  topic            String        @default("cv-events") @db.VarChar(100)
+  eventKey         String        @map("event_key") @db.Uuid
+  payload          Json          @db.JsonB
+  attempts         Int           @default(0)
+  nextAttemptAt    DateTime      @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
+  leaseOwner       String?       @map("lease_owner") @db.VarChar(64)
+  leaseFence       Int           @default(0) @map("lease_fence")
+  leaseExpiresAt   DateTime?     @map("lease_expires_at") @db.Timestamptz(3)
+  publishedAt      DateTime?     @map("published_at") @db.Timestamptz(3)
+  lastErrorCode    String?       @map("last_error_code") @db.VarChar(96)
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([cvId, aggregateVersion], map: "cv_event_outbox_cv_version_key")
+  @@index([leaseExpiresAt], map: "cv_event_outbox_lease_expires_at_idx")
+  @@map("cv_event_outbox")
 }

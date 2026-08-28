@@ -1,5 +1,10 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
-import { Cv, CvType, Prisma } from '@prisma/client';
+import {
+  Cv,
+  CvEventAction,
+  CvType,
+  Prisma,
+} from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { ApiException } from '../common/http/api-exception';
 import {
@@ -29,6 +34,7 @@ import {
   RETAINED_CV_SNAPSHOT_LIMIT,
 } from './cv-limits';
 import { CvDeletionService } from './cv-deletion.service';
+import { CvEventPublisherService } from './cv-event-publisher.service';
 
 const AVATAR_REFERENCE_TYPE = 'PROFILE_AVATAR';
 const CV_REFERENCE_TYPE = 'PROFILE_CV';
@@ -48,6 +54,7 @@ interface LockedProfile {
 interface CvProjectionMutation {
   cv: Cv;
   mediaReferenceAccepted: boolean;
+  eventAppended: boolean;
 }
 
 @Injectable()
@@ -59,6 +66,7 @@ export class ProfileMediaService {
     private readonly profiles: ProfileService,
     private readonly media: ProfileMediaClient,
     private readonly deletions: CvDeletionService,
+    private readonly events: CvEventPublisherService,
   ) {}
 
   async attachAvatar(
@@ -182,6 +190,7 @@ export class ProfileMediaService {
             return {
               cv: existing,
               mediaReferenceAccepted: false,
+              eventAppended: false,
             };
           }
           throw new ApiException(
@@ -226,6 +235,11 @@ export class ProfileMediaService {
             isDefault: activeCount === 0,
           },
         });
+        await this.events.append(
+          transaction,
+          created,
+          CvEventAction.UPSERTED,
+        );
         if (!locked.created) {
           await transaction.profile.update({
             where: { id: locked.id },
@@ -236,6 +250,7 @@ export class ProfileMediaService {
         return {
           cv: created,
           mediaReferenceAccepted: true,
+          eventAppended: true,
         };
       });
     } catch (error) {
@@ -248,6 +263,7 @@ export class ProfileMediaService {
         'unused concurrent CV binding',
       );
     }
+    if (mutation.eventAppended) this.events.wake();
     return this.toCvResponse(mutation.cv);
   }
 

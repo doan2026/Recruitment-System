@@ -4,6 +4,7 @@ import { MediaClientModule } from '../media/media-client.module';
 import { CvBuilderController } from './cv-builder.controller';
 import { CvBuilderService } from './cv-builder.service';
 import { CvDeletionService } from './cv-deletion.service';
+import { CvEventPublisherService } from './cv-event-publisher.service';
 import { CvMediaCleanupService } from './cv-media-cleanup.service';
 import { InternalCvController } from './internal-cv.controller';
 import { InternalCvService } from './internal-cv.service';
@@ -25,6 +26,7 @@ import { ProfileService } from './profile.service';
     ProfileMediaService,
     CvBuilderService,
     CvDeletionService,
+    CvEventPublisherService,
     CvMediaCleanupService,
     InternalCvService,
   ],

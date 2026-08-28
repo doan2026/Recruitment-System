@@ -394,6 +394,111 @@ const main = async () => {
       throw revisionLockWaitError;
     }
     executeMigration('20260828010000_cv_deletion_fence');
+    executeMigration('20260828020000_cv_event_outbox');
+
+    const historicalEventRows = await prisma.$queryRawUnsafe(`
+      SELECT COUNT(*)::integer AS "count"
+      FROM "profile"."cv_event_outbox"
+    `);
+    assert.equal(historicalEventRows[0].count, 0);
+
+    const outboxForeignKeys = await prisma.$queryRawUnsafe(`
+      SELECT COUNT(*)::integer AS "count"
+      FROM "information_schema"."table_constraints"
+      WHERE "table_schema" = 'profile'
+        AND "table_name" = 'cv_event_outbox'
+        AND "constraint_type" = 'FOREIGN KEY'
+    `);
+    assert.equal(outboxForeignKeys[0].count, 0);
+
+    const outboxIndexes = await prisma.$queryRawUnsafe(`
+      SELECT "indexname" AS "name", "indexdef" AS "definition"
+      FROM "pg_catalog"."pg_indexes"
+      WHERE "schemaname" = 'profile'
+        AND "tablename" = 'cv_event_outbox'
+      ORDER BY "indexname"
+    `);
+    assert.equal(
+      outboxIndexes.some((index) =>
+        index.name === 'cv_event_outbox_cv_version_key' &&
+        /UNIQUE/i.test(index.definition)
+      ),
+      true,
+    );
+    assert.equal(
+      outboxIndexes.some((index) =>
+        index.name === 'cv_event_outbox_pending_due_idx' &&
+        /WHERE \(published_at IS NULL\)/i.test(index.definition)
+      ),
+      true,
+    );
+
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO "profile"."cv_event_outbox" (
+        "event_id", "cv_id", "candidate_id", "file_id", "cv_type",
+        "aggregate_version", "action", "event_key", "payload"
+      ) VALUES (
+        '76000000-0000-4000-8000-000000000001'::uuid,
+        '76000000-0000-4000-8000-000000000002'::uuid,
+        '76000000-0000-4000-8000-000000000003'::uuid,
+        '76000000-0000-4000-8000-000000000004'::uuid,
+        'UPLOAD', 1, 'UPSERTED',
+        '76000000-0000-4000-8000-000000000002'::uuid,
+        jsonb_build_object(
+          'event_id', '76000000-0000-4000-8000-000000000001',
+          'action', 'UPSERTED',
+          'cv_id', '76000000-0000-4000-8000-000000000002',
+          'candidate_id', '76000000-0000-4000-8000-000000000003',
+          'file_id', '76000000-0000-4000-8000-000000000004',
+          'cv_type', 'UPLOAD',
+          'occurred_at', '2026-08-28T02:03:04.005Z',
+          'schema_version', 1,
+          'aggregate_version', 1
+        )
+      )
+    `);
+    await assert.rejects(
+      () => prisma.$executeRawUnsafe(`
+        UPDATE "profile"."cv_event_outbox"
+        SET "payload" = jsonb_set(
+          "payload", '{candidate_id}', '"77000000-0000-4000-8000-000000000003"'
+        )
+        WHERE "event_id" =
+          '76000000-0000-4000-8000-000000000001'::uuid
+      `),
+      /identity and payload are immutable/i,
+    );
+    await assert.rejects(
+      () => prisma.$executeRawUnsafe(`
+        INSERT INTO "profile"."cv_event_outbox" (
+          "event_id", "cv_id", "candidate_id", "file_id", "cv_type",
+          "aggregate_version", "action", "event_key", "payload"
+        ) VALUES (
+          '76000000-0000-4000-8000-000000000011'::uuid,
+          '76000000-0000-4000-8000-000000000012'::uuid,
+          '76000000-0000-4000-8000-000000000013'::uuid,
+          '76000000-0000-4000-8000-000000000014'::uuid,
+          'ONLINE', 1, 'UPSERTED',
+          '76000000-0000-4000-8000-000000000012'::uuid,
+          jsonb_build_object(
+            'event_id', '76000000-0000-4000-8000-000000000011',
+            'action', 'UPSERTED',
+            'cv_id', '76000000-0000-4000-8000-000000000012',
+            'candidate_id', '76000000-0000-4000-8000-000000000013',
+            'file_id', '76000000-0000-4000-8000-000000000014',
+            'cv_type', 'ONLINE',
+            'occurred_at', 'not-a-time',
+            'schema_version', 1,
+            'aggregate_version', 1
+          )
+        )
+      `),
+    );
+    await prisma.$executeRawUnsafe(`
+      DELETE FROM "profile"."cv_event_outbox"
+      WHERE "event_id" =
+        '76000000-0000-4000-8000-000000000001'::uuid
+    `);
 
     const rows = await prisma.$queryRawUnsafe(`
       SELECT "completion_percent", "completion_rule_version"

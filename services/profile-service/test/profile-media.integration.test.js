@@ -275,7 +275,7 @@ before(async () => {
   await assertSafeTestDatabase(prisma);
   canResetSchema = true;
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "profile"."profiles" CASCADE',
+    'TRUNCATE TABLE "profile"."cv_event_outbox", "profile"."profiles" CASCADE',
   );
 
   mediaServer = createServer((request, response) => {
@@ -299,7 +299,7 @@ after(async () => {
   try {
     if (canResetSchema) {
       await prisma.$executeRawUnsafe(
-        'TRUNCATE TABLE "profile"."profiles" CASCADE',
+        'TRUNCATE TABLE "profile"."cv_event_outbox", "profile"."profiles" CASCADE',
       );
     }
     if (app) {
@@ -568,6 +568,27 @@ test('Profile avatar and uploaded CV integration', async (t) => {
     const row = await prisma.cv.findUniqueOrThrow({ where: { id: created.id } });
     assert.equal(row.fileUrl, null);
     assert.ok(row.mediaReferenceId);
+    const createdEvent = await prisma.cvEventOutbox.findFirstOrThrow({
+      where: { cvId: created.id },
+    });
+    assert.equal(createdEvent.action, 'UPSERTED');
+    assert.equal(createdEvent.aggregateVersion, 1);
+    assert.equal(createdEvent.eventKey, created.id);
+    assert.deepEqual(Object.keys(createdEvent.payload).sort(), [
+      'action',
+      'aggregate_version',
+      'candidate_id',
+      'cv_id',
+      'cv_type',
+      'event_id',
+      'file_id',
+      'occurred_at',
+      'schema_version',
+    ]);
+    assert.equal(createdEvent.payload.candidate_id, CANDIDATE_A);
+    assert.equal(createdEvent.payload.file_id, file.id);
+    assert.equal(createdEvent.payload.cv_type, 'UPLOAD');
+    assert.equal(createdEvent.payload.schema_version, 1);
     assert.equal(
       [...references.values()].find((item) => item.fileId === file.id)
         .referenceType,
@@ -635,6 +656,11 @@ test('Profile avatar and uploaded CV integration', async (t) => {
       'ordinary idempotent retry must not call Media again',
     );
     assert.equal(await prisma.cv.count({ where: { fileId: file.id } }), 1);
+    assert.equal(
+      await prisma.cvEventOutbox.count({ where: { cvId: created.id } }),
+      1,
+      'idempotent create retry must not append another event',
+    );
     assert.equal(
       (
         await prisma.profile.findUniqueOrThrow({

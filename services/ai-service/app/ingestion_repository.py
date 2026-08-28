@@ -18,6 +18,7 @@ from psycopg import Connection, Cursor
 _HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _ERROR_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 _JOB_ACTIONS = frozenset({"CREATED", "UPDATED", "CLOSED", "EXPIRED", "DELETED"})
+_CV_ACTIONS = frozenset({"UPSERTED", "DEACTIVATED", "DELETED"})
 _VECTOR_DIMENSIONS = 384
 
 _MAX_BIGINT = 9_223_372_036_854_775_807
@@ -91,6 +92,25 @@ class JobEmbeddingWrite:
 class JobDeactivation:
     event: IngestionEvent
     job_id: UUID
+    tombstone: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class CvEmbeddingWrite:
+    event: IngestionEvent
+    cv_id: UUID
+    candidate_id: UUID
+    vector: Sequence[float]
+    text_hash: str
+    model_name: str
+    is_active: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class CvDeactivation:
+    event: IngestionEvent
+    cv_id: UUID
+    candidate_id: UUID
     tombstone: bool = False
 
 
@@ -321,6 +341,240 @@ class PsycopgIngestionRepository:
 
         return self._write(operation)
 
+    def upsert_cv(self, write: CvEmbeddingWrite) -> IngestionOutcome:
+        event = _validate_cv_event(write.event, write.cv_id)
+        if event.action != "UPSERTED" or write.is_active is not True:
+            raise IngestionContractError("CV upsert must be an active UPSERTED event")
+        _require_hash("text_hash", write.text_hash)
+        model_name = _required_text("model_name", write.model_name, maximum=128)
+        vector = _vector_literal(write.vector)
+
+        def operation(cursor: Cursor[Any]) -> IngestionOutcome:
+            self._lock_aggregate(cursor, event)
+            self._bind_cv_owner(cursor, write.cv_id, write.candidate_id)
+            duplicate = self._find_duplicate(cursor, event)
+            if duplicate is not None:
+                return duplicate
+            self._require_unused_transport(cursor, event)
+            current = self._load_cursor(cursor, event)
+            decision = (
+                _OrderingDecision(IngestionOutcome.SKIPPED_STALE, False)
+                if current is not None and current.action == "DEACTIVATED"
+                else _decide_order(current, event, target_tombstone=False)
+            )
+            if decision.outcome is IngestionOutcome.SKIPPED_STALE:
+                self._insert_ledger(cursor, event, decision.outcome, write.text_hash)
+                return decision.outcome
+            if decision.outcome is IngestionOutcome.SKIPPED_UNCHANGED:
+                if decision.advance_cursor:
+                    self._write_cursor(cursor, event, tombstoned=False)
+                self._insert_ledger(cursor, event, decision.outcome, write.text_hash)
+                return decision.outcome
+
+            cursor.execute(
+                """
+                INSERT INTO ai.cv_embeddings (
+                    cv_id,
+                    user_id,
+                    vector,
+                    text_hash,
+                    model_name,
+                    is_active,
+                    updated_at,
+                    source_event_id,
+                    source_version,
+                    source_occurred_at
+                ) VALUES (
+                    %s, %s, %s::vector, %s, %s, TRUE, CURRENT_TIMESTAMP,
+                    %s, %s, %s
+                )
+                ON CONFLICT (cv_id) DO UPDATE SET
+                    vector = EXCLUDED.vector,
+                    text_hash = EXCLUDED.text_hash,
+                    model_name = EXCLUDED.model_name,
+                    is_active = TRUE,
+                    updated_at = CURRENT_TIMESTAMP,
+                    source_event_id = EXCLUDED.source_event_id,
+                    source_version = EXCLUDED.source_version,
+                    source_occurred_at = EXCLUDED.source_occurred_at
+                WHERE ai.cv_embeddings.user_id = EXCLUDED.user_id
+                """,
+                (
+                    write.cv_id,
+                    write.candidate_id,
+                    vector,
+                    write.text_hash,
+                    model_name,
+                    event.event_id,
+                    event.aggregate_version,
+                    event.occurred_at,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise IngestionContractError(
+                    "cv_id is already owned by another candidate"
+                )
+            self._write_cursor(cursor, event, tombstoned=False)
+            self._insert_ledger(
+                cursor,
+                event,
+                IngestionOutcome.APPLIED,
+                write.text_hash,
+            )
+            return IngestionOutcome.APPLIED
+
+        return self._write(operation)
+
+    def deactivate_cv(self, command: CvDeactivation) -> IngestionOutcome:
+        event = _validate_cv_event(command.event, command.cv_id)
+        expected_action = "DELETED" if command.tombstone else "DEACTIVATED"
+        if event.action != expected_action:
+            raise IngestionContractError("CV deactivation action is inconsistent")
+
+        def operation(cursor: Cursor[Any]) -> IngestionOutcome:
+            self._lock_aggregate(cursor, event)
+            self._bind_cv_owner(cursor, command.cv_id, command.candidate_id)
+            duplicate = self._find_duplicate(cursor, event)
+            if duplicate is not None:
+                return duplicate
+            self._require_unused_transport(cursor, event)
+            current = self._load_cursor(cursor, event)
+            decision = _decide_order(
+                current,
+                event,
+                target_tombstone=command.tombstone,
+            )
+            if decision.outcome is IngestionOutcome.SKIPPED_STALE:
+                self._insert_ledger(cursor, event, decision.outcome, None)
+                return decision.outcome
+            if decision.outcome is IngestionOutcome.SKIPPED_UNCHANGED:
+                if decision.advance_cursor:
+                    self._write_cursor(
+                        cursor,
+                        event,
+                        tombstoned=command.tombstone,
+                    )
+                self._insert_ledger(cursor, event, decision.outcome, None)
+                return decision.outcome
+
+            if command.tombstone:
+                cursor.execute(
+                    "DELETE FROM ai.cv_embeddings WHERE cv_id = %s",
+                    (command.cv_id,),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE ai.cv_embeddings
+                    SET is_active = FALSE,
+                        updated_at = CURRENT_TIMESTAMP,
+                        source_event_id = %s,
+                        source_version = %s,
+                        source_occurred_at = %s
+                    WHERE cv_id = %s
+                    """,
+                    (
+                        event.event_id,
+                        event.aggregate_version,
+                        event.occurred_at,
+                        command.cv_id,
+                    ),
+                )
+            self._write_cursor(cursor, event, tombstoned=command.tombstone)
+            self._insert_ledger(cursor, event, IngestionOutcome.APPLIED, None)
+            return IngestionOutcome.APPLIED
+
+        return self._write(operation)
+
+    def dead_letter_cv(
+        self,
+        event: IngestionEvent,
+        cv_id: UUID,
+        candidate_id: UUID,
+        *,
+        error_code: str,
+        safe_message: str,
+        attempt_count: int,
+    ) -> IngestionOutcome:
+        event = _validate_cv_event(event, cv_id)
+        error_code, message, attempt_count = _validate_dead_letter_details(
+            error_code,
+            safe_message,
+            attempt_count,
+        )
+
+        def operation(cursor: Cursor[Any]) -> IngestionOutcome:
+            self._lock_aggregate(cursor, event)
+            self._bind_cv_owner(cursor, cv_id, candidate_id)
+            existing = cursor.execute(
+                """
+                SELECT payload_hash, outcome
+                FROM ai.embedding_event_ledger
+                WHERE event_id = %s
+                FOR UPDATE
+                """,
+                (event.event_id,),
+            ).fetchone()
+            if existing is not None:
+                if existing[0] != event.payload_hash:
+                    raise EventIdentityConflict(
+                        "event_id was already used with a different payload hash"
+                    )
+                outcome = IngestionOutcome(existing[1])
+                if outcome is IngestionOutcome.DEAD_LETTER:
+                    return outcome
+                return IngestionOutcome.SKIPPED_DUPLICATE
+
+            self._require_unused_transport(cursor, event)
+            transport = cursor.execute(
+                """
+                SELECT event_id, payload_hash
+                FROM ai.embedding_dead_letters
+                WHERE topic = %s
+                  AND kafka_partition = %s
+                  AND kafka_offset = %s
+                FOR UPDATE
+                """,
+                (event.topic, event.partition, event.offset),
+            ).fetchone()
+            if transport is not None:
+                if transport == (event.event_id, event.payload_hash):
+                    return IngestionOutcome.DEAD_LETTER
+                raise TransportIdentityConflict(
+                    "Kafka position was already dead-lettered for another event"
+                )
+            cursor.execute(
+                """
+                INSERT INTO ai.embedding_dead_letters (
+                    event_id, topic, kafka_partition, kafka_offset, key_hash,
+                    aggregate_type, aggregate_id, action, payload_hash,
+                    error_code, error_message, attempt_count
+                ) VALUES (%s, %s, %s, %s, NULL, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    event.event_id,
+                    event.topic,
+                    event.partition,
+                    event.offset,
+                    event.aggregate_type,
+                    event.aggregate_id,
+                    event.action,
+                    event.payload_hash,
+                    error_code,
+                    message,
+                    attempt_count,
+                ),
+            )
+            self._insert_ledger(
+                cursor,
+                event,
+                IngestionOutcome.DEAD_LETTER,
+                None,
+            )
+            return IngestionOutcome.DEAD_LETTER
+
+        return self._write(operation)
+
     def dead_letter_job(
         self,
         event: IngestionEvent,
@@ -528,6 +782,32 @@ class PsycopgIngestionRepository:
             (f"{event.aggregate_type}:{event.aggregate_id}",),
         )
 
+    def _bind_cv_owner(
+        self,
+        cursor: Cursor[Any],
+        cv_id: UUID,
+        candidate_id: UUID,
+    ) -> None:
+        cursor.execute(
+            """
+            INSERT INTO ai.cv_aggregate_owners (cv_id, user_id)
+            VALUES (%s, %s)
+            ON CONFLICT (cv_id) DO NOTHING
+            """,
+            (cv_id, candidate_id),
+        )
+        owner = cursor.execute(
+            """
+            SELECT user_id
+            FROM ai.cv_aggregate_owners
+            WHERE cv_id = %s
+            FOR UPDATE
+            """,
+            (cv_id,),
+        ).fetchone()
+        if owner is None or owner[0] != candidate_id:
+            raise IngestionContractError("cv_id is already owned by another candidate")
+
     def _find_duplicate(
         self,
         cursor: Cursor[Any],
@@ -718,6 +998,36 @@ def _validate_job_event(event: IngestionEvent, job_id: UUID) -> IngestionEvent:
     ):
         raise IngestionContractError(
             "aggregate_version must be non-negative and fit PostgreSQL BIGINT"
+        )
+    _require_hash("payload_hash", event.payload_hash)
+    _require_hash("state_hash", event.state_hash)
+    return event
+
+
+def _validate_cv_event(event: IngestionEvent, cv_id: UUID) -> IngestionEvent:
+    if event.aggregate_type != "CV":
+        raise IngestionContractError("aggregate_type must be CV")
+    if event.aggregate_id != cv_id:
+        raise IngestionContractError("aggregate_id must match cv_id")
+    _required_text("topic", event.topic, maximum=100)
+    if event.action not in _CV_ACTIONS:
+        raise IngestionContractError("unsupported CV event action")
+    if isinstance(event.partition, bool) or event.partition < 0:
+        raise IngestionContractError("partition must be non-negative")
+    if isinstance(event.offset, bool) or event.offset < 0:
+        raise IngestionContractError("offset must be non-negative")
+    if event.occurred_at.utcoffset() is None:
+        raise IngestionContractError("occurred_at must include a UTC offset")
+    if event.schema_version != 1:
+        raise IngestionContractError("schema_version must be 1 for CV events")
+    if (
+        isinstance(event.aggregate_version, bool)
+        or event.aggregate_version is None
+        or event.aggregate_version <= 0
+        or event.aggregate_version > _MAX_BIGINT
+    ):
+        raise IngestionContractError(
+            "CV aggregate_version must be positive and fit PostgreSQL BIGINT"
         )
     _require_hash("payload_hash", event.payload_hash)
     _require_hash("state_hash", event.state_hash)

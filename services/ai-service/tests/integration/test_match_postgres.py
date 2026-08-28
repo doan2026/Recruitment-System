@@ -64,7 +64,7 @@ def test_migration_creates_versioned_private_vector_store(
         "cv_embeddings",
         "job_embeddings",
     }
-    assert migration_version == ("20260826_03",)
+    assert migration_version == ("20260828_04",)
     assert index_definition is not None
     assert "USING hnsw" in index_definition[0]
     assert "WHERE is_active" in index_definition[0]

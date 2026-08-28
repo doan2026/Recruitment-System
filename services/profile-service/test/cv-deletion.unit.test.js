@@ -14,6 +14,7 @@ test('USED terminal convergence keys on stable firstUsedAt, not a later live app
     {},
     {},
     {},
+    { append: async () => undefined, wake: () => undefined },
     { get: () => undefined },
   );
   const firstUsedAt = new Date('2026-08-27T03:00:00.000Z');

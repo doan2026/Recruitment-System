@@ -19,7 +19,7 @@ const AVATAR_MEDIA_REFERENCE_ID = '31000000-0000-4000-8000-000000000001';
 
 async function truncateProfileSchema() {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "profile"."profiles" CASCADE',
+    'TRUNCATE TABLE "profile"."cv_event_outbox", "profile"."profiles" CASCADE',
   );
 }
 

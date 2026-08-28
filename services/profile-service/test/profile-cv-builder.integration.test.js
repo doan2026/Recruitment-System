@@ -282,7 +282,7 @@ before(async () => {
   await assertSafeTestDatabase(prisma);
   canResetSchema = true;
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "profile"."profiles" CASCADE',
+    'TRUNCATE TABLE "profile"."cv_event_outbox", "profile"."profiles" CASCADE',
   );
   mediaServer = createServer((request, response) => {
     handleMediaRequest(request, response).catch((error) =>
@@ -310,7 +310,7 @@ after(async () => {
   try {
     if (canResetSchema) {
       await prisma.$executeRawUnsafe(
-        'TRUNCATE TABLE "profile"."profiles" CASCADE',
+        'TRUNCATE TABLE "profile"."cv_event_outbox", "profile"."profiles" CASCADE',
       );
     }
     if (app) await app.close();
@@ -393,6 +393,15 @@ test('Online CV Builder publishes immutable Media-backed revisions', async (t) =
     assert.equal(persisted.fileUrl, null);
     assert.ok(persisted.mediaReferenceId);
     assert.equal(persisted.revisionSeriesId, root.id);
+    const rootEvents = await prisma.cvEventOutbox.findMany({
+      where: { cvId: root.id },
+    });
+    assert.deepEqual(
+      rootEvents.map((event) => [event.action, event.aggregateVersion]),
+      [['UPSERTED', 1]],
+    );
+    assert.equal(rootEvents[0].payload.cv_type, 'ONLINE');
+    assert.equal(rootEvents[0].payload.file_id, file.id);
     assert.equal(
       [...references.values()].find((item) => item.fileId === file.id)
         .referenceId,
@@ -430,6 +439,10 @@ test('Online CV Builder publishes immutable Media-backed revisions', async (t) =
     );
     assert.equal(retry.id, root.id);
     assert.equal(mediaRequests.length, beforeRetry);
+    assert.equal(
+      await prisma.cvEventOutbox.count({ where: { cvId: root.id } }),
+      1,
+    );
     const conflictingRetry = await api('POST', '/cvs/online', tokenA, {
       ...requestBody,
       title: 'Different title',
@@ -470,6 +483,21 @@ test('Online CV Builder publishes immutable Media-backed revisions', async (t) =
     assert.deepEqual(oldRow.contentJson, root.contentJson);
     assert.ok(oldRow.mediaReferenceId);
     assert.equal(newRow.isDeleted, false);
+    const revisionEvents = await prisma.cvEventOutbox.findMany({
+      where: { cvId: { in: [root.id, revision.id] } },
+      orderBy: [{ cvId: 'asc' }, { aggregateVersion: 'asc' }],
+    });
+    const byCv = new Map();
+    for (const event of revisionEvents) {
+      const values = byCv.get(event.cvId) ?? [];
+      values.push([event.action, event.aggregateVersion]);
+      byCv.set(event.cvId, values);
+    }
+    assert.deepEqual(byCv.get(root.id), [
+      ['UPSERTED', 1],
+      ['DEACTIVATED', 2],
+    ]);
+    assert.deepEqual(byCv.get(revision.id), [['UPSERTED', 1]]);
     assert.equal(
       [...references.values()].some((item) => item.fileId === root.fileId),
       true,
@@ -506,6 +534,13 @@ test('Online CV Builder publishes immutable Media-backed revisions', async (t) =
     );
     assert.equal(retry.id, revision.id);
     assert.equal(mediaRequests.length, beforeRetry);
+    assert.equal(
+      await prisma.cvEventOutbox.count({
+        where: { cvId: { in: [root.id, revision.id] } },
+      }),
+      3,
+      'revision retry must not duplicate either event',
+    );
     const fork = await api(
       'POST',
       `/cvs/${root.id}/revisions`,
