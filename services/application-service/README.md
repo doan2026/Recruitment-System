@@ -37,6 +37,28 @@ Application Pipeline policy does not change Job Service ownership rules:
 `MEMBER` can still edit or delete only jobs they created, while `OWNER` can
 manage every job.
 
+## Interview scheduling authorization contract
+
+Interview Service obtains an authoritative, purpose-limited scheduling
+snapshot through the Swagger-hidden
+`POST /internal/v1/interview-scheduling/authorize` endpoint. The strict request
+contains only `{applicationId}`. It must carry exactly one
+`X-Internal-Service: interview-service`, exactly one dedicated
+`X-Internal-Api-Key`, and exactly one forwarded Recruiter bearer token.
+Application Service independently verifies that JWT, requires its canonical
+UUID subject and `RECRUITER` role, then verifies `MEMBER` or `OWNER` membership
+through Company Service. The membership company must equal the stored
+Application company, and the Application must be in `REVIEWING` or `INTERVIEW`.
+
+The no-store response is limited to `applicationId`, `jobId`, `companyId`,
+`candidateId`, `status`, and `applicationVersion`. It deliberately excludes
+CV identity/content, cover letter, recruiter identity, evaluations, offers,
+and timeline. Interview Service derives its scheduling ownership fields only
+from this response, not from public request data. The directional
+`INTERNAL_API_KEY_INTERVIEW` must be a non-placeholder value of at least 32
+bytes and must differ from Profile inbound/outbound and other shared internal
+keys.
+
 ## Canonical Profile CV contract
 
 Candidate submission no longer lists Candidate CVs and scans a permissive
@@ -353,6 +375,7 @@ canonical v1 JSON Schema and producer fixtures live under
 export PROFILE_SERVICE_URL='http://localhost:3000'
 export PROFILE_INTERNAL_API_KEY='replace-with-a-distinct-application-to-profile-key-of-at-least-32-bytes'
 export INTERNAL_API_KEY_PROFILE='replace-with-a-distinct-profile-to-application-key-of-at-least-32-bytes'
+export INTERNAL_API_KEY_INTERVIEW='replace-with-a-distinct-interview-to-application-key-of-at-least-32-bytes'
 
 mvn test
 mvn package
@@ -380,11 +403,13 @@ V7-to-V8 migration without historical backfill, strict v2
 Profile parsing, transactional snapshot persistence/rollback, metadata and
 child-row protection, exact `ANY` filtering, combined filters, company
 isolation, legacy/empty-snapshot behavior, and deterministic tied-value
-pagination. The verified Application Service suite passes 246 unit tests and
+pagination. The verified Application Service suite passes 260 unit tests and
 63 PostgreSQL/Kafka integration tests.
 
-In Root Compose, use two distinct keys: `PROFILE_INTERNAL_API_KEY_APPLICATION`
+In Root Compose, use three distinct keys: `PROFILE_INTERNAL_API_KEY_APPLICATION`
 maps to Application's `PROFILE_INTERNAL_API_KEY` and Profile's
 `INTERNAL_API_KEY_APPLICATION`; `APPLICATION_INTERNAL_API_KEY_PROFILE` maps to
-Application's `INTERNAL_API_KEY_PROFILE`. Each key must be a non-placeholder
-value of at least 32 bytes.
+Application's `INTERNAL_API_KEY_PROFILE`; and
+`APPLICATION_INTERNAL_API_KEY_INTERVIEW` maps to Application's
+`INTERNAL_API_KEY_INTERVIEW` and Interview's outbound Application key. Each
+key must be a non-placeholder value of at least 32 bytes.

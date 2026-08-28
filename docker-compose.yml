@@ -145,6 +145,7 @@ services:
     environment:
       PROFILE_INTERNAL_API_KEY: ${PROFILE_INTERNAL_API_KEY_APPLICATION:?PROFILE_INTERNAL_API_KEY_APPLICATION is required}
       INTERNAL_API_KEY_PROFILE: ${APPLICATION_INTERNAL_API_KEY_PROFILE:?APPLICATION_INTERNAL_API_KEY_PROFILE is required}
+      INTERNAL_API_KEY_INTERVIEW: ${APPLICATION_INTERNAL_API_KEY_INTERVIEW:?APPLICATION_INTERNAL_API_KEY_INTERVIEW is required}
     secrets:
       - source: jwt-public-key
         target: jwt-public.pem
@@ -159,10 +160,23 @@ services:
     build: ./services/interview-service
     env_file:
       - ./services/interview-service/.env
+    environment:
+      APPLICATION_SERVICE_URL: http://application-service:8080
+      APPLICATION_SERVICE_ALLOWED_HOSTS: application-service
+      APPLICATION_REQUEST_TIMEOUT_MS: ${INTERVIEW_APPLICATION_REQUEST_TIMEOUT_MS:-2000}
+      APPLICATION_INTERNAL_API_KEY: ${APPLICATION_INTERNAL_API_KEY_INTERVIEW:?APPLICATION_INTERNAL_API_KEY_INTERVIEW is required}
+      JWT_ISSUER: ${JWT_ISSUER:-https://auth.recruitment.local}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-recruitment-api}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+    secrets:
+      - source: jwt-public-key
+        target: jwt-public.pem
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
+      application-service:
+        condition: service_started
     expose:
       - "8080"
 

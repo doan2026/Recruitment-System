@@ -18,6 +18,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
@@ -40,6 +41,37 @@ public class SecurityConfig {
     }
 
     @Bean
+    InternalInterviewAuthenticationFilter internalInterviewAuthenticationFilter(
+        @Value("${internal.interview-api-key}")
+            String internalInterviewApiKey,
+        @Value("${internal.profile-api-key}") String internalProfileApiKey,
+        @Value("${clients.profile-internal-api-key}")
+            String profileInternalApiKey,
+        @Value("${clients.internal-api-key:}") String sharedInternalApiKey,
+        JwtDecoder jwtDecoder
+    ) {
+        for (String otherKey : List.of(
+            internalProfileApiKey,
+            profileInternalApiKey,
+            sharedInternalApiKey == null ? "" : sharedInternalApiKey
+        )) {
+            if (!otherKey.isBlank() && sameSecret(
+                internalInterviewApiKey,
+                otherKey
+            )) {
+                throw new IllegalStateException(
+                    "Interview internal API key must be distinct from all " +
+                    "other directional internal API keys"
+                );
+            }
+        }
+        return new InternalInterviewAuthenticationFilter(
+            internalInterviewApiKey,
+            jwtDecoder
+        );
+    }
+
+    @Bean
     FilterRegistrationBean<InternalProfileAuthenticationFilter>
         disableContainerRegistration(
             InternalProfileAuthenticationFilter filter
@@ -51,8 +83,38 @@ public class SecurityConfig {
     }
 
     @Bean
+    FilterRegistrationBean<InternalInterviewAuthenticationFilter>
+        disableInterviewContainerRegistration(
+            InternalInterviewAuthenticationFilter filter
+        ) {
+        FilterRegistrationBean<InternalInterviewAuthenticationFilter>
+            registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
     @Order(1)
-    SecurityFilterChain internalSecurityFilterChain(
+    SecurityFilterChain internalInterviewSecurityFilterChain(
+        HttpSecurity http,
+        InternalInterviewAuthenticationFilter filter
+    ) throws Exception {
+        return http
+            .securityMatcher("/internal/v1/interview-scheduling/**")
+            .csrf(csrf -> csrf.disable())
+            .sessionManagement(session -> session.sessionCreationPolicy(
+                SessionCreationPolicy.STATELESS
+            ))
+            .authorizeHttpRequests(auth -> auth
+                .anyRequest().hasAuthority("ROLE_INTERNAL_INTERVIEW")
+            )
+            .addFilterBefore(filter, BearerTokenAuthenticationFilter.class)
+            .build();
+    }
+
+    @Bean
+    @Order(2)
+    SecurityFilterChain internalProfileSecurityFilterChain(
         HttpSecurity http,
         InternalProfileAuthenticationFilter internalProfileAuthenticationFilter
     ) throws Exception {
@@ -73,7 +135,7 @@ public class SecurityConfig {
     }
 
     @Bean
-    @Order(2)
+    @Order(3)
     SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http
             .csrf(csrf -> csrf.disable())

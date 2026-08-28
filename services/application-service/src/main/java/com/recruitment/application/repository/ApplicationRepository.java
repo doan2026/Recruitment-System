@@ -26,6 +26,11 @@ public interface ApplicationRepository
             UUID jobId
         );
 
+    Optional<ApplicationEntity> findByIdAndCompanyId(
+        UUID id,
+        UUID companyId
+    );
+
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
         update ApplicationEntity application

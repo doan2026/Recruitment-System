@@ -123,8 +123,8 @@ Ba luồng có tổng điểm bằng nhau. Rủi ro lệch lớn nhất nằm �
  REST AI Match              Người 2 (AI)    Người 2           POST /ai/match; X-Internal-Api-Key; body
                                              (Application)     { cv_id, job_id }; response { data: { cv_id,
                                                                job_id, score, reason }, meta }
- REST xác thực đơn ứng       Người 2          Người 3           GET /applications/:id — kiểm tra tồn tại, trạng
- tuyển                       (Application)    (Interview)       thái và quyền công ty
+ REST xác thực đơn ứng       Người 2          Người 3           POST nội bộ /internal/v1/interview-scheduling/authorize;
+ tuyển                       (Application)    (Interview)       key hướng riêng + Recruiter JWT; response tối thiểu
 ```
 
 
@@ -157,6 +157,8 @@ Người 1 sở hữu toàn bộ luồng "một người bước vào hệ thố
                              gọi ngược lại Auth mỗi request.
  Ưu tiên                     Cao nhất — phải hoàn thành trong 3–5 ngày đầu
 ```
+
+Trạng thái 28/08/2026: Scheduling foundation v1 đã hoàn thành qua PR #51. Recruiter có thể đặt lịch OFFLINE cho chính mình; Application xác minh MEMBER/OWNER và trả authoritative snapshot tối thiểu; PostgreSQL khóa active round và chống overlap Candidate/interviewer bằng khoảng `[start,end)`. Strict JWT, idempotency, UTC/IANA timezone, Nginx/Compose/readiness và test PostgreSQL concurrency thật đã có. Phần còn lại của C1 gồm interviewer/panel tùy chọn, list/calendar, confirm/reschedule/cancel/no-show, `InterviewFeedback`, Jitsi, `interview-events`, Notification/reminder và frontend/E2E vẫn pending.
 
 
 ### 1. Luồng hoạt động các chức năng
