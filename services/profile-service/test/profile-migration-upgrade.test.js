@@ -393,6 +393,7 @@ const main = async () => {
     if (revisionLockWaitError) {
       throw revisionLockWaitError;
     }
+    executeMigration('20260828010000_cv_deletion_fence');
 
     const rows = await prisma.$queryRawUnsafe(`
       SELECT "completion_percent", "completion_rule_version"
@@ -629,21 +630,25 @@ const main = async () => {
         "deleted_at" = CURRENT_TIMESTAMP
       WHERE "id" = '71000000-0000-4000-8000-000000000006'::uuid
     `);
-    await prisma.$executeRawUnsafe(`
-      UPDATE "profile"."cvs"
-      SET
-        "is_default" = true,
-        "is_deleted" = false,
-        "deleted_at" = NULL
-      WHERE "id" = '71000000-0000-4000-8000-000000000006'::uuid
-    `);
+    await assert.rejects(
+      () =>
+        prisma.$executeRawUnsafe(`
+          UPDATE "profile"."cvs"
+          SET
+            "is_default" = true,
+            "is_deleted" = false,
+            "deleted_at" = NULL
+          WHERE "id" = '71000000-0000-4000-8000-000000000006'::uuid
+        `),
+      /deleted CV cannot be reopened/i,
+    );
     await assert.rejects(
       () =>
         prisma.$executeRawUnsafe(`
           DELETE FROM "profile"."cvs"
           WHERE "id" = '71000000-0000-4000-8000-000000000006'::uuid
         `),
-      /hard delete is disabled/i,
+      /hard delete requires an authoritative CV deletion fence/i,
     );
 
     const mediaColumns = await prisma.$queryRawUnsafe(`

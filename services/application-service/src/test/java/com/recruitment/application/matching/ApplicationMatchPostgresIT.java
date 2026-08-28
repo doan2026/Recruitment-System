@@ -117,6 +117,7 @@ class ApplicationMatchPostgresIT {
                 application.application_history,
                 application.bookmarks,
                 application.application_cv_usage,
+                application.cv_submission_gates,
                 application.applications
             CASCADE
             """

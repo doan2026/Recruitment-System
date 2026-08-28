@@ -393,6 +393,52 @@ test('release uses the reference UUID path and requires released=true', async ()
   );
 });
 
+test('file deletion uses the internal file path and accepts only exact DELETED ownership metadata', async () => {
+  const client = new HttpProfileMediaClient(createConfig());
+  const deleted = metadata('CV', {
+    aggregateVersion: 3,
+    status: 'DELETED',
+    updatedAt: '2026-08-27T03:02:00.000Z',
+  });
+  await withFetch(
+    async (url, options) => {
+      assert.equal(
+        url,
+        'https://media.internal.example/internal/files/' + FILE_ID,
+      );
+      assert.equal(options.method, 'DELETE');
+      assert.equal(options.body, undefined);
+      assert.deepEqual(options.headers, {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-Internal-Api-Key': INTERNAL_KEY,
+        'X-Internal-Service': 'profile-service',
+      });
+      return envelopeResponse(deleted);
+    },
+    () => client.deleteUserFile(FILE_ID, USER_ID, 'CV'),
+  );
+
+  const invalidPayloads = [
+    { ...deleted, status: 'ACTIVE' },
+    { ...deleted, ownerId: REFERENCE_ID },
+    { ...deleted, privateDelivery: false },
+    { ...deleted, updatedAt: '2026-08-27T02:59:00.000Z' },
+    { ...deleted, unexpected: true },
+  ];
+  for (const invalid of invalidPayloads) {
+    await withFetch(
+      async () => envelopeResponse(invalid),
+      () =>
+        assertApiError(
+          () => client.deleteUserFile(FILE_ID, USER_ID, 'CV'),
+          503,
+          'MEDIA_SERVICE_BAD_RESPONSE',
+        ),
+    );
+  }
+});
+
 test('download sends the expectation and accepts only HTTPS future expiry', async () => {
   const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
   const expected = {

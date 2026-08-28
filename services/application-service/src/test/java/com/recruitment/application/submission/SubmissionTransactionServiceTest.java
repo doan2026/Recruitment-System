@@ -3,6 +3,7 @@ package com.recruitment.application.submission;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -33,6 +34,8 @@ class SubmissionTransactionServiceTest {
 
     private final ApplicationRepository applications =
         mock(ApplicationRepository.class);
+    private final CvSubmissionGateService cvSubmissionGate =
+        mock(CvSubmissionGateService.class);
     private final ApplicationHistoryRepository history =
         mock(ApplicationHistoryRepository.class);
     private final ApplicationEventOutboxRepository outbox =
@@ -50,6 +53,7 @@ class SubmissionTransactionServiceTest {
     @BeforeEach
     void setUp() {
         service = new SubmissionTransactionService(
+            cvSubmissionGate,
             applications,
             history,
             outbox,
@@ -84,6 +88,7 @@ class SubmissionTransactionServiceTest {
         assertThat(response.status()).isEqualTo(ApplicationStatus.APPLIED);
         assertThat(response.coverLetter()).isEqualTo("Hello HR");
         verify(applications).saveAndFlush(any(ApplicationEntity.class));
+        verify(cvSubmissionGate).lockForSubmission(candidateId, cvId);
         verify(history).save(any(ApplicationHistoryEntity.class));
 
         ArgumentCaptor<ApplicationEventOutboxEntity> captor =
@@ -95,6 +100,27 @@ class SubmissionTransactionServiceTest {
             .contains("\"action\":\"STATUS_CHANGED\"")
             .contains("\"to_status\":\"APPLIED\"")
             .contains(jobId.toString());
+    }
+
+    @Test
+    void fencedCvIsRejectedBeforeDuplicateChecksOrWrites() {
+        doThrow(new BusinessException(
+            "CV_NOT_AVAILABLE",
+            "The selected CV is no longer available",
+            org.springframework.http.HttpStatus.BAD_REQUEST
+        )).when(cvSubmissionGate).lockForSubmission(candidateId, cvId);
+
+        assertThatThrownBy(() ->
+            service.create(candidateId, request, availableJob())
+        )
+            .isInstanceOf(BusinessException.class)
+            .extracting("code")
+            .isEqualTo("CV_NOT_AVAILABLE");
+
+        verify(applications, never())
+            .existsByCandidateIdAndJobIdAndStatusIn(any(), any(), any());
+        verify(applications, never()).saveAndFlush(any());
+        verifyNoDownstreamWrites();
     }
 
     @Test
@@ -114,6 +140,11 @@ class SubmissionTransactionServiceTest {
             .extracting("code")
             .isEqualTo("ACTIVE_APPLICATION_EXISTS");
         verify(applications, never()).saveAndFlush(any());
+    }
+
+    private void verifyNoDownstreamWrites() {
+        verify(history, never()).save(any());
+        verify(outbox, never()).save(any());
     }
 
     @Test

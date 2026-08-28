@@ -93,8 +93,9 @@ class CvUsagePostgresIT {
     @BeforeEach
     void cleanDatabase() {
         jdbc.execute(
-            "TRUNCATE TABLE application.application_cv_usage, " +
-                "application.applications CASCADE"
+            "TRUNCATE TABLE application.applications, " +
+                "application.application_cv_usage, " +
+                "application.cv_submission_gates CASCADE"
         );
     }
 
@@ -269,6 +270,43 @@ class CvUsagePostgresIT {
             assertThat(((Number) usage.get("application_count")).longValue())
                 .isEqualTo(2);
 
+            Map<String, Object> gate = jdbc.queryForMap(
+                "SELECT candidate_id, state, deletion_request_id " +
+                    "FROM " + schema + ".cv_submission_gates " +
+                    "WHERE cv_id = ?",
+                CV_ID
+            );
+            assertThat(gate.get("candidate_id")).isEqualTo(CANDIDATE_ID);
+            assertThat(gate.get("state")).isEqualTo("OPEN");
+            assertThat(gate.get("deletion_request_id")).isNull();
+
+            UUID postMigrationCvId = UUID.randomUUID();
+            insertLegacyApplication(
+                schema,
+                UUID.randomUUID(),
+                CANDIDATE_ID,
+                postMigrationCvId,
+                FIRST_APPLIED_AT.plusSeconds(10800)
+            );
+            assertThat(jdbc.queryForObject(
+                "SELECT application_count FROM " + schema +
+                    ".application_cv_usage WHERE cv_id = ?",
+                Long.class,
+                postMigrationCvId
+            )).isEqualTo(1L);
+            assertThat(jdbc.queryForObject(
+                "SELECT state FROM " + schema +
+                    ".cv_submission_gates WHERE cv_id = ?",
+                String.class,
+                postMigrationCvId
+            )).isEqualTo("OPEN");
+            assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM application.application_cv_usage " +
+                    "WHERE cv_id = ?",
+                Long.class,
+                postMigrationCvId
+            )).isZero();
+
             Integer indexCount = jdbc.queryForObject(
                 """
                 SELECT COUNT(*)
@@ -352,6 +390,12 @@ class CvUsagePostgresIT {
                 .isEqualTo(FIRST_APPLIED_AT);
             assertThat(((Number) usage.get("application_count")).longValue())
                 .isEqualTo(1);
+            assertThat(jdbc.queryForObject(
+                "SELECT state FROM " + schema +
+                    ".cv_submission_gates WHERE cv_id = ?",
+                String.class,
+                CV_ID
+            )).isEqualTo("OPEN");
         } finally {
             executor.shutdownNow();
             jdbc.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");

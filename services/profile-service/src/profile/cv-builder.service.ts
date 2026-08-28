@@ -62,12 +62,12 @@ export class CvBuilderService {
     if (current) {
       return this.resolveCreateRetry(current, userId, dto);
     }
-
     await this.media.verifyUserFile(
       fileId,
       userId,
       ProfileMediaType.CV,
     );
+    await this.assertCvFileNotRetired(this.prisma, fileId);
     const cvId = randomUUID();
     const reference = await this.media.bindUserFile(
       fileId,
@@ -81,6 +81,7 @@ export class CvBuilderService {
     try {
       mutation = await this.profiles.runMutation(async (transaction) => {
         const locked = await this.lockProfile(transaction, userId);
+        await this.assertCvFileNotRetired(transaction, fileId);
         const concurrent = await transaction.cv.findUnique({
           where: { fileId },
         });
@@ -187,12 +188,12 @@ export class CvBuilderService {
     if (registeredFile) {
       throw this.fileAlreadyRegistered();
     }
-
     await this.media.verifyUserFile(
       fileId,
       userId,
       ProfileMediaType.CV,
     );
+    await this.assertCvFileNotRetired(this.prisma, fileId);
     const revisionId = randomUUID();
     const reference = await this.media.bindUserFile(
       fileId,
@@ -209,6 +210,7 @@ export class CvBuilderService {
           transaction,
           userId,
         );
+        await this.assertCvFileNotRetired(transaction, fileId);
         const concurrent = await this.findRevisionRetry(
           userId,
           sourceId,
@@ -349,6 +351,25 @@ export class CvBuilderService {
       where: { id: profileId },
       data: { aggregateVersion: { increment: 1 } },
     });
+  }
+
+  private async assertCvFileNotRetired(
+    client:
+      | Pick<PrismaService, 'cvDeletionWorkflow'>
+      | Transaction,
+    fileId: string,
+  ): Promise<void> {
+    const retired = await client.cvDeletionWorkflow.findUnique({
+      where: { fileId },
+      select: { cvId: true },
+    });
+    if (retired) {
+      throw new ApiException(
+        'CV_FILE_RETIRED',
+        'A file from a hard-deletion workflow cannot be registered again',
+        HttpStatus.CONFLICT,
+      );
+    }
   }
 
   private async assertDeferredInvariants(

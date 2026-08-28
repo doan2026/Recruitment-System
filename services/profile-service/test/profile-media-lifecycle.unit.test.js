@@ -100,6 +100,7 @@ test('CV lifecycle controller delegates the authenticated candidate and version 
     deletedAt: '2026-08-27T10:00:00.000Z',
     replacementDefaultCvId: null,
     aggregateVersion: 10,
+    cleanupPending: false,
   };
   const media = {
     renameUploadedCv: async (...args) => {
@@ -110,12 +111,19 @@ test('CV lifecycle controller delegates the authenticated candidate and version 
       calls.push(['default', ...args]);
       return selected;
     },
-    softDeleteUploadedCv: async (...args) => {
+    deleteUploadedCv: async (...args) => {
       calls.push(['delete', ...args]);
       return deleted;
     },
   };
   const controller = new ProfileMediaController(media);
+  const statuses = [];
+  const response = {
+    status: (status) => {
+      statuses.push(status);
+      return response;
+    },
+  };
   const user = { id: USER_ID };
   const renameDto = {
     title: 'Backend CV',
@@ -132,7 +140,7 @@ test('CV lifecycle controller delegates the authenticated candidate and version 
   assert.equal(
     await controller.deleteCv(user, CV_ID, {
       expectedAggregateVersion: 9,
-    }),
+    }, response),
     deleted,
   );
   assert.deepEqual(calls, [
@@ -140,4 +148,38 @@ test('CV lifecycle controller delegates the authenticated candidate and version 
     ['default', USER_ID, CV_ID, 8],
     ['delete', USER_ID, CV_ID, 9],
   ]);
+  assert.deepEqual(statuses, [200]);
+});
+
+test('CV delete route returns 202 only for a durable PENDING workflow', async () => {
+  const pending = {
+    id: CV_ID,
+    userId: USER_ID,
+    deletionMode: 'PENDING',
+    isDeleted: true,
+    deletedAt: '2026-08-27T10:00:00.000Z',
+    replacementDefaultCvId: null,
+    aggregateVersion: 2,
+    cleanupPending: false,
+  };
+  const controller = new ProfileMediaController({
+    deleteUploadedCv: async () => pending,
+  });
+  let status;
+  const response = {
+    status: (value) => {
+      status = value;
+      return response;
+    },
+  };
+  assert.equal(
+    await controller.deleteCv(
+      { id: USER_ID },
+      CV_ID,
+      { expectedAggregateVersion: 1 },
+      response,
+    ),
+    pending,
+  );
+  assert.equal(status, 202);
 });

@@ -3,6 +3,8 @@ import { ApplicationClientModule } from '../application/application-client.modul
 import { MediaClientModule } from '../media/media-client.module';
 import { CvBuilderController } from './cv-builder.controller';
 import { CvBuilderService } from './cv-builder.service';
+import { CvDeletionService } from './cv-deletion.service';
+import { CvMediaCleanupService } from './cv-media-cleanup.service';
 import { InternalCvController } from './internal-cv.controller';
 import { InternalCvService } from './internal-cv.service';
 import { ProfileMediaController } from './profile-media.controller';
@@ -22,6 +24,8 @@ import { ProfileService } from './profile.service';
     ProfileService,
     ProfileMediaService,
     CvBuilderService,
+    CvDeletionService,
+    CvMediaCleanupService,
     InternalCvService,
   ],
   exports: [ProfileService],

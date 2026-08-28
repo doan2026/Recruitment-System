@@ -82,8 +82,13 @@ export class DeletedCvResponseDto {
   @ApiProperty({ format: 'uuid' })
   userId!: string;
 
-  @ApiProperty({ enum: ['SOFT'], example: 'SOFT' })
-  deletionMode!: 'SOFT';
+  @ApiProperty({
+    enum: ['PENDING', 'SOFT', 'HARD'],
+    example: 'HARD',
+    description:
+      'PENDING is durably soft-marked while the Application fence is retried; USED snapshots become SOFT; authoritatively fenced never-used snapshots become HARD',
+  })
+  deletionMode!: 'PENDING' | 'SOFT' | 'HARD';
 
   @ApiProperty({ example: true })
   isDeleted!: true;
@@ -102,4 +107,11 @@ export class DeletedCvResponseDto {
 
   @ApiProperty({ minimum: 1 })
   aggregateVersion!: number;
+
+  @ApiProperty({
+    example: false,
+    description:
+      'True only after a HARD delete while durable Media reference/file cleanup is still retrying',
+  })
+  cleanupPending!: boolean;
 }
