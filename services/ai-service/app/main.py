@@ -221,6 +221,7 @@ def create_app(
         result = service.recommend_candidates(
             payload.job_id,
             filters,
+            job_version=payload.job_version,
             limit=payload.limit,
             cursor=payload.cursor,
         )

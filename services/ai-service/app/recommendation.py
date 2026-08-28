@@ -137,6 +137,7 @@ class RecommendationRepository(Protocol):
         job_id: UUID,
         filters: CandidateRecommendationFilters,
         *,
+        job_version: int,
         limit: int,
         boundary: RecommendationBoundary | None,
         expected_source_fingerprint: str | None,
@@ -317,11 +318,15 @@ class RecommendationService:
         job_id: UUID,
         filters: CandidateRecommendationFilters,
         *,
+        job_version: int,
         limit: int,
         cursor: str | None,
     ) -> RecommendationOutput:
-        _validate_candidate_filters(filters)
-        filter_fingerprint = _candidate_filter_fingerprint(filters)
+        _validate_candidate_filters(filters, job_version=job_version)
+        filter_fingerprint = _candidate_filter_fingerprint(
+            filters,
+            job_version=job_version,
+        )
         decoded = self._decode_cursor(
             cursor,
             RecommendationKind.CANDIDATES,
@@ -331,6 +336,7 @@ class RecommendationService:
             page = self._repository.recommend_candidates(
                 job_id,
                 filters,
+                job_version=job_version,
                 limit=limit,
                 boundary=decoded.boundary if decoded else None,
                 expected_source_fingerprint=(
@@ -476,9 +482,12 @@ def _job_filter_fingerprint(filters: JobRecommendationFilters) -> str:
 
 def _candidate_filter_fingerprint(
     filters: CandidateRecommendationFilters,
+    *,
+    job_version: int,
 ) -> str:
     return _sha256_json(
         {
+            "job_version": job_version,
             "eligible_candidates": [
                 {
                     "candidate_id": str(candidate.candidate_id),
@@ -487,19 +496,24 @@ def _candidate_filter_fingerprint(
                     "profile_version": candidate.profile_version,
                 }
                 for candidate in filters.eligible_candidates
-            ]
+            ],
         }
     )
 
 
 def _validate_candidate_filters(
     filters: CandidateRecommendationFilters,
+    *,
+    job_version: int,
 ) -> None:
     candidates = filters.eligible_candidates
     candidate_ids = [candidate.candidate_id for candidate in candidates]
     cv_ids = [candidate.cv_id for candidate in candidates]
     if (
-        not candidates
+        not isinstance(job_version, int)
+        or isinstance(job_version, bool)
+        or not 1 <= job_version <= 2_147_483_647
+        or not candidates
         or len(candidates) > CANDIDATE_RECOMMENDATION_MAXIMUM_SCOPE
         or any(
             not isinstance(candidate.candidate_id, UUID)

@@ -71,8 +71,10 @@ class Settings:
             key_bytes = value.encode("ascii")
         except UnicodeEncodeError as error:
             raise RuntimeError(f"{name} is invalid") from error
-        if not 32 <= len(key_bytes) <= 512 or any(
-            byte < 0x21 or byte > 0x7E for byte in key_bytes
+        if (
+            not 32 <= len(key_bytes) <= 512
+            or b"replace-with" in key_bytes.lower()
+            or any(byte < 0x21 or byte > 0x7E for byte in key_bytes)
         ):
             raise RuntimeError(f"{name} is invalid")
 

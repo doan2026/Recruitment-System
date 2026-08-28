@@ -259,21 +259,26 @@ before raising limits.
 
 ## Recruiter-facing Candidate recommendation provider
 
-`POST /recommend/candidates` is also internal-only. It receives one Job ID and
-a sorted, duplicate-free snapshot of at most 500 Profile-authorized entries.
+`POST /recommend/candidates` is also internal-only. It receives one Job ID,
+the exact authorized `job_version`, and a sorted, duplicate-free snapshot of
+at most 500 Profile-authorized entries.
 Each entry binds a Candidate to the exact active CV selected in the separate
 Recruiter-discovery consent plus the current discovery/Profile versions. AI
 ranks only those exact CV IDs; it never treats job-preference consent, a
 default CV or every active CV as permission. The response contains only
 Candidate IDs, normalized scores, an opaque cursor and a stable empty reason.
+The Job embedding `source_version` must exactly equal the authorized Job
+version; ingestion lag or stale/future embedding state fails closed.
 
 The route uses the distinct
 `INTERNAL_API_KEY_JOB_SEARCH_CANDIDATES` credential. It cannot be called with
 the `/match` or `/recommend/jobs` key. Its HMAC cursor is bound to the complete
-Candidate/CV/version scope, Job embedding state and transactional CV target
-generation, so any visibility, Profile or selected-CV snapshot change makes a
-continuation stale. Repository results outside the authorized Candidate set
-fail closed.
+Candidate/CV/version scope, authorized Job version, Job embedding state and
+transactional CV target generation, so any Job, visibility, Profile or
+selected-CV snapshot change makes a continuation stale. Target statistics and
+ranking join every authorized `(candidate_id, cv_id)` pair exactly; a selected
+CV ID can never authorize its actual owner under a mismatched Candidate ID.
+Repository results outside the authorized Candidate set fail closed.
 
 AI does not return Profile or CV data. Job Search must first authorize the
 Recruiter, verified Company and active owned Job, then obtain the visibility
@@ -288,9 +293,10 @@ Copy `.env.example` to `.env` and set at least:
 - `DATABASE_URL`
 - `INTERNAL_API_KEY` — exactly the same secret as Application Service
 - `INTERNAL_API_KEY_JOB_SEARCH` — distinct scoped Job Search-to-AI secret,
-  32–512 printable ASCII bytes
+  32–512 printable ASCII bytes with no `replace-with` placeholder
 - `INTERNAL_API_KEY_JOB_SEARCH_CANDIDATES` — a second distinct scoped key for
-  the consent-sensitive Candidate-ranking direction
+  the consent-sensitive Candidate-ranking direction, with the same
+  no-placeholder rule
 - `DATABASE_CONNECT_TIMEOUT_SECONDS` (default 2)
 - `DATABASE_STATEMENT_TIMEOUT_MS` (default 2000)
 - `KAFKA_BROKERS`, the Job/CV topics, consumer groups and client IDs

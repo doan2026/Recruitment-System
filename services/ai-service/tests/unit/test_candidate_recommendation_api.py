@@ -23,6 +23,7 @@ MATCH_KEY = "legacy-match-key"
 JOB_RECOMMENDATION_KEY = "job-search-scoped-internal-key-000001"
 CANDIDATE_KEY = "job-search-candidate-scoped-key-000001"
 JOB_ID = UUID("20000000-0000-0000-0000-000000000001")
+JOB_VERSION = 7
 CANDIDATE_A = UUID("10000000-0000-0000-0000-000000000001")
 CANDIDATE_B = UUID("10000000-0000-0000-0000-000000000002")
 CANDIDATE_C = UUID("10000000-0000-0000-0000-000000000003")
@@ -48,6 +49,7 @@ class StubRecommendationRepository:
             UUID,
             CandidateRecommendationFilters,
             int,
+            int,
             RecommendationBoundary | None,
             str | None,
         ]
@@ -61,6 +63,7 @@ class StubRecommendationRepository:
         job_id: UUID,
         filters: CandidateRecommendationFilters,
         *,
+        job_version: int,
         limit: int,
         boundary: RecommendationBoundary | None,
         expected_source_fingerprint: str | None,
@@ -69,6 +72,7 @@ class StubRecommendationRepository:
             (
                 job_id,
                 filters,
+                job_version,
                 limit,
                 boundary,
                 expected_source_fingerprint,
@@ -95,6 +99,7 @@ def eligibility(
 def request_body(**overrides: object) -> dict[str, object]:
     value: dict[str, object] = {
         "job_id": str(JOB_ID),
+        "job_version": JOB_VERSION,
         "eligible_candidates": [
             eligibility(CANDIDATE_A, CV_A),
             eligibility(CANDIDATE_B, CV_B, discovery_version=2),
@@ -140,8 +145,9 @@ def test_recommend_candidates_returns_only_consent_scoped_ranked_ids() -> None:
     }
     assert isinstance(cursor, str)
     assert str(CANDIDATE_A) not in cursor
-    job_id, filters, limit, boundary, fingerprint = repository.calls[0]
+    job_id, filters, job_version, limit, boundary, fingerprint = repository.calls[0]
     assert job_id == JOB_ID
+    assert job_version == JOB_VERSION
     assert limit == 2
     assert boundary is None
     assert fingerprint is None
@@ -233,6 +239,11 @@ def test_recommend_candidates_requires_exact_direction_scoped_key(
         request_body(
             eligible_candidates=[eligibility(CANDIDATE_A, CV_A, discovery_version=0)]
         ),
+        {key: value for key, value in request_body().items() if key != "job_version"},
+        request_body(job_version=0),
+        request_body(job_version=2_147_483_648),
+        request_body(job_version="7"),
+        request_body(job_version=True),
         request_body(limit=0),
         request_body(limit="10"),
         request_body(extra=True),
@@ -255,7 +266,7 @@ def test_recommend_candidates_rejects_invalid_or_ambiguous_scope(
     assert repository.calls == []
 
 
-def test_candidate_cursor_is_bound_to_exact_consent_and_profile_versions() -> None:
+def test_candidate_cursor_is_bound_to_job_consent_and_profile_versions() -> None:
     first_page = RecommendationPage(
         (RecommendationDistanceItem(CANDIDATE_A, 0.25),),
         SOURCE_FINGERPRINT,
@@ -269,6 +280,15 @@ def test_candidate_cursor_is_bound_to_exact_consent_and_profile_versions() -> No
             "/recommend/candidates",
             headers=AUTH_HEADERS,
             json=request_body(limit=1),
+        )
+        changed_job = client.post(
+            "/recommend/candidates",
+            headers=AUTH_HEADERS,
+            json=request_body(
+                limit=1,
+                cursor=first.json()["data"]["next_cursor"],
+                job_version=JOB_VERSION + 1,
+            ),
         )
         changed_scope = request_body(
             limit=1,
@@ -285,6 +305,8 @@ def test_candidate_cursor_is_bound_to_exact_consent_and_profile_versions() -> No
         )
 
     assert first.status_code == 200
+    assert changed_job.status_code == 409
+    assert changed_job.json()["code"] == "RECOMMENDATION_CURSOR_STALE"
     assert stale.status_code == 409
     assert stale.json()["code"] == "RECOMMENDATION_CURSOR_STALE"
     assert len(repository.calls) == 1

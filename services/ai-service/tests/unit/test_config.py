@@ -185,6 +185,34 @@ def test_settings_rejects_invalid_job_search_scoped_key(
         settings.validate()
 
 
+@pytest.mark.parametrize(
+    ("job_key", "candidate_key"),
+    [
+        (
+            "replace-with-job-search-scoped-key-000001",
+            CANDIDATE_SCOPED_KEY,
+        ),
+        (
+            SCOPED_KEY,
+            "candidate-REPLACE-WITH-scoped-key-000001",
+        ),
+    ],
+)
+def test_settings_rejects_scoped_key_placeholders_case_insensitively(
+    job_key: str,
+    candidate_key: str,
+) -> None:
+    settings = Settings(
+        database_url=DATABASE_URL,
+        internal_api_key="shared-secret",
+        internal_api_key_job_search=job_key,
+        internal_api_key_job_search_candidates=candidate_key,
+    )
+
+    with pytest.raises(RuntimeError, match="INTERNAL_API_KEY_JOB_SEARCH"):
+        settings.validate()
+
+
 def test_settings_rejects_reusing_match_key_for_job_recommendations() -> None:
     settings = Settings(
         database_url=DATABASE_URL,

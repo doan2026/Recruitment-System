@@ -272,6 +272,7 @@ def test_private_candidate_query_uses_only_selected_cvs_once_per_user(
                 ),
             )
         ),
+        job_version=1,
         limit=10,
         boundary=None,
         expected_source_fingerprint=None,
@@ -309,6 +310,7 @@ def test_recommend_candidates_http_ranks_only_exact_selected_cvs(
             headers=CANDIDATE_AUTH_HEADERS,
             json={
                 "job_id": str(job_id),
+                "job_version": 1,
                 "eligible_candidates": [
                     {
                         "candidate_id": str(USER_ID),
@@ -336,6 +338,62 @@ def test_recommend_candidates_http_ranks_only_exact_selected_cvs(
     }
     assert response.json()["data"]["next_cursor"] is None
     assert response.json()["data"]["reason"] is None
+
+
+def test_candidate_repository_rejects_mismatched_candidate_cv_pair(
+    database_url: str,
+) -> None:
+    job_id = _job_id(1)
+    actual_owner = UUID("11000000-0000-0000-0000-000000000002")
+    mismatched_cv = UUID("10000000-0000-0000-0000-000000000002")
+    _insert_job(database_url, job_id)
+    _insert_cv(database_url, mismatched_cv, actual_owner)
+
+    page = _repository(database_url).recommend_candidates(
+        job_id,
+        CandidateRecommendationFilters(
+            (CandidateEligibility(USER_ID, mismatched_cv, 1, 1),)
+        ),
+        job_version=1,
+        limit=10,
+        boundary=None,
+        expected_source_fingerprint=None,
+    )
+
+    assert page.items == ()
+    assert page.reason is not None
+    assert page.reason.value == "NO_ACTIVE_CV_EMBEDDINGS"
+
+
+@pytest.mark.parametrize("embedded_version", [1, 3])
+def test_candidate_recommendation_requires_exact_job_source_version(
+    database_url: str,
+    embedded_version: int,
+) -> None:
+    job_id = _job_id(1)
+    _insert_job(database_url, job_id, source_version=embedded_version)
+    _insert_cv(database_url, CV_ID, USER_ID)
+
+    with _client(database_url) as client:
+        response = client.post(
+            "/recommend/candidates",
+            headers=CANDIDATE_AUTH_HEADERS,
+            json={
+                "job_id": str(job_id),
+                "job_version": 2,
+                "eligible_candidates": [
+                    {
+                        "candidate_id": str(USER_ID),
+                        "cv_id": str(CV_ID),
+                        "discovery_version": 1,
+                        "profile_version": 1,
+                    }
+                ],
+            },
+        )
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "AI_SERVICE_UNAVAILABLE"
 
 
 def _client(database_url: str) -> TestClient:
@@ -398,6 +456,7 @@ def _insert_job(
     salary_max: Decimal | None = Decimal("40.00"),
     job_type: str | None = "FULL_TIME",
     is_active: bool = True,
+    source_version: int = 1,
 ) -> None:
     with psycopg.connect(database_url) as connection:
         connection.execute(
@@ -405,7 +464,7 @@ def _insert_job(
             INSERT INTO ai.job_embeddings (
                 job_id, vector, text_hash, model_name, location,
                 salary_min, salary_max, job_type, is_active, source_version
-            ) VALUES (%s, %s::vector, %s, %s, %s, %s, %s, %s, %s, 1)
+            ) VALUES (%s, %s::vector, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 job_id,
@@ -417,6 +476,7 @@ def _insert_job(
                 salary_max,
                 job_type,
                 is_active,
+                source_version,
             ),
         )
 

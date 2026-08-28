@@ -121,6 +121,7 @@ class CandidateRecommendationEligibility(StrictModel):
 
 class RecommendCandidatesRequest(StrictModel):
     job_id: UUID
+    job_version: int = Field(ge=1, le=2_147_483_647, strict=True)
     eligible_candidates: list[CandidateRecommendationEligibility] = Field(
         min_length=1,
         max_length=CANDIDATE_RECOMMENDATION_MAXIMUM_SCOPE,
