@@ -2,7 +2,7 @@
 
 > Ngày cập nhật: 29/08/2026
 > Nhánh đối chiếu chính: `develop`
-> Pull Request lần cập nhật: PR #59 từ `feature/ai-service/candidate-ann-benchmark` vào `develop`
+> Pull Request lần cập nhật: PR #60 từ `feature/company-service/invitation-auth-binding` vào `develop`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -712,7 +712,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Controlled PostgreSQL repository load chạy 500 warm-up + 10.000 call, concurrency 32, statement timeout production 2 giây: **0 lỗi, 0 mismatch, 323,129 req/s, p95 130,089 ms, p99 149,503 ms, max 183,722 ms**. Vector tổng hợp chỉ dùng hai chiều có dữ liệu trong 384 chiều nên không được diễn giải thành chất lượng semantic/relevance thật.
 - Verify code hiện đạt Ruff/format và shell syntax PASS, **331 unit/non-integration + 55 PostgreSQL/Kafka integration test (386 tổng)**. Docker test image cũng lint thư mục `scripts`; toàn bộ tài nguyên benchmark đã được cleanup.
 
-## 2.35 Company Invitation–Auth Identity Binding — hoàn thành trên `feature/company-service/invitation-auth-binding`
+## 2.35 Company Invitation–Auth Identity Binding — hoàn thành qua PR #60
 
 > Phạm vi chỉ thuộc Company Service của Người 2 và hoàn thành lát cắt Auth trong P06. Task này không sửa Auth/Admin/File Service, shared Compose/gateway hoặc frontend, và không tuyên bố full Company multi-service E2E.
 
