@@ -1,0 +1,158 @@
+\set ON_ERROR_STOP on
+
+BEGIN;
+SET LOCAL synchronous_commit = off;
+
+WITH generated AS (
+    SELECT
+        i,
+        pg_catalog.lpad(i::text, 6, '0') AS ordinal,
+        ((i - 1) / 10) % 10 AS pattern,
+        pg_catalog.md5('company-load-id-' || i::text) AS company_hash,
+        pg_catalog.md5('company-load-logo-' || i::text) AS logo_hash,
+        pg_catalog.md5('company-load-logo-reference-' || i::text) AS reference_hash
+    FROM pg_catalog.generate_series(1, :company_count::integer) AS series(i)
+), fixture AS (
+    SELECT
+        i,
+        ordinal,
+        pattern,
+        (
+            pg_catalog.substr(company_hash, 1, 8) || '-' ||
+            pg_catalog.substr(company_hash, 9, 4) || '-4' ||
+            pg_catalog.substr(company_hash, 14, 3) || '-8' ||
+            pg_catalog.substr(company_hash, 18, 3) || '-' ||
+            pg_catalog.substr(company_hash, 21, 12)
+        )::uuid AS company_id,
+        (
+            pg_catalog.substr(logo_hash, 1, 8) || '-' ||
+            pg_catalog.substr(logo_hash, 9, 4) || '-4' ||
+            pg_catalog.substr(logo_hash, 14, 3) || '-8' ||
+            pg_catalog.substr(logo_hash, 18, 3) || '-' ||
+            pg_catalog.substr(logo_hash, 21, 12)
+        )::uuid AS logo_id,
+        (
+            pg_catalog.substr(reference_hash, 1, 8) || '-' ||
+            pg_catalog.substr(reference_hash, 9, 4) || '-4' ||
+            pg_catalog.substr(reference_hash, 14, 3) || '-8' ||
+            pg_catalog.substr(reference_hash, 18, 3) || '-' ||
+            pg_catalog.substr(reference_hash, 21, 12)
+        )::uuid AS logo_reference_id,
+        CASE pattern
+            WHEN 0 THEN 'công ty công nghệ ánh dương'
+            WHEN 1 THEN 'công nghệ đà nẵng'
+            WHEN 2 THEN 'điện máy sài gòn'
+            WHEN 3 THEN 'cơ khí thăng long'
+            WHEN 4 THEN 'nông nghiệp hòa bình'
+            WHEN 5 THEN 'y tế cần thơ'
+            WHEN 6 THEN 'phần mềm việt nam'
+            WHEN 7 THEN 'giáo dục huế'
+            WHEN 8 THEN 'logistics hải phòng'
+            ELSE 'du lịch phú quốc'
+        END AS vietnamese_name,
+        CASE pattern
+            WHEN 0 THEN 'công nghệ'
+            WHEN 1 THEN 'phần mềm'
+            WHEN 2 THEN 'bán lẻ'
+            WHEN 3 THEN 'cơ khí'
+            WHEN 4 THEN 'nông nghiệp'
+            WHEN 5 THEN 'y tế'
+            WHEN 6 THEN 'công nghệ'
+            WHEN 7 THEN 'giáo dục'
+            WHEN 8 THEN 'logistics'
+            ELSE 'du lịch'
+        END AS industry
+    FROM generated
+)
+INSERT INTO company.companies (
+    id,
+    name,
+    normalized_name,
+    slug,
+    description,
+    industry,
+    size,
+    address,
+    website,
+    tax_code,
+    logo_file_id,
+    logo_url,
+    logo_media_reference_id,
+    aggregate_version,
+    verified_status,
+    reject_reason,
+    created_at,
+    updated_at
+)
+SELECT
+    company_id,
+    'company ' || ordinal || ' ' || vietnamese_name,
+    'company ' || ordinal || ' ' || vietnamese_name,
+    'load-company-' || ordinal,
+    'PRIVATE_DESCRIPTION_LOAD_FIXTURE_' || ordinal,
+    industry,
+    '51-200',
+    'địa chỉ kiểm thử ' || ordinal || ', việt nam',
+    NULL,
+    'PRIVATE-TAX-' || ordinal,
+    CASE WHEN i % 20 = 1 THEN logo_id ELSE NULL END,
+    CASE
+        WHEN i % 20 = 1
+        THEN 'https://res.cloudinary.com/recruitment/image/upload/load-logo-' || ordinal || '.png'
+        ELSE NULL
+    END,
+    CASE WHEN i % 20 = 1 THEN logo_reference_id ELSE NULL END,
+    0,
+    CASE
+        WHEN i % 10 BETWEEN 1 AND 8 THEN 'VERIFIED'
+        WHEN i % 10 = 9 THEN 'PENDING'
+        ELSE 'REJECTED'
+    END::company."CompanyVerificationStatus",
+    CASE
+        WHEN i % 10 = 0 THEN 'PRIVATE_REJECT_REASON_LOAD_FIXTURE_' || ordinal
+        ELSE NULL
+    END,
+    '2026-01-01 00:00:00+00'::timestamptz + (i * interval '1 millisecond'),
+    '2026-01-01 00:00:00+00'::timestamptz + (i * interval '1 millisecond')
+FROM fixture;
+
+COMMIT;
+
+ANALYZE company.companies;
+
+SELECT pg_catalog.set_config(
+    'company.load_expected_count',
+    :'company_count',
+    false
+);
+
+DO $assert$
+DECLARE
+    expected_total bigint :=
+        pg_catalog.current_setting('company.load_expected_count')::bigint;
+    expected_verified bigint := expected_total * 8 / 10;
+    expected_pending bigint := expected_total / 10;
+    expected_rejected bigint := expected_total / 10;
+    actual_total bigint;
+    actual_verified bigint;
+    actual_pending bigint;
+    actual_rejected bigint;
+BEGIN
+    SELECT
+        count(*),
+        count(*) FILTER (WHERE verified_status = 'VERIFIED'),
+        count(*) FILTER (WHERE verified_status = 'PENDING'),
+        count(*) FILTER (WHERE verified_status = 'REJECTED')
+    INTO actual_total, actual_verified, actual_pending, actual_rejected
+    FROM company.companies;
+
+    IF actual_total <> expected_total
+       OR actual_verified <> expected_verified
+       OR actual_pending <> expected_pending
+       OR actual_rejected <> expected_rejected THEN
+        RAISE EXCEPTION
+            'deterministic fixture ratio mismatch: total %, verified %, pending %, rejected %',
+            actual_total, actual_verified, actual_pending, actual_rejected;
+    END IF;
+END
+$assert$;

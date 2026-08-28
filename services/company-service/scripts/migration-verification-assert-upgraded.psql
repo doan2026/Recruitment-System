@@ -258,6 +258,132 @@ BEGIN
     RAISE EXCEPTION 'company audit append-only trigger contract mismatch';
   END IF;
 
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    JOIN pg_language l ON l.oid = p.prolang
+    WHERE n.nspname = 'company'
+      AND p.proname = 'fold_public_company_search'
+      AND p.prokind = 'f'
+      AND p.pronargs = 1
+      AND pg_get_function_identity_arguments(p.oid) = 'value text'
+      AND p.prorettype = 'text'::regtype
+      AND l.lanname = 'sql'
+      AND p.provolatile = 'i'
+      AND p.proparallel = 's'
+      AND p.proisstrict
+      AND NOT p.prosecdef
+      AND NOT p.proleakproof
+  ) THEN
+    RAISE EXCEPTION 'public Company search fold function property contract mismatch';
+  END IF;
+
+  IF company.fold_public_company_search('Công nghệ Đà Nẵng')
+       IS DISTINCT FROM 'cong nghe da nang'
+     OR company.fold_public_company_search(
+       U&'Co\0302ng nghe\0302\0323 \0110a\0300 Na\0306\0303ng'
+     ) IS DISTINCT FROM 'cong nghe da nang'
+     OR company.fold_public_company_search(
+       '  CÔNG---NGHỆ / ĐÀ_NẴNG!!!  '
+     ) IS DISTINCT FROM 'cong nghe da nang'
+     OR company.fold_public_company_search('Công ty 24/7')
+       IS DISTINCT FROM 'cong ty 24 7'
+     OR company.fold_public_company_search(NULL) IS NOT NULL THEN
+    RAISE EXCEPTION 'public Company search fold function behavior mismatch';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_index i
+    JOIN pg_class index_class ON index_class.oid = i.indexrelid
+    JOIN pg_namespace index_namespace
+      ON index_namespace.oid = index_class.relnamespace
+    JOIN pg_class table_class ON table_class.oid = i.indrelid
+    JOIN pg_namespace table_namespace
+      ON table_namespace.oid = table_class.relnamespace
+    JOIN pg_am access_method ON access_method.oid = index_class.relam
+    WHERE index_namespace.nspname = 'company'
+      AND index_class.relname =
+        'companies_public_verified_normalized_name_id_idx'
+      AND table_namespace.nspname = 'company'
+      AND table_class.relname = 'companies'
+      AND access_method.amname = 'btree'
+      AND NOT i.indisunique
+      AND NOT i.indisprimary
+      AND NOT i.indisexclusion
+      AND i.indisvalid
+      AND i.indisready
+      AND i.indislive
+      AND i.indnkeyatts = 2
+      AND i.indnatts = 2
+      AND i.indexprs IS NULL
+      AND pg_get_indexdef(i.indexrelid, 1, true) = 'normalized_name'
+      AND pg_get_indexdef(i.indexrelid, 2, true) = 'id'
+      AND (
+        SELECT opclass_namespace.nspname || '.' || opclass.opcname
+        FROM pg_opclass opclass
+        JOIN pg_namespace opclass_namespace
+          ON opclass_namespace.oid = opclass.opcnamespace
+        WHERE opclass.oid = i.indclass[0]
+      ) = 'pg_catalog.text_ops'
+      AND (
+        SELECT opclass_namespace.nspname || '.' || opclass.opcname
+        FROM pg_opclass opclass
+        JOIN pg_namespace opclass_namespace
+          ON opclass_namespace.oid = opclass.opcnamespace
+        WHERE opclass.oid = i.indclass[1]
+      ) = 'pg_catalog.uuid_ops'
+      AND i.indoption[0] = 0
+      AND i.indoption[1] = 0
+      AND pg_get_expr(i.indpred, i.indrelid, true) =
+        'verified_status = ''VERIFIED''::company."CompanyVerificationStatus"'
+  ) THEN
+    RAISE EXCEPTION 'public Company keyset B-tree index contract mismatch';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_index i
+    JOIN pg_class index_class ON index_class.oid = i.indexrelid
+    JOIN pg_namespace index_namespace
+      ON index_namespace.oid = index_class.relnamespace
+    JOIN pg_class table_class ON table_class.oid = i.indrelid
+    JOIN pg_namespace table_namespace
+      ON table_namespace.oid = table_class.relnamespace
+    JOIN pg_am access_method ON access_method.oid = index_class.relam
+    WHERE index_namespace.nspname = 'company'
+      AND index_class.relname = 'companies_public_verified_search_tsv_idx'
+      AND table_namespace.nspname = 'company'
+      AND table_class.relname = 'companies'
+      AND access_method.amname = 'gin'
+      AND NOT i.indisunique
+      AND NOT i.indisprimary
+      AND NOT i.indisexclusion
+      AND i.indisvalid
+      AND i.indisready
+      AND i.indislive
+      AND i.indnkeyatts = 1
+      AND i.indnatts = 1
+      AND i.indexprs IS NOT NULL
+      AND pg_get_indexdef(i.indexrelid, 1, true) =
+        'to_tsvector(''simple''::regconfig, company.fold_public_company_search(name::text))'
+      AND pg_get_expr(i.indexprs, i.indrelid, true) =
+        'to_tsvector(''simple''::regconfig, company.fold_public_company_search(name::text))'
+      AND (
+        SELECT opclass_namespace.nspname || '.' || opclass.opcname
+        FROM pg_opclass opclass
+        JOIN pg_namespace opclass_namespace
+          ON opclass_namespace.oid = opclass.opcnamespace
+        WHERE opclass.oid = i.indclass[0]
+      ) = 'pg_catalog.tsvector_ops'
+      AND i.indoption[0] = 0
+      AND pg_get_expr(i.indpred, i.indrelid, true) =
+        'verified_status = ''VERIFIED''::company."CompanyVerificationStatus"'
+  ) THEN
+    RAISE EXCEPTION 'public Company full-text GIN index contract mismatch';
+  END IF;
+
   SELECT array_agg(migration_name ORDER BY started_at, migration_name)
   INTO migrations
   FROM company."_prisma_migrations"
@@ -266,7 +392,8 @@ BEGIN
     '20260822000000_company_profile',
     '20260824000000_company_members',
     '20260828000000_company_media_ownership',
-    '20260829000000_company_audit_log'
+    '20260829000000_company_audit_log',
+    '20260829100000_company_public_search'
   ] OR EXISTS (
     SELECT 1
     FROM company."_prisma_migrations"
