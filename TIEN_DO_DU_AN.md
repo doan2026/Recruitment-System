@@ -2,7 +2,7 @@
 
 > Ngày cập nhật: 29/08/2026
 > Nhánh đối chiếu chính: `develop`
-> Pull Request lần cập nhật: PR #TBD từ `feature/company-service/audit-log` vào `develop`
+> Pull Request lần cập nhật: PR #56 từ `feature/company-service/audit-log` vào `develop`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -80,7 +80,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** tạo hồ sơ công ty; OWNER xin chữ ký/confirm upload và gắn media đã xác minh; cập nhật; gửi duyệt và Admin xác minh; hiển thị trang công khai; mời, chấp nhận, xóa và chuyển quyền thành viên.
 - **Chức năng chính:** profile CRUD, logo/ảnh/video Media-backed, trạng thái `PENDING/VERIFIED/REJECTED`, ownership, invitation token, public company page và endpoint tra cứu membership cho service khác.
 - **Phụ thuộc:** Auth, File/Media và Admin.
-- **Trạng thái:** nghiệp vụ chính và Company–Media ownership đã merge vào `develop` qua PR #54; migration backup/restore đã verify qua PR #55; append-only domain audit cho duyệt công ty/chuyển OWNER hoàn thành qua PR #TBD. Real multi-service E2E và load public search vẫn pending.
+- **Trạng thái:** nghiệp vụ chính và Company–Media ownership đã merge vào `develop` qua PR #54; migration backup/restore đã verify qua PR #55; append-only domain audit cho duyệt công ty/chuyển OWNER hoàn thành qua PR #56. Real multi-service E2E và load public search vẫn pending.
 
 ## T06 — Job & Search Service
 
@@ -209,7 +209,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Rollback hợp lệ là drain/freeze toàn bộ writer, chấp nhận RPO tại thời điểm pre-upgrade backup, restore sang database mới và chuyển đồng thời connection cùng old artifact đã pin. Old-schema SQL probe chỉ chứng minh database restore đọc/ghi được; không chứng minh binary cũ hoặc mixed old/new writer an toàn trên database đã upgrade, và không có in-place down migration.
 - E2E verifier PASS trên PostgreSQL 16 sạch; full regression Company vẫn đạt **139/139 unit test** và build PASS.
 
-### Company Domain Audit Ledger — PR #TBD
+### Company Domain Audit Ledger — PR #56
 
 - Prisma bổ sung `CompanyAuditLog` và ba action allowlist: Admin approve, Admin reject và OWNER transfer. Actor luôn lấy từ JWT `sub`; approve/reject cập nhật status và audit trong cùng transaction Serializable, còn transfer đổi hai role, tăng `aggregateVersion` và ghi một audit atomically. Retry review giống hệt không tạo audit trùng; audit insert lỗi làm rollback domain mutation.
 - Migration PostgreSQL thêm action-shape/positive-version CHECK, unique `(company_id, resulting_aggregate_version)`, FK `ON DELETE/UPDATE RESTRICT`, partial unique index bảo đảm tối đa một OWNER và trigger chặn `UPDATE`, `DELETE`, `TRUNCATE` audit. Không backfill actor giả; ledger bắt đầu từ rollout và không phải lịch sử đầy đủ của mọi profile/status mutation.
