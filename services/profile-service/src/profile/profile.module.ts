@@ -10,6 +10,8 @@ import { InternalCvController } from './internal-cv.controller';
 import { InternalCvService } from './internal-cv.service';
 import { InternalCvV2Controller } from './internal-cv-v2.controller';
 import { InternalCvV2Service } from './internal-cv-v2.service';
+import { JobPreferenceController } from './job-preference.controller';
+import { JobPreferenceService } from './job-preference.service';
 import { ProfileMediaController } from './profile-media.controller';
 import { ProfileMediaService } from './profile-media.service';
 import { ProfileController } from './profile.controller';
@@ -21,6 +23,7 @@ import { ProfileService } from './profile.service';
     InternalCvController,
     InternalCvV2Controller,
     CvBuilderController,
+    JobPreferenceController,
     ProfileMediaController,
     ProfileController,
   ],
@@ -33,6 +36,7 @@ import { ProfileService } from './profile.service';
     CvMediaCleanupService,
     InternalCvService,
     InternalCvV2Service,
+    JobPreferenceService,
   ],
   exports: [ProfileService],
 })

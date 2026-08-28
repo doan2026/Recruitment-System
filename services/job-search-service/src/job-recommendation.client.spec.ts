@@ -9,6 +9,7 @@ import {
 } from './ai-recommendation-client.service';
 import { JobRecommendationQueryDto } from './job-recommendation.dto';
 import {
+  JobPreferenceState,
   ProfileRecommendationClientService,
   ProfileRecommendationUnavailableError,
 } from './profile-recommendation-client.service';
@@ -138,6 +139,200 @@ describe('ProfileRecommendationClientService', () => {
       authorization,
     )).rejects.toBeInstanceOf(ProfileRecommendationUnavailableError);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('reads the exact Candidate preference projection without another identity',
+  async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+      jsonResponse(envelope(enabledPreferences())),
+    );
+
+    await expect(profileClient().getJobPreferences(
+      CANDIDATE_ID,
+      AUTHORIZATION,
+    )).resolves.toEqual({
+      ...enabledPreferences(),
+      state: JobPreferenceState.ENABLED,
+      targetRoles: ['Backend Engineer'],
+      preferredLocations: ['Ha Noi'],
+      preferredJobTypes: [JobType.FULL_TIME],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://profile:3000/job-preferences',
+      expect.objectContaining({
+        method: 'GET',
+        cache: 'no-store',
+        redirect: 'error',
+        headers: {
+          accept: 'application/json',
+          authorization: AUTHORIZATION,
+        },
+      }),
+    );
+  });
+
+  it('accepts exactly the four job types defined by preference schema v1',
+  async () => {
+    const data = {
+      ...enabledPreferences(),
+      preferredJobTypes: [
+        JobType.FULL_TIME,
+        JobType.PART_TIME,
+        JobType.REMOTE,
+        JobType.INTERNSHIP,
+      ],
+    };
+    jest.spyOn(global, 'fetch').mockResolvedValue(
+      jsonResponse(envelope(data)),
+    );
+
+    await expect(profileClient().getJobPreferences(
+      CANDIDATE_ID,
+      AUTHORIZATION,
+    )).resolves.toMatchObject({
+      preferredJobTypes: data.preferredJobTypes,
+    });
+  });
+
+  it.each([
+    unsetPreferences(),
+    disabledPreferences(),
+  ])('accepts a strictly redacted $state projection', async (preference) => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(
+      jsonResponse(envelope(preference)),
+    );
+
+    await expect(profileClient().getJobPreferences(
+      CANDIDATE_ID,
+      AUTHORIZATION,
+    )).resolves.toMatchObject({
+      state: preference.state,
+      targetRoles: [],
+      preferredLocations: [],
+      preferredJobTypes: [],
+      minimumSalary: null,
+    });
+  });
+
+  it.each([
+    { ...enabledPreferences(), extra: true },
+    { ...enabledPreferences(), candidateId: LATEST_CV_ID },
+    { ...enabledPreferences(), schemaVersion: 2 },
+    { ...enabledPreferences(), version: 0 },
+    { ...enabledPreferences(), consentVersion: null },
+    { ...enabledPreferences(), consentedAt: null },
+    { ...enabledPreferences(), withdrawnAt: '2026-08-28T00:30:00.000Z' },
+    {
+      ...enabledPreferences(),
+      targetRoles: ['Backend Engineer', 'backend engineer'],
+    },
+    { ...enabledPreferences(), targetRoles: [' Backend Engineer'] },
+    { ...enabledPreferences(), preferredLocations: Array(6).fill('Ha Noi') },
+    { ...enabledPreferences(), preferredJobTypes: ['CONTRACT'] },
+    { ...enabledPreferences(), minimumSalary: '20000000' },
+    { ...enabledPreferences(), minimumSalary: '0.00' },
+    { ...enabledPreferences(), minimumSalary: '10000000000000.00' },
+    {
+      ...enabledPreferences(),
+      targetRoles: [],
+      preferredLocations: [],
+      preferredJobTypes: [],
+      minimumSalary: null,
+    },
+    { ...enabledPreferences(), consentedAt: '2026-08-28T02:00:00.000Z' },
+    { ...disabledPreferences(), targetRoles: ['Backend Engineer'] },
+    { ...disabledPreferences(), withdrawnAt: null },
+    { ...unsetPreferences(), version: 1 },
+    { ...unsetPreferences(), createdAt: '2026-08-28T00:00:00.000Z' },
+  ])('rejects a contradictory preference projection: %j', async (data) => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+      jsonResponse(envelope(data)),
+    );
+
+    await expect(profileClient().getJobPreferences(
+      CANDIDATE_ID,
+      AUTHORIZATION,
+    )).rejects.toBeInstanceOf(ProfileRecommendationUnavailableError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      'percent ILIKE metacharacter',
+      { ...enabledPreferences(), targetRoles: ['Backend%Engineer'] },
+    ],
+    [
+      'underscore ILIKE metacharacter',
+      { ...enabledPreferences(), preferredLocations: ['Ha_Noi'] },
+    ],
+    [
+      'backslash ILIKE escape',
+      { ...enabledPreferences(), targetRoles: ['Backend\\Engineer'] },
+    ],
+    [
+      'unpaired high surrogate',
+      {
+        ...enabledPreferences(),
+        targetRoles: [`Backend${String.fromCharCode(0xd800)}Engineer`],
+      },
+    ],
+    [
+      'unpaired low surrogate',
+      {
+        ...enabledPreferences(),
+        preferredLocations: [`Ha${String.fromCharCode(0xdc00)}Noi`],
+      },
+    ],
+    [
+      'PostgreSQL zero byte',
+      {
+        ...enabledPreferences(),
+        preferredLocations: [`Ha${String.fromCharCode(0)}Noi`],
+      },
+    ],
+  ])('rejects PostgreSQL-unsafe preference text: %s', async (_case, data) => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+      jsonResponse(envelope(data)),
+    );
+
+    await expect(profileClient().getJobPreferences(
+      CANDIDATE_ID,
+      AUTHORIZATION,
+    )).rejects.toBeInstanceOf(ProfileRecommendationUnavailableError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts a paired supplementary Unicode scalar in preference text',
+  async () => {
+    const data = {
+      ...enabledPreferences(),
+      targetRoles: ['Backend 🚀 Engineer'],
+    };
+    jest.spyOn(global, 'fetch').mockResolvedValue(
+      jsonResponse(envelope(data)),
+    );
+
+    await expect(profileClient().getJobPreferences(
+      CANDIDATE_ID,
+      AUTHORIZATION,
+    )).resolves.toMatchObject({ targetRoles: data.targetRoles });
+  });
+
+  it('does not follow redirects or retry a preference failure', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(null, {
+        status: 302,
+        headers: { location: 'https://evil.invalid' },
+      }),
+    );
+
+    await expect(profileClient().getJobPreferences(
+      CANDIDATE_ID,
+      AUTHORIZATION,
+    )).rejects.toBeInstanceOf(ProfileRecommendationUnavailableError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: 'error' });
   });
 });
 
@@ -491,6 +686,56 @@ function cv(id: string, isDefault: boolean, createdAt: string) {
     fileUrl: null,
     isDefault,
     createdAt,
+  };
+}
+
+function enabledPreferences() {
+  return {
+    schemaVersion: 1,
+    candidateId: CANDIDATE_ID,
+    state: 'ENABLED',
+    version: 3,
+    consentVersion: 1,
+    consentedAt: '2026-08-28T00:00:00.000Z',
+    withdrawnAt: null,
+    targetRoles: ['Backend Engineer'],
+    preferredLocations: ['Ha Noi'],
+    preferredJobTypes: [JobType.FULL_TIME],
+    minimumSalary: '20000000.00',
+    currency: 'VND',
+    createdAt: '2026-08-28T00:00:00.000Z',
+    updatedAt: '2026-08-28T01:00:00.000Z',
+  };
+}
+
+function unsetPreferences() {
+  return {
+    schemaVersion: 1,
+    candidateId: CANDIDATE_ID,
+    state: 'UNSET',
+    version: 0,
+    consentVersion: null,
+    consentedAt: null,
+    withdrawnAt: null,
+    targetRoles: [],
+    preferredLocations: [],
+    preferredJobTypes: [],
+    minimumSalary: null,
+    currency: 'VND',
+    createdAt: null,
+    updatedAt: null,
+  };
+}
+
+function disabledPreferences() {
+  return {
+    ...unsetPreferences(),
+    state: 'DISABLED',
+    version: 4,
+    consentedAt: '2026-08-28T00:00:00.000Z',
+    withdrawnAt: '2026-08-28T02:00:00.000Z',
+    createdAt: '2026-08-28T00:00:00.000Z',
+    updatedAt: '2026-08-28T03:00:00.000Z',
   };
 }
 

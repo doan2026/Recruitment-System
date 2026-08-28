@@ -395,12 +395,19 @@ const main = async () => {
     }
     executeMigration('20260828010000_cv_deletion_fence');
     executeMigration('20260828020000_cv_event_outbox');
+    executeMigration('20260828030000_candidate_job_preferences');
 
     const historicalEventRows = await prisma.$queryRawUnsafe(`
       SELECT COUNT(*)::integer AS "count"
       FROM "profile"."cv_event_outbox"
     `);
     assert.equal(historicalEventRows[0].count, 0);
+
+    const historicalPreferenceRows = await prisma.$queryRawUnsafe(`
+      SELECT COUNT(*)::integer AS "count"
+      FROM "profile"."candidate_job_preferences"
+    `);
+    assert.equal(historicalPreferenceRows[0].count, 0);
 
     const outboxForeignKeys = await prisma.$queryRawUnsafe(`
       SELECT COUNT(*)::integer AS "count"

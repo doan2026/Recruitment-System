@@ -9,6 +9,7 @@ import {
 } from './job-recommendation.dto';
 import { JobRecommendationService } from './job-recommendation.service';
 import {
+  JobPreferenceState,
   ProfileRecommendationClientService,
 } from './profile-recommendation-client.service';
 import { PrismaService } from './prisma.service';
@@ -166,6 +167,7 @@ integrationDescribe('Job recommendation PostgreSQL revalidation', () => {
       prisma,
       {
         getPreferredCv: jest.fn().mockResolvedValue(null),
+        getJobPreferences: jest.fn().mockResolvedValue(unsetPreferences()),
       } as unknown as ProfileRecommendationClientService,
       ai,
     );
@@ -194,6 +196,72 @@ integrationDescribe('Job recommendation PostgreSQL revalidation', () => {
       olderTodayDeadline.id,
     ]);
     expect(result.items.every(({ score }) => score === null)).toBe(true);
+  });
+
+  it('uses exact case-insensitive role matches before deterministic latest fill',
+  async () => {
+    const exact = await createJob(20, {
+      title: 'Backend Engineer',
+      publishedAt: new Date('2026-08-20T00:00:00.000Z'),
+    });
+    const latestA = await createJob(21, {
+      title: 'Senior Backend Engineer',
+      publishedAt: new Date('2026-08-27T00:00:00.000Z'),
+    });
+    const latestB = await createJob(22, {
+      title: 'Platform Engineer',
+      publishedAt: new Date('2026-08-27T00:00:00.000Z'),
+    });
+    await createJob(23, {
+      title: 'BACKEND ENGINEER',
+      status: JobStatus.CLOSED,
+      publishedAt: new Date('2026-08-28T00:00:00.000Z'),
+    });
+    await createJob(24, {
+      title: 'backend engineer',
+      deadline: new Date('2026-08-27T00:00:00.000Z'),
+      publishedAt: new Date('2026-08-28T00:00:00.000Z'),
+    });
+    const service = new JobRecommendationService(
+      prisma,
+      {
+        getPreferredCv: jest.fn().mockResolvedValue(null),
+        getJobPreferences: jest.fn().mockResolvedValue({
+          ...unsetPreferences(),
+          state: JobPreferenceState.ENABLED,
+          version: 1,
+          consentVersion: 1,
+          consentedAt: '2026-08-28T00:00:00.000Z',
+          targetRoles: ['backend engineer'],
+          createdAt: '2026-08-28T00:00:00.000Z',
+          updatedAt: '2026-08-28T00:00:00.000Z',
+        }),
+      } as unknown as ProfileRecommendationClientService,
+      { recommendJobs: jest.fn() } as unknown as AiRecommendationClientService,
+    );
+
+    const result = await service.recommend(
+      CANDIDATE_ID,
+      'Bearer candidate.jwt',
+      { limit: 3 } as JobRecommendationQueryDto,
+      NOW,
+    );
+
+    expect(result).toMatchObject({
+      source: JobRecommendationSource.PREFERENCES,
+      fallbackReason: JobRecommendationFallbackReason.NO_ACTIVE_CV,
+      nextCursor: null,
+    });
+    expect(result.items.map(({ id }) => id)).toEqual([
+      exact.id,
+      latestA.id,
+      latestB.id,
+    ]);
+    expect(new Set(result.items.map(({ id }) => id)).size).toBe(3);
+    expect(result.items.every(({ score }) => score === null)).toBe(true);
+    expect(result.items[0]).not.toHaveProperty('requirements');
+    expect(await prisma.jobEventOutbox.count()).toBe(0);
+    expect(await prisma.jobIndexSync.count()).toBe(0);
   });
 
   async function createJob(
@@ -228,3 +296,22 @@ integrationDescribe('Job recommendation PostgreSQL revalidation', () => {
     });
   }
 });
+
+function unsetPreferences() {
+  return {
+    schemaVersion: 1 as const,
+    candidateId: CANDIDATE_ID,
+    state: JobPreferenceState.UNSET,
+    version: 0,
+    consentVersion: null,
+    consentedAt: null,
+    withdrawnAt: null,
+    targetRoles: [],
+    preferredLocations: [],
+    preferredJobTypes: [],
+    minimumSalary: null,
+    currency: 'VND' as const,
+    createdAt: null,
+    updatedAt: null,
+  };
+}

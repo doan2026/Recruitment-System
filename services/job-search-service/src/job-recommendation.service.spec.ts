@@ -14,6 +14,7 @@ import {
 } from './job-recommendation.dto';
 import { JobRecommendationService } from './job-recommendation.service';
 import {
+  JobPreferenceState,
   ProfileRecommendationClientService,
   ProfileRecommendationUnavailableError,
 } from './profile-recommendation-client.service';
@@ -45,16 +46,28 @@ const PUBLIC_CARD_SELECT = {
 describe('JobRecommendationService', () => {
   let findMany: jest.Mock;
   let getPreferredCv: jest.Mock;
+  let getJobPreferences: jest.Mock;
   let recommendJobs: jest.Mock;
+  let transaction: jest.Mock;
   let service: JobRecommendationService;
 
   beforeEach(() => {
     findMany = jest.fn();
     getPreferredCv = jest.fn().mockResolvedValue({ cvId: CV_ID });
+    getJobPreferences = jest.fn().mockResolvedValue(unsetPreferences());
     recommendJobs = jest.fn();
+    transaction = jest.fn(async (operation) => operation({
+      job: { findMany },
+    }));
     service = new JobRecommendationService(
-      { job: { findMany } } as unknown as PrismaService,
-      { getPreferredCv } as unknown as ProfileRecommendationClientService,
+      {
+        job: { findMany },
+        $transaction: transaction,
+      } as unknown as PrismaService,
+      {
+        getPreferredCv,
+        getJobPreferences,
+      } as unknown as ProfileRecommendationClientService,
       { recommendJobs } as unknown as AiRecommendationClientService,
     );
   });
@@ -91,6 +104,7 @@ describe('JobRecommendationService', () => {
       CANDIDATE_ID,
       'Bearer token',
     );
+    expect(getJobPreferences).not.toHaveBeenCalled();
     expect(recommendJobs).toHaveBeenCalledWith(CV_ID, query);
     expect(findMany).toHaveBeenCalledTimes(1);
     expect(findMany).toHaveBeenCalledWith({
@@ -272,10 +286,225 @@ describe('JobRecommendationService', () => {
     );
 
     expect(recommendJobs).toHaveBeenCalledTimes(aiCalls);
+    expect(getJobPreferences).toHaveBeenCalledWith(
+      CANDIDATE_ID,
+      'Bearer token',
+    );
     expect(findMany).toHaveBeenCalledTimes(1);
     expect(result.source).toBe(JobRecommendationSource.LATEST);
     expect(result.fallbackReason).toBe(reason);
     expect(result.items[0].score).toBeNull();
+  });
+
+  it('returns preference matches first and fills the page without duplicates',
+  async () => {
+    getPreferredCv.mockResolvedValue(null);
+    getJobPreferences.mockResolvedValue(enabledPreferences());
+    findMany
+      .mockResolvedValueOnce([job(JOB_ID_1)])
+      .mockResolvedValueOnce([job(JOB_ID_2)]);
+
+    const result = await service.recommend(
+      CANDIDATE_ID,
+      'Bearer token',
+      { limit: 2 } as JobRecommendationQueryDto,
+      NOW,
+    );
+
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(transaction.mock.calls[0][1]).toEqual({
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    });
+    expect(findMany).toHaveBeenCalledTimes(2);
+    expect(findMany.mock.calls[0][0]).toEqual({
+      select: PUBLIC_CARD_SELECT,
+      where: {
+        AND: [
+          {
+            status: JobStatus.PUBLISHED,
+            deadline: { gte: TODAY },
+          },
+          {
+            OR: [
+              {
+                title: {
+                  equals: 'Backend Engineer',
+                  mode: Prisma.QueryMode.insensitive,
+                },
+              },
+              {
+                location: {
+                  equals: 'Ha Noi',
+                  mode: Prisma.QueryMode.insensitive,
+                },
+              },
+              { jobType: { in: [JobType.FULL_TIME] } },
+              {
+                OR: [
+                  { isNegotiable: true },
+                  {
+                    currency: 'VND',
+                    salaryMax: { gte: new Prisma.Decimal('20000000.00') },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      orderBy: [
+        { publishedAt: { sort: 'desc', nulls: 'last' } },
+        { id: 'asc' },
+      ],
+      take: 2,
+    });
+    expect(findMany.mock.calls[1][0]).toEqual({
+      select: PUBLIC_CARD_SELECT,
+      where: {
+        AND: [
+          {
+            status: JobStatus.PUBLISHED,
+            deadline: { gte: TODAY },
+          },
+          { id: { notIn: [JOB_ID_1] } },
+        ],
+      },
+      orderBy: [
+        { publishedAt: { sort: 'desc', nulls: 'last' } },
+        { id: 'asc' },
+      ],
+      take: 1,
+    });
+    expect(result).toMatchObject({
+      source: JobRecommendationSource.PREFERENCES,
+      fallbackReason: JobRecommendationFallbackReason.NO_ACTIVE_CV,
+      nextCursor: null,
+    });
+    expect(result.items.map(({ id, score }) => ({ id, score }))).toEqual([
+      { id: JOB_ID_1, score: null },
+      { id: JOB_ID_2, score: null },
+    ]);
+    expect(findMany.mock.calls[0][0].select).not.toHaveProperty('createdBy');
+    expect(findMany.mock.calls[0][0].select).not.toHaveProperty('requirements');
+  });
+
+  it('keeps request filters hard and ignores stored values in those dimensions',
+  async () => {
+    getPreferredCv.mockResolvedValue(null);
+    getJobPreferences.mockResolvedValue(enabledPreferences());
+    findMany.mockResolvedValue([job(JOB_ID_1)]);
+    const query = {
+      limit: 1,
+      location: 'Da Nang',
+      salaryMin: 35_000_000,
+      jobType: JobType.REMOTE,
+    } as JobRecommendationQueryDto;
+
+    const result = await service.recommend(
+      CANDIDATE_ID,
+      'Bearer token',
+      query,
+      NOW,
+    );
+
+    expect(findMany.mock.calls[0][0].where).toEqual({
+      AND: [
+        {
+          status: JobStatus.PUBLISHED,
+          deadline: { gte: TODAY },
+          location: {
+            equals: 'Da Nang',
+            mode: Prisma.QueryMode.insensitive,
+          },
+          OR: [
+            { isNegotiable: true },
+            { salaryMax: { gte: 35_000_000 } },
+          ],
+          jobType: JobType.REMOTE,
+        },
+        {
+          OR: [{
+            title: {
+              equals: 'Backend Engineer',
+              mode: Prisma.QueryMode.insensitive,
+            },
+          }],
+        },
+      ],
+    });
+    expect(result.source).toBe(JobRecommendationSource.PREFERENCES);
+  });
+
+  it('uses latest when request filters override every stored criterion',
+  async () => {
+    getPreferredCv.mockResolvedValue(null);
+    getJobPreferences.mockResolvedValue(enabledPreferences({
+      targetRoles: [],
+      minimumSalary: null,
+    }));
+    findMany.mockResolvedValue([job(JOB_ID_1)]);
+
+    const result = await service.recommend(
+      CANDIDATE_ID,
+      'Bearer token',
+      {
+        limit: 10,
+        location: 'Da Nang',
+        jobType: JobType.REMOTE,
+      } as JobRecommendationQueryDto,
+      NOW,
+    );
+
+    expect(transaction).not.toHaveBeenCalled();
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(result.source).toBe(JobRecommendationSource.LATEST);
+  });
+
+  it('returns latest from the same snapshot when no job matches preferences',
+  async () => {
+    getPreferredCv.mockResolvedValue(null);
+    getJobPreferences.mockResolvedValue(enabledPreferences({
+      preferredLocations: [],
+      preferredJobTypes: [],
+      minimumSalary: null,
+    }));
+    findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([job(JOB_ID_2)]);
+
+    const result = await service.recommend(
+      CANDIDATE_ID,
+      'Bearer token',
+      { limit: 10 } as JobRecommendationQueryDto,
+      NOW,
+    );
+
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledTimes(2);
+    expect(result.source).toBe(JobRecommendationSource.LATEST);
+    expect(result.items.map(({ id }) => id)).toEqual([JOB_ID_2]);
+  });
+
+  it('fails soft to latest when the preference contract is unavailable',
+  async () => {
+    getPreferredCv.mockResolvedValue(null);
+    getJobPreferences.mockRejectedValue(
+      new ProfileRecommendationUnavailableError(),
+    );
+    findMany.mockResolvedValue([job(JOB_ID_1)]);
+
+    const result = await service.recommend(
+      CANDIDATE_ID,
+      'Bearer token',
+      { limit: 10 } as JobRecommendationQueryDto,
+      NOW,
+    );
+
+    expect(transaction).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      source: JobRecommendationSource.LATEST,
+      fallbackReason: JobRecommendationFallbackReason.NO_ACTIVE_CV,
+    });
   });
 
   it('does not hide PostgreSQL failures behind a fallback', async () => {
@@ -376,6 +605,8 @@ describe('JobRecommendationService', () => {
     await expect(result).rejects.toBeInstanceOf(ApiException);
     await expect(result).rejects.toMatchObject({ code, status });
     expect(recommendJobs).toHaveBeenCalledTimes(aiCalls);
+    expect(getJobPreferences).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
     expect(findMany).not.toHaveBeenCalled();
   });
 
@@ -399,9 +630,49 @@ describe('JobRecommendationService', () => {
     await expect(result).rejects.toMatchObject({
       code: 'RECOMMENDATION_CURSOR_STALE',
     });
+    expect(getJobPreferences).not.toHaveBeenCalled();
     expect(findMany).toHaveBeenCalledTimes(1);
   });
 });
+
+function unsetPreferences() {
+  return {
+    schemaVersion: 1 as const,
+    candidateId: CANDIDATE_ID,
+    state: JobPreferenceState.UNSET,
+    version: 0,
+    consentVersion: null,
+    consentedAt: null,
+    withdrawnAt: null,
+    targetRoles: [],
+    preferredLocations: [],
+    preferredJobTypes: [],
+    minimumSalary: null,
+    currency: 'VND' as const,
+    createdAt: null,
+    updatedAt: null,
+  };
+}
+
+function enabledPreferences(overrides: Record<string, unknown> = {}) {
+  return {
+    schemaVersion: 1 as const,
+    candidateId: CANDIDATE_ID,
+    state: JobPreferenceState.ENABLED,
+    version: 1,
+    consentVersion: 1 as const,
+    consentedAt: '2026-08-28T00:00:00.000Z',
+    withdrawnAt: null,
+    targetRoles: ['Backend Engineer'],
+    preferredLocations: ['Ha Noi'],
+    preferredJobTypes: [JobType.FULL_TIME],
+    minimumSalary: '20000000.00',
+    currency: 'VND' as const,
+    createdAt: '2026-08-28T00:00:00.000Z',
+    updatedAt: '2026-08-28T00:00:00.000Z',
+    ...overrides,
+  };
+}
 
 function job(id: string, overrides: Partial<Job> = {}): Job {
   return {

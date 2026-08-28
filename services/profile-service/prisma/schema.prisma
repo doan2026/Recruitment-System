@@ -40,25 +40,41 @@ enum CvEventAction {
   @@map("cv_event_action")
 }
 
+enum JobPreferenceState {
+  ENABLED
+  DISABLED
+
+  @@map("job_preference_state")
+}
+
+enum PreferredJobType {
+  FULL_TIME
+  PART_TIME
+  REMOTE
+  INTERNSHIP
+
+  @@map("preferred_job_type")
+}
+
 model Profile {
-  id                     String               @id @default(uuid()) @db.Uuid
-  userId                 String               @unique(map: "profiles_user_id_key") @map("user_id") @db.Uuid
-  fullName               String?              @map("full_name") @db.VarChar(160)
-  headline               String?              @db.VarChar(200)
+  id                     String                  @id @default(uuid()) @db.Uuid
+  userId                 String                  @unique(map: "profiles_user_id_key") @map("user_id") @db.Uuid
+  fullName               String?                 @map("full_name") @db.VarChar(160)
+  headline               String?                 @db.VarChar(200)
   summary                String?
-  phone                  String?              @db.VarChar(32)
-  address                String?              @db.VarChar(500)
-  avatarFileId           String?              @map("avatar_file_id") @db.Uuid
-  avatarUrl              String?              @map("avatar_url") @db.VarChar(2048)
-  avatarMediaReferenceId String?              @unique(map: "profiles_avatar_media_reference_id_key") @map("avatar_media_reference_id") @db.Uuid
-  githubUrl              String?              @map("github_url") @db.VarChar(2048)
-  linkedinUrl            String?              @map("linkedin_url") @db.VarChar(2048)
-  portfolioUrl           String?              @map("portfolio_url") @db.VarChar(2048)
-  completionRuleVersion  Int                  @default(1) @map("completion_rule_version")
-  completionPercent      Int                  @default(0) @map("completion_percent")
-  aggregateVersion       Int                  @default(1) @map("aggregate_version")
-  createdAt              DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt              DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+  phone                  String?                 @db.VarChar(32)
+  address                String?                 @db.VarChar(500)
+  avatarFileId           String?                 @map("avatar_file_id") @db.Uuid
+  avatarUrl              String?                 @map("avatar_url") @db.VarChar(2048)
+  avatarMediaReferenceId String?                 @unique(map: "profiles_avatar_media_reference_id_key") @map("avatar_media_reference_id") @db.Uuid
+  githubUrl              String?                 @map("github_url") @db.VarChar(2048)
+  linkedinUrl            String?                 @map("linkedin_url") @db.VarChar(2048)
+  portfolioUrl           String?                 @map("portfolio_url") @db.VarChar(2048)
+  completionRuleVersion  Int                     @default(1) @map("completion_rule_version")
+  completionPercent      Int                     @default(0) @map("completion_percent")
+  aggregateVersion       Int                     @default(1) @map("aggregate_version")
+  createdAt              DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
   educations             Education[]
   experiences            Experience[]
   skills                 Skill[]
@@ -66,8 +82,29 @@ model Profile {
   projects               Project[]
   cvs                    Cv[]
   cvDeletions            CvDeletionWorkflow[]
+  jobPreference          CandidateJobPreference?
 
   @@map("profiles")
+}
+
+model CandidateJobPreference {
+  candidateId        String             @id @map("candidate_id") @db.Uuid
+  schemaVersion      Int                @default(1) @map("schema_version")
+  state              JobPreferenceState
+  version            Int                @default(1)
+  consentVersion     Int?               @map("consent_version")
+  consentedAt        DateTime?          @map("consented_at") @db.Timestamptz(3)
+  withdrawnAt        DateTime?          @map("withdrawn_at") @db.Timestamptz(3)
+  targetRoles        String[]           @default([]) @map("target_roles")
+  preferredLocations String[]           @default([]) @map("preferred_locations")
+  preferredJobTypes  PreferredJobType[] @default([]) @map("preferred_job_types")
+  minimumSalary      Decimal?           @map("minimum_salary") @db.Decimal(15, 2)
+  currency           String             @default("VND") @db.Char(3)
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+  profile            Profile            @relation(fields: [candidateId], references: [userId], onDelete: Cascade, onUpdate: Restrict)
+
+  @@map("candidate_job_preferences")
 }
 
 model Education {
