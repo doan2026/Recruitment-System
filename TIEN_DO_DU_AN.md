@@ -2,7 +2,7 @@
 
 > Ngày cập nhật: 29/08/2026
 > Nhánh đối chiếu chính: `develop`
-> Pull Request lần cập nhật: PR #61 từ `feature/ai-service/secure-chatbot` vào `develop`
+> Pull Request lần cập nhật: PR #62 từ `feature/ai-service/chat-recommendation-tool` vào `develop`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -734,9 +734,9 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Test plumbing deterministic bao phủ **10 FAQ** tiếng Việt, prompt injection, JWT/JWKS, Candidate-only role, owner/session isolation, Redis TTL/trim, atomic lock/fencing, distributed user/global limit, provider timeout/oversize/error redaction và cache headers. Full Compose gate đạt **445 unit/non-integration + 59 PostgreSQL/Kafka/Redis integration (504/504 tổng)**; Ruff và format check đều PASS.
 - Còn pending và không được suy diễn là đã PASS: chạy 10 FAQ với Claude thật để đánh giá chất lượng, provider staging smoke bằng API key thật, recommendation intent/tool, frontend chatbot widget của Người 3, deployed gateway E2E, HTTP/load đa replica, production monitoring/SLO và secret rotation.
 
-## 2.37 Personalized Job Recommendation Chat Tool v1 — đang bàn giao (PR pending)
+## 2.37 Personalized Job Recommendation Chat Tool v1 — hoàn thành qua PR #62
 
-> Task chỉ thuộc AI Service của Người 2, được triển khai trên `feature/ai-service/chat-recommendation-tool`. Task không sửa frontend chatbot widget của Người 3, shared gateway/Compose hoặc service ngoài phạm vi.
+> Task chỉ thuộc AI Service của Người 2, được bàn giao từ `feature/ai-service/chat-recommendation-tool` vào `develop` qua PR #62 ngày 29/08/2026. Task không sửa frontend chatbot widget của Người 3, shared gateway/Compose hoặc service ngoài phạm vi.
 
 - Feature flag mặc định tắt giữ chatbot v1 độc lập; khi bật, Anthropic chỉ được khai báo đúng một strict tool `get_my_job_recommendations` không tham số. Provider chỉ chấp nhận một tool call exact hoặc một câu trả lời text hợp lệ, không cho model chọn user/CV/filter/URL và không gọi Claude lần hai sau tool.
 - Chỉ sau exact intent, Candidate bearer đang có mới được chuyển tạm thời tới fixed Job endpoint `/recommended?limit=3`; identity, CV mặc định, preferences và authorization tiếp tục do Job/Profile phía server quyết định. Token không đi vào prompt, Redis, formatter, log hoặc error.
