@@ -32,6 +32,10 @@
     {
       "key": "invitationToken",
       "value": ""
+    },
+    {
+      "key": "companySearchCursor",
+      "value": ""
     }
   ],
   "item": [
@@ -86,7 +90,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"name\": \"Acme Vietnam\",\n  \"description\": \"A recruitment technology company\",\n  \"industry\": \"Technology\",\n  \"size\": \"51-200\",\n  \"address\": \"Ho Chi Minh City\",\n  \"website\": \"https://acme.example\",\n  \"taxCode\": \"0312345678\",\n  \"logo\": {\n    \"fileId\": \"6105e846-3bb5-4dc0-a6ed-d0f0148c5bc8\",\n    \"url\": \"https://res.cloudinary.com/example/logo.png\"\n  },\n  \"media\": []\n}",
+          "raw": "{\n  \"name\": \"Acme Vietnam\",\n  \"description\": \"A recruitment technology company\",\n  \"industry\": \"Technology\",\n  \"size\": \"51-200\",\n  \"address\": \"Ho Chi Minh City\",\n  \"website\": \"https://acme.example\",\n  \"taxCode\": \"0312345678\"\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -145,6 +149,52 @@
           "path": [
             "companies",
             "{{companyId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Search verified public companies",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('public search succeeds', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test('bounded search envelope', () => { pm.expect(body).to.have.all.keys('data', 'meta'); pm.expect(body.data).to.be.an('array'); pm.expect(body.meta).to.have.all.keys('limit', 'hasMore', 'nextCursor'); });",
+              "pm.test('public cards do not expose workflow or internal media fields', () => body.data.forEach((item) => pm.expect(item).to.have.all.keys('id', 'name', 'slug', 'industry', 'size', 'address', 'logoUrl')));",
+              "pm.collectionVariables.set('companySearchCursor', body.meta.nextCursor || '');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/companies/search?q=C%C3%B4ng%20ngh%E1%BB%87&limit=20",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "companies",
+            "search"
+          ],
+          "query": [
+            {
+              "key": "q",
+              "value": "Công nghệ"
+            },
+            {
+              "key": "limit",
+              "value": "20"
+            },
+            {
+              "key": "cursor",
+              "value": "{{companySearchCursor}}",
+              "disabled": true
+            }
           ]
         }
       }
