@@ -1,18 +1,12 @@
-import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
-  ArrayMaxSize,
-  IsArray,
   IsOptional,
   IsString,
   IsUrl,
   Length,
   MaxLength,
-  ValidateNested,
 } from 'class-validator';
 import { Trim } from '../../common/validation/trim.decorator';
-import { CompanyMediaReferenceDto } from './company-media-reference.dto';
-import { FileReferenceDto } from './file-reference.dto';
 
 export class CreateCompanyDto {
   @ApiProperty({ minLength: 2, maxLength: 160 })
@@ -65,21 +59,4 @@ export class CreateCompanyDto {
   @IsString()
   @Length(1, 32)
   taxCode!: string;
-
-  @ApiPropertyOptional({ type: FileReferenceDto })
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => FileReferenceDto)
-  logo?: FileReferenceDto;
-
-  @ApiPropertyOptional({
-    type: [CompanyMediaReferenceDto],
-    maxItems: 11,
-  })
-  @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(11)
-  @ValidateNested({ each: true })
-  @Type(() => CompanyMediaReferenceDto)
-  media?: CompanyMediaReferenceDto[];
 }

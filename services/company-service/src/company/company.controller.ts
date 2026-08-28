@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  Header,
+  Headers,
   HttpCode,
   HttpStatus,
   Param,
@@ -17,10 +19,12 @@ import {
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiExtraModels,
+  ApiHeader,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiResponse,
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger';
@@ -38,6 +42,12 @@ import {
   LogoReferenceResponseDto,
 } from './dto/company-profile.dto';
 import { CreateCompanyDto } from './dto/create-company.dto';
+import {
+  CompanyMediaUploadCapabilityDto,
+  CompanyMediaUploadResultDto,
+  ConfirmCompanyMediaUploadDto,
+  CreateCompanyMediaUploadDto,
+} from './dto/company-media-upload.dto';
 import { ListCompaniesQueryDto } from './dto/list-companies-query.dto';
 import {
   PublicCompanyMediaDto,
@@ -95,6 +105,24 @@ const PUBLIC_COMPANY_PROFILE_ENVELOPE = {
   },
 };
 
+const COMPANY_MEDIA_UPLOAD_CAPABILITY_ENVELOPE = {
+  type: 'object',
+  required: ['data', 'meta'],
+  properties: {
+    data: { $ref: getSchemaPath(CompanyMediaUploadCapabilityDto) },
+    meta: { type: 'object', nullable: true, example: null },
+  },
+};
+
+const COMPANY_MEDIA_UPLOAD_RESULT_ENVELOPE = {
+  type: 'object',
+  required: ['data', 'meta'],
+  properties: {
+    data: { $ref: getSchemaPath(CompanyMediaUploadResultDto) },
+    meta: { type: 'object', nullable: true, example: null },
+  },
+};
+
 @ApiTags('companies')
 @ApiExtraModels(
   CompanyProfileDto,
@@ -102,6 +130,8 @@ const PUBLIC_COMPANY_PROFILE_ENVELOPE = {
   PublicCompanyMediaDto,
   LogoReferenceResponseDto,
   CompanyMediaResponseDto,
+  CompanyMediaUploadCapabilityDto,
+  CompanyMediaUploadResultDto,
 )
 @Controller()
 export class CompanyController {
@@ -192,6 +222,66 @@ export class CompanyController {
     @Param('id', COMPANY_ID_PIPE) companyId: string,
   ): Promise<PublicCompanyProfileDto> {
     return this.companyService.getPublicById(companyId);
+  }
+
+  @Post(':id/media/signature')
+  @Roles(SystemRole.RECRUITER)
+  @ApiBearerAuth()
+  @Header('Cache-Control', 'private, no-store')
+  @Header('Pragma', 'no-cache')
+  @ApiOperation({
+    summary: 'Create a signed Company-owned upload intent as its OWNER',
+  })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: false,
+    description: 'Stable 8-128 character key for retrying this upload intent',
+  })
+  @ApiCreatedResponse({ schema: COMPANY_MEDIA_UPLOAD_CAPABILITY_ENVELOPE })
+  @ApiConflictResponse({ description: 'Idempotency key or upload intent conflict' })
+  @ApiResponse({ status: 422, description: 'Media policy or ownership rejected' })
+  @ApiResponse({ status: 429, description: 'Media upload rate limit reached' })
+  @ApiResponse({ status: 503, description: 'Media Service unavailable or invalid response' })
+  createMediaUploadIntent(
+    @CurrentUser() user: AuthUser,
+    @Param('id', COMPANY_ID_PIPE) companyId: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Body() dto: CreateCompanyMediaUploadDto,
+  ): Promise<CompanyMediaUploadCapabilityDto> {
+    return this.companyService.createMediaUploadIntent(
+      user.id,
+      companyId,
+      dto,
+      idempotencyKey,
+    );
+  }
+
+  @Post(':id/media/confirm')
+  @HttpCode(HttpStatus.OK)
+  @Roles(SystemRole.RECRUITER)
+  @ApiBearerAuth()
+  @Header('Cache-Control', 'private, no-store')
+  @Header('Pragma', 'no-cache')
+  @ApiOperation({
+    summary: 'Confirm and verify a Company-owned upload as its OWNER',
+  })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOkResponse({ schema: COMPANY_MEDIA_UPLOAD_RESULT_ENVELOPE })
+  @ApiConflictResponse({ description: 'Confirmation state changed concurrently' })
+  @ApiResponse({ status: 422, description: 'Upload intent, ownership or type mismatch' })
+  @ApiResponse({ status: 429, description: 'Media confirmation retry limit reached' })
+  @ApiResponse({ status: 503, description: 'Media Service unavailable or invalid response' })
+  confirmMediaUpload(
+    @CurrentUser() user: AuthUser,
+    @Param('id', COMPANY_ID_PIPE) companyId: string,
+    @Body() dto: ConfirmCompanyMediaUploadDto,
+  ): Promise<CompanyMediaUploadResultDto> {
+    return this.companyService.confirmMediaUpload(
+      user.id,
+      companyId,
+      dto,
+    );
   }
 
   @Put(':id')

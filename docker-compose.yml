@@ -260,12 +260,18 @@ services:
     build: ./services/company-service
     env_file:
       - ./services/company-service/.env
+    environment:
+      MEDIA_SERVICE_URL: http://media-service:3000
+      MEDIA_INTERNAL_API_KEY: ${MEDIA_INTERNAL_API_KEY_COMPANY:?MEDIA_INTERNAL_API_KEY_COMPANY is required}
+      MEDIA_REQUEST_TIMEOUT_MS: ${COMPANY_MEDIA_REQUEST_TIMEOUT_MS:-3000}
     secrets:
       - source: jwt-public-key
         target: jwt-public.pem
     restart: unless-stopped
     depends_on:
       postgres:
+        condition: service_healthy
+      media-service:
         condition: service_healthy
     expose:
       - "3000"

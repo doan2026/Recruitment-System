@@ -1,7 +1,10 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import {
   Company,
+  CompanyMediaAssetType as PrismaCompanyMediaAssetType,
+  CompanyMediaOperationKind,
   CompanyMedia,
+  CompanyMediaUploadIntent,
   CompanyMediaType,
   CompanyMemberRole,
   CompanyVerificationStatus,
@@ -14,7 +17,20 @@ import {
   apiSuccess,
 } from '../common/http/api-response.interceptor';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  CompanyFileReference,
+  CompanyMediaAssetType,
+  CompanyMediaClient,
+  VerifiedCompanyFile,
+} from '../media/company-media.client';
+import { CompanyMediaOperationService } from '../media/company-media-operation.service';
 import { CompanyProfileDto } from './dto/company-profile.dto';
+import {
+  CompanyMediaUploadCapabilityDto,
+  CompanyMediaUploadResultDto,
+  ConfirmCompanyMediaUploadDto,
+  CreateCompanyMediaUploadDto,
+} from './dto/company-media-upload.dto';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { ListCompaniesQueryDto } from './dto/list-companies-query.dto';
 import { PublicCompanyProfileDto } from './dto/public-company-profile.dto';
@@ -26,6 +42,54 @@ import {
 
 type CompanyWithMedia = Company & { media: CompanyMedia[] };
 
+interface PlannedLogo {
+  fileId: string;
+  url?: string;
+  mediaReferenceId?: string;
+}
+
+interface PlannedGalleryItem {
+  id: string;
+  fileId: string;
+  type: CompanyMediaType;
+  sortOrder: number;
+  url?: string;
+  mediaReferenceId?: string;
+}
+
+interface PendingAttachment {
+  operationId: string;
+  fileId: string;
+  assetType: CompanyMediaAssetType;
+  referenceType: string;
+  referenceId: string;
+  localMediaId: string | null;
+  apply: (
+    verified: VerifiedCompanyFile,
+    reference: CompanyFileReference,
+  ) => void;
+}
+
+interface MediaMutationPlan {
+  logo: PlannedLogo | null | undefined;
+  gallery: PlannedGalleryItem[] | undefined;
+  attachments: PendingAttachment[];
+  detachments: Array<{
+    id: string;
+    companyId: string;
+    fileId: string;
+    assetType: CompanyMediaAssetType;
+    referenceType: string;
+    referenceId: string;
+    localMediaId: string | null;
+    mediaReferenceId: string;
+  }>;
+}
+
+interface ForegroundAttachmentLease {
+  token: string;
+}
+
 const COMPANY_WITH_MEDIA = {
   include: {
     media: {
@@ -36,15 +100,17 @@ const COMPANY_WITH_MEDIA = {
 
 @Injectable()
 export class CompanyService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly media: CompanyMediaClient,
+    private readonly mediaOperations: CompanyMediaOperationService,
+  ) {}
 
   async create(
     recruiterId: string,
     dto: CreateCompanyDto,
   ): Promise<CompanyProfileDto> {
     this.validateNoUnexpectedNulls(dto, new Set(['website']));
-    this.validateMedia(dto.logo?.fileId, dto.media ?? []);
-
     const companyId = randomUUID();
     const name = this.cleanCompanyName(dto.name);
     const taxCode = this.normalizeTaxCode(dto.taxCode);
@@ -78,8 +144,6 @@ export class CompanyService {
             address: dto.address,
             website: dto.website,
             taxCode,
-            logoFileId: dto.logo?.fileId,
-            logoUrl: dto.logo?.url,
             verifiedStatus: CompanyVerificationStatus.PENDING,
             members: {
               create: {
@@ -87,16 +151,6 @@ export class CompanyService {
                 role: CompanyMemberRole.OWNER,
               },
             },
-            media: dto.media?.length
-              ? {
-                  create: dto.media.map((item, index) => ({
-                    fileId: item.fileId,
-                    url: item.url,
-                    type: item.type,
-                    sortOrder: item.sortOrder ?? index,
-                  })),
-                }
-              : undefined,
           },
           ...COMPANY_WITH_MEDIA,
         });
@@ -239,6 +293,7 @@ export class CompanyService {
                 targetStatus === CompanyVerificationStatus.REJECTED
                   ? reason
                   : null,
+              aggregateVersion: { increment: 1 },
             },
             ...COMPANY_WITH_MEDIA,
           });
@@ -297,6 +352,7 @@ export class CompanyService {
             data: {
               verifiedStatus: CompanyVerificationStatus.PENDING,
               rejectReason: null,
+              aggregateVersion: { increment: 1 },
             },
             ...COMPANY_WITH_MEDIA,
           });
@@ -332,6 +388,194 @@ export class CompanyService {
     return this.toPublicProfile(company);
   }
 
+  async createMediaUploadIntent(
+    recruiterId: string,
+    companyId: string,
+    dto: CreateCompanyMediaUploadDto,
+    idempotencyKey?: string,
+  ): Promise<CompanyMediaUploadCapabilityDto> {
+    const company = await this.requireOwner(recruiterId, companyId);
+    const capability = await this.media.createCompanyUploadIntent(
+      company.id,
+      recruiterId,
+      dto.type,
+      dto.originalFilename,
+      idempotencyKey,
+    );
+    const expiresAt = new Date(capability.expiresAt);
+    const cleanupAt = this.mediaOperations.uploadIntentCleanupAt(expiresAt);
+
+    try {
+      await this.prisma.$transaction(async (transaction) => {
+        const stored = await transaction.companyMediaUploadIntent.upsert({
+          where: { fileId: capability.fileId },
+          create: {
+            fileId: capability.fileId,
+            companyId: company.id,
+            requestedBy: recruiterId.toLowerCase(),
+            assetType:
+              dto.type as unknown as PrismaCompanyMediaAssetType,
+            expiresAt,
+            cleanupAt,
+          },
+          update: {},
+        });
+        if (
+          !this.matchesUploadIntent(stored, company.id, recruiterId, dto) ||
+          stored.expiresAt.getTime() !== expiresAt.getTime()
+        ) {
+          throw new ApiException(
+            'COMPANY_MEDIA_UPLOAD_INTENT_CONFLICT',
+            'The Media upload intent conflicts with an existing Company intent',
+            HttpStatus.CONFLICT,
+          );
+        }
+
+        const cleanup = await transaction.companyMediaOperation.upsert({
+          where: { id: capability.fileId },
+          create: {
+            id: capability.fileId,
+            kind: CompanyMediaOperationKind.UPLOAD_INTENT_CLEANUP,
+            companyId: company.id,
+            fileId: capability.fileId,
+            assetType:
+              dto.type as unknown as PrismaCompanyMediaAssetType,
+            referenceType: 'COMPANY_UPLOAD_INTENT',
+            referenceId: capability.fileId,
+            localMediaId: null,
+            mediaReferenceId: null,
+            nextAttemptAt: stored.cleanupAt,
+          },
+          update: {},
+        });
+        if (
+          cleanup.kind !==
+            CompanyMediaOperationKind.UPLOAD_INTENT_CLEANUP ||
+          cleanup.companyId !== company.id ||
+          cleanup.fileId !== capability.fileId ||
+          cleanup.assetType !==
+            (dto.type as unknown as PrismaCompanyMediaAssetType) ||
+          cleanup.referenceType !== 'COMPANY_UPLOAD_INTENT' ||
+          cleanup.referenceId !== capability.fileId ||
+          cleanup.localMediaId !== null ||
+          cleanup.mediaReferenceId !== null ||
+          cleanup.nextAttemptAt.getTime() !== stored.cleanupAt.getTime()
+        ) {
+          throw new ApiException(
+            'COMPANY_MEDIA_UPLOAD_INTENT_CONFLICT',
+            'The Media upload intent conflicts with an existing cleanup operation',
+            HttpStatus.CONFLICT,
+          );
+        }
+      });
+      return capability;
+    } catch (error) {
+      this.throwPersistenceError(error);
+    }
+  }
+
+  async confirmMediaUpload(
+    recruiterId: string,
+    companyId: string,
+    dto: ConfirmCompanyMediaUploadDto,
+  ): Promise<CompanyMediaUploadResultDto> {
+    const company = await this.requireOwner(recruiterId, companyId);
+    const intent = await this.prisma.companyMediaUploadIntent.findUnique({
+      where: { fileId: dto.fileId },
+    });
+    if (
+      !intent ||
+      !this.matchesUploadIntent(intent, company.id, recruiterId, dto) ||
+      intent.cleanupAt.getTime() <= Date.now()
+    ) {
+      throw this.invalidUploadIntent();
+    }
+    if (intent.confirmedAt && intent.canonicalUrl) {
+      return {
+        fileId: intent.fileId,
+        type: dto.type,
+        url: intent.canonicalUrl,
+      };
+    }
+    if (intent.expiresAt.getTime() <= Date.now()) {
+      throw this.invalidUploadIntent();
+    }
+
+    const file = await this.media.confirmCompanyFile(
+      dto.fileId,
+      company.id,
+      dto.type,
+    );
+    const result = {
+      fileId: file.id,
+      type: file.type,
+      url: file.url,
+    };
+    const confirmed = await this.prisma.companyMediaUploadIntent.updateMany({
+      where: {
+        fileId: intent.fileId,
+        companyId: company.id,
+        requestedBy: recruiterId.toLowerCase(),
+        assetType:
+          dto.type as unknown as PrismaCompanyMediaAssetType,
+        confirmedAt: null,
+        expiresAt: { gt: new Date() },
+        cleanupAt: { gt: new Date() },
+      },
+      data: {
+        confirmedAt: new Date(),
+        canonicalUrl: file.url,
+      },
+    });
+    if (confirmed.count === 1) {
+      return result;
+    }
+
+    const concurrent = await this.prisma.companyMediaUploadIntent.findUnique({
+      where: { fileId: intent.fileId },
+    });
+    if (
+      concurrent &&
+      this.matchesUploadIntent(concurrent, company.id, recruiterId, dto) &&
+      concurrent.cleanupAt.getTime() > Date.now() &&
+      concurrent.confirmedAt &&
+      concurrent.canonicalUrl
+    ) {
+      return {
+        fileId: concurrent.fileId,
+        type: dto.type,
+        url: concurrent.canonicalUrl,
+      };
+    }
+    throw new ApiException(
+      'COMPANY_MEDIA_UPLOAD_CONFIRM_CONFLICT',
+      'The upload confirmation changed concurrently; retry the request',
+      HttpStatus.CONFLICT,
+    );
+  }
+
+  private matchesUploadIntent(
+    intent: CompanyMediaUploadIntent,
+    companyId: string,
+    recruiterId: string,
+    dto: { type: CompanyMediaAssetType },
+  ): boolean {
+    return (
+      intent.companyId === companyId &&
+      intent.requestedBy === recruiterId.toLowerCase() &&
+      intent.assetType ===
+        (dto.type as unknown as PrismaCompanyMediaAssetType)
+    );
+  }
+
+  private invalidUploadIntent(): ApiException {
+    return new ApiException(
+      'COMPANY_MEDIA_UPLOAD_INTENT_INVALID',
+      'No valid Company upload intent matches this file confirmation',
+      HttpStatus.UNPROCESSABLE_ENTITY,
+    );
+  }
+
   async update(
     recruiterId: string,
     companyId: string,
@@ -339,34 +583,50 @@ export class CompanyService {
   ): Promise<CompanyProfileDto> {
     this.validateUpdate(dto);
 
+    const baseline = await this.requireOwner(recruiterId, companyId);
+    const targetCompanyId = baseline.id;
+    const mediaPlan = this.planMediaMutation(targetCompanyId, baseline, dto);
+    const attachmentLease: ForegroundAttachmentLease = {
+      token: randomUUID(),
+    };
+    const effectiveLogoFileId =
+      mediaPlan.logo === undefined
+        ? baseline.logoFileId
+        : (mediaPlan.logo?.fileId ?? undefined);
+    const effectiveMedia = mediaPlan.gallery ?? baseline.media;
+    this.validateMedia(effectiveLogoFileId, effectiveMedia);
+
+    await this.stageAttachmentOperations(
+      targetCompanyId,
+      mediaPlan.attachments,
+      attachmentLease,
+    );
+    try {
+      await this.resolveAttachments(
+        targetCompanyId,
+        mediaPlan.attachments,
+        attachmentLease,
+      );
+      this.assertMediaPlanResolved(mediaPlan);
+    } catch (error) {
+      await this.markAttachmentsDue(mediaPlan.attachments, attachmentLease);
+      this.mediaOperations.kick();
+      throw error;
+    }
+
     try {
       const company = await this.prisma.$transaction(
         async (transaction) => {
           const membership = await transaction.companyMember.findUnique({
             where: { userId: recruiterId },
-            select: {
-              companyId: true,
-              role: true,
-              company: {
-                select: {
-                  name: true,
-                  taxCode: true,
-                  logoFileId: true,
-                  verifiedStatus: true,
-                  media: {
-                    select: {
-                      fileId: true,
-                      type: true,
-                    },
-                  },
-                },
-              },
+            include: {
+              company: COMPANY_WITH_MEDIA,
             },
           });
 
           if (
             !membership ||
-            membership.companyId !== companyId ||
+            membership.companyId !== targetCompanyId ||
             membership.role !== CompanyMemberRole.OWNER
           ) {
             throw new ApiException(
@@ -376,12 +636,16 @@ export class CompanyService {
             );
           }
 
-          const effectiveLogoFileId =
-            dto.removeLogo === true
-              ? undefined
-              : (dto.logo?.fileId ?? membership.company.logoFileId);
-          const effectiveMedia = dto.media ?? membership.company.media;
-          this.validateMedia(effectiveLogoFileId, effectiveMedia);
+          if (
+            membership.company.aggregateVersion !==
+            baseline.aggregateVersion
+          ) {
+            throw new ApiException(
+              'COMPANY_UPDATE_CONFLICT',
+              'The company changed concurrently; retry the request',
+              HttpStatus.CONFLICT,
+            );
+          }
 
           const data: Prisma.CompanyUpdateInput = {};
           const cleanedName =
@@ -396,7 +660,7 @@ export class CompanyService {
           if (cleanedName !== undefined) {
             data.name = cleanedName;
             data.normalizedName = this.normalizeCompanyName(cleanedName);
-            data.slug = this.createSlug(cleanedName, companyId);
+            data.slug = this.createSlug(cleanedName, targetCompanyId);
           }
           if (dto.description !== undefined) {
             data.description = dto.description;
@@ -416,21 +680,22 @@ export class CompanyService {
           if (normalizedTaxCode !== undefined) {
             data.taxCode = normalizedTaxCode;
           }
-          if (dto.removeLogo === true) {
-            data.logoFileId = null;
-            data.logoUrl = null;
-          } else if (dto.logo) {
-            data.logoFileId = dto.logo.fileId;
-            data.logoUrl = dto.logo.url;
+          if (mediaPlan.logo !== undefined) {
+            data.logoFileId = mediaPlan.logo?.fileId ?? null;
+            data.logoUrl = mediaPlan.logo?.url ?? null;
+            data.logoMediaReferenceId =
+              mediaPlan.logo?.mediaReferenceId ?? null;
           }
-          if (dto.media !== undefined) {
+          if (mediaPlan.gallery !== undefined) {
             data.media = {
               deleteMany: {},
-              create: dto.media.map((item, index) => ({
+              create: mediaPlan.gallery.map((item) => ({
+                id: item.id,
                 fileId: item.fileId,
-                url: item.url,
+                mediaReferenceId: item.mediaReferenceId!,
+                url: item.url!,
                 type: item.type,
-                sortOrder: item.sortOrder ?? index,
+                sortOrder: item.sortOrder,
               })),
             };
           }
@@ -450,21 +715,365 @@ export class CompanyService {
             data.rejectReason = null;
           }
 
-          return transaction.company.update({
-            where: { id: companyId },
+          data.aggregateVersion = { increment: 1 };
+
+          if (mediaPlan.detachments.length > 0) {
+            await transaction.companyMediaOperation.createMany({
+              data: mediaPlan.detachments.map((operation) => ({
+                ...operation,
+                assetType:
+                  operation.assetType as unknown as PrismaCompanyMediaAssetType,
+                kind: CompanyMediaOperationKind.DETACH_CLEANUP,
+              })),
+            });
+          }
+
+          const updated = await transaction.company.update({
+            where: { id: targetCompanyId },
             data,
             ...COMPANY_WITH_MEDIA,
           });
+
+          if (mediaPlan.attachments.length > 0) {
+            const attachedFileIds = mediaPlan.attachments.map(
+              (attachment) => attachment.fileId,
+            );
+            await transaction.companyMediaUploadIntent.deleteMany({
+              where: {
+                fileId: { in: attachedFileIds },
+                companyId: targetCompanyId,
+              },
+            });
+            await transaction.companyMediaOperation.deleteMany({
+              where: {
+                id: { in: attachedFileIds },
+                companyId: targetCompanyId,
+                kind: CompanyMediaOperationKind.UPLOAD_INTENT_CLEANUP,
+              },
+            });
+
+            const completedAttachments =
+              await transaction.companyMediaOperation.deleteMany({
+                where: {
+                  id: {
+                    in: mediaPlan.attachments.map(
+                      (attachment) => attachment.operationId,
+                    ),
+                  },
+                  kind: CompanyMediaOperationKind.ATTACH_COMPENSATION,
+                  leaseToken: attachmentLease.token,
+                },
+              });
+            if (
+              completedAttachments.count !== mediaPlan.attachments.length
+            ) {
+              throw this.mediaOperationConflict();
+            }
+          }
+
+          return updated;
         },
         {
           isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
         },
       );
 
+      this.mediaOperations.kick();
       return this.toProfile(company);
     } catch (error) {
+      await this.markAttachmentsDue(mediaPlan.attachments, attachmentLease);
+      this.mediaOperations.kick();
       this.throwPersistenceError(error);
     }
+  }
+
+  private async requireOwner(
+    recruiterId: string,
+    companyId: string,
+  ): Promise<CompanyWithMedia> {
+    const membership = await this.prisma.companyMember.findUnique({
+      where: { userId: recruiterId },
+      include: { company: COMPANY_WITH_MEDIA },
+    });
+
+    if (
+      !membership ||
+      membership.companyId.toLowerCase() !== companyId.toLowerCase() ||
+      membership.role !== CompanyMemberRole.OWNER
+    ) {
+      throw new ApiException(
+        'COMPANY_OWNER_REQUIRED',
+        'Only the company owner can manage this profile',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    return membership.company;
+  }
+
+  private planMediaMutation(
+    companyId: string,
+    current: CompanyWithMedia,
+    dto: UpdateCompanyDto,
+  ): MediaMutationPlan {
+    const attachments: PendingAttachment[] = [];
+    let logo: PlannedLogo | null | undefined;
+
+    if (dto.removeLogo === true) {
+      logo = null;
+    } else if (dto.logo !== undefined) {
+      if (
+        current.logoFileId === dto.logo.fileId &&
+        current.logoUrl &&
+        current.logoMediaReferenceId
+      ) {
+        logo = {
+          fileId: current.logoFileId,
+          url: current.logoUrl,
+          mediaReferenceId: current.logoMediaReferenceId,
+        };
+      } else {
+        logo = { fileId: dto.logo.fileId };
+        const target = logo;
+        const operationId = randomUUID();
+        attachments.push({
+          operationId,
+          fileId: dto.logo.fileId,
+          assetType: CompanyMediaAssetType.COMPANY_LOGO,
+          referenceType: 'COMPANY_LOGO',
+          referenceId: operationId,
+          localMediaId: null,
+          apply: (verified, reference) => {
+            target.url = verified.url;
+            target.mediaReferenceId = reference.id;
+          },
+        });
+      }
+    }
+
+    let gallery: PlannedGalleryItem[] | undefined;
+    if (dto.media !== undefined) {
+      gallery = dto.media.map((input, index) => {
+        const existing = current.media.find(
+          (item) =>
+            item.fileId === input.fileId && item.type === input.type,
+        );
+        const item: PlannedGalleryItem = {
+          id: existing?.id ?? randomUUID(),
+          fileId: input.fileId,
+          type: input.type,
+          sortOrder: input.sortOrder ?? index,
+        };
+
+        if (existing?.mediaReferenceId && existing.url) {
+          item.url = existing.url;
+          item.mediaReferenceId = existing.mediaReferenceId;
+          return item;
+        }
+
+        const assetType = this.toAssetType(input.type);
+        attachments.push({
+          operationId: randomUUID(),
+          fileId: input.fileId,
+          assetType,
+          referenceType: 'COMPANY_MEDIA',
+          referenceId: item.id,
+          localMediaId: item.id,
+          apply: (verified, reference) => {
+            item.url = verified.url;
+            item.mediaReferenceId = reference.id;
+          },
+        });
+        return item;
+      });
+    }
+
+    const detachments: MediaMutationPlan['detachments'] = [];
+    if (
+      logo !== undefined &&
+      current.logoFileId &&
+      current.logoMediaReferenceId &&
+      current.logoMediaReferenceId !== logo?.mediaReferenceId
+    ) {
+      detachments.push({
+        id: randomUUID(),
+        companyId,
+        fileId: current.logoFileId,
+        assetType: CompanyMediaAssetType.COMPANY_LOGO,
+        referenceType: 'COMPANY_LOGO',
+        referenceId: current.logoMediaReferenceId,
+        localMediaId: null,
+        mediaReferenceId: current.logoMediaReferenceId,
+      });
+    }
+
+    if (gallery !== undefined) {
+      const retainedReferences = new Set(
+        gallery
+          .map((item) => item.mediaReferenceId)
+          .filter((value): value is string => value !== undefined),
+      );
+      for (const oldItem of current.media) {
+        if (
+          oldItem.mediaReferenceId &&
+          !retainedReferences.has(oldItem.mediaReferenceId)
+        ) {
+          detachments.push({
+            id: randomUUID(),
+            companyId,
+            fileId: oldItem.fileId,
+            assetType: this.toAssetType(oldItem.type),
+            referenceType: 'COMPANY_MEDIA',
+            referenceId: oldItem.id,
+            localMediaId: oldItem.id,
+            mediaReferenceId: oldItem.mediaReferenceId,
+          });
+        }
+      }
+    }
+
+    return { logo, gallery, attachments, detachments };
+  }
+
+  private async stageAttachmentOperations(
+    companyId: string,
+    attachments: PendingAttachment[],
+    lease: ForegroundAttachmentLease,
+  ): Promise<void> {
+    if (attachments.length === 0) return;
+
+    const staged = await this.prisma.companyMediaOperation.createMany({
+      data: attachments.map((attachment) => ({
+        id: attachment.operationId,
+        kind: CompanyMediaOperationKind.ATTACH_COMPENSATION,
+        companyId,
+        fileId: attachment.fileId,
+        assetType:
+          attachment.assetType as unknown as PrismaCompanyMediaAssetType,
+        referenceType: attachment.referenceType,
+        referenceId: attachment.referenceId,
+        localMediaId: attachment.localMediaId,
+        nextAttemptAt: new Date(),
+        leaseToken: lease.token,
+        leaseExpiresAt: this.mediaOperations.foregroundLeaseExpiresAt(),
+      })),
+    });
+    if (staged.count !== attachments.length) {
+      throw this.mediaOperationConflict();
+    }
+  }
+
+  private async resolveAttachments(
+    companyId: string,
+    attachments: PendingAttachment[],
+    lease: ForegroundAttachmentLease,
+  ): Promise<void> {
+    for (const attachment of attachments) {
+      await this.renewAttachmentLease(attachments, lease);
+      const verified = await this.media.verifyCompanyFile(
+        attachment.fileId,
+        companyId,
+        attachment.assetType,
+      );
+      const reference = await this.media.bindCompanyFile(
+        attachment.fileId,
+        companyId,
+        attachment.assetType,
+        attachment.referenceType,
+        attachment.referenceId,
+      );
+      const stored = await this.prisma.companyMediaOperation.updateMany({
+        where: {
+          id: attachment.operationId,
+          kind: CompanyMediaOperationKind.ATTACH_COMPENSATION,
+          leaseToken: lease.token,
+        },
+        data: {
+          mediaReferenceId: reference.id,
+          leaseExpiresAt: this.mediaOperations.foregroundLeaseExpiresAt(),
+        },
+      });
+      if (stored.count !== 1) {
+        throw this.mediaOperationConflict();
+      }
+      attachment.apply(verified, reference);
+    }
+    await this.renewAttachmentLease(attachments, lease);
+  }
+
+  private async renewAttachmentLease(
+    attachments: PendingAttachment[],
+    lease: ForegroundAttachmentLease,
+  ): Promise<void> {
+    if (attachments.length === 0) return;
+    const renewed = await this.prisma.companyMediaOperation.updateMany({
+      where: {
+        id: { in: attachments.map((attachment) => attachment.operationId) },
+        kind: CompanyMediaOperationKind.ATTACH_COMPENSATION,
+        leaseToken: lease.token,
+      },
+      data: {
+        leaseExpiresAt: this.mediaOperations.foregroundLeaseExpiresAt(),
+      },
+    });
+    if (renewed.count !== attachments.length) {
+      throw this.mediaOperationConflict();
+    }
+  }
+
+  private async markAttachmentsDue(
+    attachments: PendingAttachment[],
+    lease: ForegroundAttachmentLease,
+  ): Promise<void> {
+    if (attachments.length === 0) {
+      return;
+    }
+    try {
+      await this.prisma.companyMediaOperation.updateMany({
+        where: {
+          id: { in: attachments.map((attachment) => attachment.operationId) },
+          kind: CompanyMediaOperationKind.ATTACH_COMPENSATION,
+          leaseToken: lease.token,
+        },
+        data: {
+          nextAttemptAt: new Date(),
+          leaseToken: null,
+          leaseExpiresAt: null,
+        },
+      });
+    } catch {
+      // The staged operation remains durable and becomes due after its short grace period.
+    }
+  }
+
+  private mediaOperationConflict(): ApiException {
+    return new ApiException(
+      'COMPANY_MEDIA_OPERATION_CONFLICT',
+      'The media operation changed concurrently; retry the request',
+      HttpStatus.CONFLICT,
+    );
+  }
+
+  private assertMediaPlanResolved(plan: MediaMutationPlan): void {
+    const unresolvedLogo =
+      plan.logo !== undefined &&
+      plan.logo !== null &&
+      (!plan.logo.url || !plan.logo.mediaReferenceId);
+    const unresolvedGallery = plan.gallery?.some(
+      (item) => !item.url || !item.mediaReferenceId,
+    );
+    if (unresolvedLogo || unresolvedGallery) {
+      throw new ApiException(
+        'COMPANY_MEDIA_OPERATION_INCOMPLETE',
+        'The media operation did not produce a complete canonical reference',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+  }
+
+  private toAssetType(type: CompanyMediaType): CompanyMediaAssetType {
+    return type === CompanyMediaType.IMAGE
+      ? CompanyMediaAssetType.COMPANY_IMAGE
+      : CompanyMediaAssetType.COMPANY_VIDEO;
   }
 
   private validateUpdate(dto: UpdateCompanyDto): void {
@@ -604,12 +1213,14 @@ export class CompanyService {
       address: company.address,
       website: company.website,
       taxCode: company.taxCode,
-      logoUrl: company.logoUrl,
-      media: company.media.map((item) => ({
-        url: item.url,
-        type: item.type,
-        sortOrder: item.sortOrder,
-      })),
+      logoUrl: company.logoMediaReferenceId ? company.logoUrl : null,
+      media: company.media
+        .filter((item) => item.mediaReferenceId !== null)
+        .map((item) => ({
+          url: item.url,
+          type: item.type,
+          sortOrder: item.sortOrder,
+        })),
       createdAt: company.createdAt.toISOString(),
       updatedAt: company.updatedAt.toISOString(),
     };
@@ -627,20 +1238,25 @@ export class CompanyService {
       website: company.website,
       taxCode: company.taxCode,
       logo:
-        company.logoFileId && company.logoUrl
+        company.logoFileId &&
+        company.logoUrl &&
+        company.logoMediaReferenceId
           ? {
               fileId: company.logoFileId,
               url: company.logoUrl,
             }
           : null,
-      media: company.media.map((item) => ({
-        fileId: item.fileId,
-        url: item.url,
-        type: item.type,
-        sortOrder: item.sortOrder,
-      })),
+      media: company.media
+        .filter((item) => item.mediaReferenceId !== null)
+        .map((item) => ({
+          fileId: item.fileId,
+          url: item.url,
+          type: item.type,
+          sortOrder: item.sortOrder,
+        })),
       verifiedStatus: company.verifiedStatus,
       rejectReason: company.rejectReason,
+      aggregateVersion: company.aggregateVersion,
       createdAt: company.createdAt.toISOString(),
       updatedAt: company.updatedAt.toISOString(),
     };

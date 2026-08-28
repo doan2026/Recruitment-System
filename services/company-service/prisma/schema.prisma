@@ -30,26 +30,41 @@ enum CompanyMediaType {
   VIDEO
 }
 
+enum CompanyMediaAssetType {
+  COMPANY_LOGO
+  COMPANY_IMAGE
+  COMPANY_VIDEO
+}
+
+enum CompanyMediaOperationKind {
+  ATTACH_COMPENSATION
+  DETACH_CLEANUP
+  UPLOAD_INTENT_CLEANUP
+}
+
 model Company {
-  id               String                    @id @default(uuid()) @db.Uuid
-  name             String                    @db.VarChar(160)
-  normalizedName   String                    @unique @map("normalized_name") @db.VarChar(160)
-  slug             String                    @unique @db.VarChar(190)
-  description      String                    @db.Text
-  industry         String                    @db.VarChar(120)
-  size             String                    @db.VarChar(50)
-  address          String                    @db.VarChar(500)
-  website          String?                   @db.VarChar(2048)
-  taxCode          String                    @unique @map("tax_code") @db.VarChar(32)
-  logoFileId       String?                   @map("logo_file_id") @db.Uuid
-  logoUrl          String?                   @map("logo_url") @db.Text
-  verifiedStatus   CompanyVerificationStatus @default(PENDING) @map("verified_status")
-  rejectReason     String?                   @map("reject_reason") @db.Text
-  createdAt        DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt        DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(3)
-  members          CompanyMember[]
-  media            CompanyMedia[]
-  invitations      CompanyInvitation[]
+  id                   String                    @id @default(uuid()) @db.Uuid
+  name                 String                    @db.VarChar(160)
+  normalizedName       String                    @unique @map("normalized_name") @db.VarChar(160)
+  slug                 String                    @unique @db.VarChar(190)
+  description          String                    @db.Text
+  industry             String                    @db.VarChar(120)
+  size                 String                    @db.VarChar(50)
+  address              String                    @db.VarChar(500)
+  website              String?                   @db.VarChar(2048)
+  taxCode              String                    @unique @map("tax_code") @db.VarChar(32)
+  logoFileId           String?                   @map("logo_file_id") @db.Uuid
+  logoUrl              String?                   @map("logo_url") @db.Text
+  logoMediaReferenceId String?                   @unique @map("logo_media_reference_id") @db.Uuid
+  aggregateVersion     Int                       @default(0) @map("aggregate_version")
+  verifiedStatus       CompanyVerificationStatus @default(PENDING) @map("verified_status")
+  rejectReason         String?                   @map("reject_reason") @db.Text
+  createdAt            DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  members              CompanyMember[]
+  media                CompanyMedia[]
+  mediaUploadIntents   CompanyMediaUploadIntent[]
+  invitations          CompanyInvitation[]
 
   @@map("companies")
 }
@@ -67,17 +82,61 @@ model CompanyMember {
 }
 
 model CompanyMedia {
-  id        String           @id @default(uuid()) @db.Uuid
-  companyId String           @map("company_id") @db.Uuid
-  fileId    String           @unique @map("file_id") @db.Uuid
-  url       String           @db.Text
-  type      CompanyMediaType
-  sortOrder Int              @default(0) @map("sort_order")
-  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
-  company   Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  id               String           @id @default(uuid()) @db.Uuid
+  companyId        String           @map("company_id") @db.Uuid
+  fileId           String           @unique @map("file_id") @db.Uuid
+  mediaReferenceId String?          @unique @map("media_reference_id") @db.Uuid
+  url              String           @db.Text
+  type             CompanyMediaType
+  sortOrder        Int              @default(0) @map("sort_order")
+  createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  company          Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId, sortOrder])
   @@map("company_media")
+}
+
+model CompanyMediaOperation {
+  id               String                    @id @default(uuid()) @db.Uuid
+  kind             CompanyMediaOperationKind
+  companyId        String                    @map("company_id") @db.Uuid
+  fileId           String                    @map("file_id") @db.Uuid
+  assetType        CompanyMediaAssetType     @map("asset_type")
+  referenceType    String                    @map("reference_type") @db.VarChar(64)
+  referenceId      String                    @map("reference_id") @db.VarChar(128)
+  localMediaId     String?                   @map("local_media_id") @db.Uuid
+  mediaReferenceId String?                   @map("media_reference_id") @db.Uuid
+  attemptCount     Int                       @default(0) @map("attempt_count")
+  nextAttemptAt    DateTime                  @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
+  leaseToken       String?                   @map("lease_token") @db.Uuid
+  leaseExpiresAt   DateTime?                 @map("lease_expires_at") @db.Timestamptz(3)
+  lastErrorCode    String?                   @map("last_error_code") @db.VarChar(64)
+  createdAt        DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([nextAttemptAt])
+  @@index([leaseExpiresAt])
+  @@index([companyId, fileId])
+  @@map("company_media_operations")
+}
+
+model CompanyMediaUploadIntent {
+  fileId       String                @id @map("file_id") @db.Uuid
+  companyId    String                @map("company_id") @db.Uuid
+  requestedBy  String                @map("requested_by") @db.Uuid
+  assetType    CompanyMediaAssetType @map("asset_type")
+  expiresAt    DateTime              @map("expires_at") @db.Timestamptz(3)
+  cleanupAt    DateTime              @map("cleanup_at") @db.Timestamptz(3)
+  confirmedAt  DateTime?             @map("confirmed_at") @db.Timestamptz(3)
+  canonicalUrl String?               @map("canonical_url") @db.Text
+  createdAt    DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+  company      Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, requestedBy])
+  @@index([expiresAt])
+  @@index([cleanupAt])
+  @@map("company_media_upload_intents")
 }
 
 model CompanyInvitation {
