@@ -207,11 +207,13 @@ class ApplicationOfferServiceTest {
         assertThat(event.getValue().getTopic()).isEqualTo(TOPIC);
         assertThat(event.getValue().getEventKey()).isEqualTo(applicationId);
         assertThat(event.getValue().getPayload())
+            .contains("\"schema_version\":1")
             .contains("\"action\":\"OFFER_SENT\"")
             .contains("\"from_status\":\"INTERVIEW\"")
             .contains("\"to_status\":\"OFFER\"")
             .contains("\"offer_status\":\"SENT\"")
             .contains("\"actor_id\":\"" + recruiterId + "\"")
+            .contains("\"aggregate_version\":1")
             .doesNotContain("salary", "note", "file_url", FILE_URL);
     }
 
@@ -836,10 +838,12 @@ class ApplicationOfferServiceTest {
         verify(outbox).save(event.capture());
         assertThat(event.getValue().getEventKey()).isEqualTo(applicationId);
         assertThat(event.getValue().getPayload())
+            .contains("\"schema_version\":1")
             .contains("\"action\":\"STATUS_CHANGED\"")
             .contains("\"offer_status\":\"" + offerStatus + "\"")
             .contains("\"to_status\":\"" + applicationStatus + "\"")
             .contains("\"actor_id\":\"" + candidateId + "\"")
+            .contains("\"aggregate_version\":1")
             .doesNotContain("salary", "note", "file_url", FILE_URL);
     }
 

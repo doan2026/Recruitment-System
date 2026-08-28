@@ -204,12 +204,17 @@ class ApplicationOutboxKafkaIT {
             assertThat(received.value()).isEqualTo(published.get("payload"));
             assertThat(payload.path("action").asText())
                 .isEqualTo("STATUS_CHANGED");
+            assertThat(payload.path("schema_version").asInt()).isEqualTo(1);
             assertThat(payload.path("application_id").asText())
                 .isEqualTo(applicationId.toString());
             assertThat(payload.path("from_status").asText())
                 .isEqualTo("APPLIED");
             assertThat(payload.path("to_status").asText())
                 .isEqualTo("REVIEWING");
+            assertThat(payload.path("actor_id").asText())
+                .isEqualTo(RECRUITER_ID.toString());
+            assertThat(payload.path("aggregate_version").asLong())
+                .isEqualTo(1L);
             assertThat(payload.path("event_id").asText())
                 .isEqualTo(published.get("id").toString());
 

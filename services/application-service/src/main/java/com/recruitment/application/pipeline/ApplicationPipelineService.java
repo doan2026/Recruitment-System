@@ -8,11 +8,11 @@ import com.recruitment.application.client.RecruiterCompanyMembership;
 import com.recruitment.application.domain.ApplicationEntity;
 import com.recruitment.application.domain.ApplicationEventOutboxEntity;
 import com.recruitment.application.domain.ApplicationStatus;
+import com.recruitment.application.event.ApplicationEventV1;
 import com.recruitment.application.repository.ApplicationEventOutboxRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.EnumSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -206,7 +206,14 @@ public class ApplicationPipelineService {
         Instant now = clock.instant();
         String note = cleanNote(rawNote);
         UUID eventId = UUID.randomUUID();
-        String payload = eventPayload(eventId, application, target, now);
+        String payload = eventPayload(
+            eventId,
+            application,
+            actorId,
+            target,
+            expectedVersion + 1,
+            now
+        );
         int changed = applications.transition(
             application.getId(),
             target,
@@ -366,20 +373,21 @@ public class ApplicationPipelineService {
     private String eventPayload(
         UUID eventId,
         ApplicationEntity application,
+        UUID actorId,
         ApplicationStatus target,
+        long aggregateVersion,
         Instant occurredAt
     ) {
-        Map<String, Object> event = new LinkedHashMap<>();
-        event.put("event_id", eventId);
-        event.put("action", "STATUS_CHANGED");
-        event.put("application_id", application.getId());
-        event.put("job_id", application.getJobId());
-        event.put("job_title", application.getJobTitle());
-        event.put("candidate_id", application.getCandidateId());
-        event.put("recruiter_id", application.getRecruiterId());
-        event.put("from_status", application.getStatus());
-        event.put("to_status", target);
-        event.put("occurred_at", occurredAt);
+        Map<String, Object> event = ApplicationEventV1.base(
+            eventId,
+            ApplicationEventV1.Action.STATUS_CHANGED,
+            application,
+            actorId,
+            application.getStatus(),
+            target,
+            aggregateVersion,
+            occurredAt
+        );
         try {
             return objectMapper.writeValueAsString(event);
         } catch (JsonProcessingException exception) {
