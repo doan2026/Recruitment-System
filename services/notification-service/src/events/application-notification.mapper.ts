@@ -1,13 +1,6 @@
 import { NotificationType, Prisma } from '@prisma/client';
 import { ApplicationEvent } from './application-event';
-
-export interface NotificationDraft {
-  userId: string;
-  type: NotificationType;
-  title: string;
-  body: string;
-  payloadJson: Prisma.InputJsonObject;
-}
+import { NotificationDraft } from './event-processing';
 
 export const mapApplicationNotification = (
   event: ApplicationEvent,

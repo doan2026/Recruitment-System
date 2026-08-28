@@ -88,9 +88,9 @@ service tự đặt tên event khác nhau:
                                                                  (Reviewing/Interview/Offer/Rejec
                                                                  ted)
 
- interview-even     Interview & Video     Notification           Gửi thông báo kèm link phòng
- ts                 Call Service          Service                phỏng vấn khi lịch được tạo/xác
-                                                                 nhận
+ interview-even     Interview & Video     Notification           Foundation SCHEDULED gửi thông
+ ts                 Call Service          Service                báo in-app an toàn; room URL/token
+                                                                 được lấy qua API đã xác thực
 
  chat-events        Chat Service          Notification           Gửi push/email khi có tin nhắn
                                           Service                mới và người nhận đang offline
@@ -425,9 +425,10 @@ API / event chính
         •   PATCH /interviews/:id/feedback
 
 Giao tiếp với service khác
-Liên kết application_id từ Application Service; tạo room qua Jitsi External API, chỉ lưu room_url —
-không xử lý/lưu trữ luồng media (Jitsi tự đảm nhiệm signaling và media). Khi lịch được xác nhận →
-publish sự kiện lên topic Kafka 'interview-events' để Notification Service gửi link phỏng vấn.
+Liên kết application_id từ Application Service; Interview và transactional outbox cùng commit rồi
+publish `SCHEDULED interview-events` v1 cho Notification tạo in-app item. Event không chứa location,
+notes, room URL/token hoặc contact/CV data. Khi Jitsi được triển khai, room credential ngắn hạn phải
+được lấy qua endpoint join đã xác thực; service không xử lý/lưu trữ luồng media vì Jitsi đảm nhiệm.
 
 7. Chat Service
         •    Công nghệ cố định: Node.js + Socket.IO · MongoDB + Mongoose · Redis Adapter

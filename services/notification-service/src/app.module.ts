@@ -9,6 +9,9 @@ import { NoStoreInterceptor } from './common/no-store.interceptor';
 import { validateEnvironment } from './config/environment';
 import { ApplicationEventConsumer } from './events/application-event.consumer';
 import { ApplicationEventProcessor } from './events/application-event.processor';
+import { InterviewEventConsumer } from './events/interview-event.consumer';
+import { InterviewEventProcessor } from './events/interview-event.processor';
+import { NotificationEventLedgerService } from './events/notification-event-ledger.service';
 import { HealthController } from './health/health.controller';
 import { NotificationCursorService } from './inbox/notification-cursor.service';
 import { NotificationInboxService } from './inbox/notification-inbox.service';
@@ -30,8 +33,11 @@ import { PrismaService } from './prisma/prisma.service';
     JwtVerifierService,
     NotificationCursorService,
     NotificationInboxService,
+    NotificationEventLedgerService,
     ApplicationEventProcessor,
     ApplicationEventConsumer,
+    InterviewEventProcessor,
+    InterviewEventConsumer,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_INTERCEPTOR, useClass: NoStoreInterceptor },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },

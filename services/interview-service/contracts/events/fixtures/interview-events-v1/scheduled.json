@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "11111111-1111-4111-8111-111111111111",
+  "action": "SCHEDULED",
+  "interview_id": "22222222-2222-4222-8222-222222222222",
+  "application_id": "33333333-3333-4333-8333-333333333333",
+  "candidate_id": "44444444-4444-4444-8444-444444444444",
+  "interviewer_id": "55555555-5555-4555-8555-555555555555",
+  "actor_id": "55555555-5555-4555-8555-555555555555",
+  "round_number": 1,
+  "schedule_revision": 1,
+  "scheduled_start_at": "2026-09-10T02:00:00.000Z",
+  "scheduled_end_at": "2026-09-10T02:45:00.000Z",
+  "status": "SCHEDULED",
+  "aggregate_version": 0,
+  "occurred_at": "2026-08-28T14:20:00.000Z"
+}

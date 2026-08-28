@@ -138,8 +138,25 @@ test('environment requires a valid replay cutoff for an enabled consumer', () =>
     validateEnvironment({
       ...base,
       NOTIFICATION_APPLICATION_REPLAY_AFTER: '2026-08-28T00:00:00Z',
+      NOTIFICATION_INTERVIEW_REPLAY_AFTER: '2026-08-28T00:00:00Z',
     }).NOTIFICATION_APPLICATION_REPLAY_AFTER,
     '2026-08-28T00:00:00.000Z',
+  );
+  assert.throws(
+    () =>
+      validateEnvironment({
+        ...base,
+        NOTIFICATION_APPLICATION_REPLAY_AFTER: '2026-08-28T00:00:00Z',
+      }),
+    /NOTIFICATION_INTERVIEW_REPLAY_AFTER is required/,
+  );
+  assert.equal(
+    validateEnvironment({
+      ...base,
+      NOTIFICATION_APPLICATION_REPLAY_AFTER: '2026-08-28T00:00:00Z',
+      NOTIFICATION_INTERVIEW_REPLAY_AFTER: '2026-08-29T00:00:00Z',
+    }).NOTIFICATION_INTERVIEW_REPLAY_AFTER,
+    '2026-08-29T00:00:00.000Z',
   );
 });
 

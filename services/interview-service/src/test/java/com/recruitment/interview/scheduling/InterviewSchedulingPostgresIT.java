@@ -83,11 +83,22 @@ class InterviewSchedulingPostgresIT {
             "interview.application-client.internal-api-key",
             () -> INTERNAL_KEY
         );
+        registry.add(
+            "interview-events.publisher-enabled",
+            () -> "false"
+        );
     }
 
     @BeforeEach
     void clearDatabase() {
-        interviews.deleteAll();
+        jdbc.execute(
+            """
+            TRUNCATE TABLE
+                interview.interview_event_outbox,
+                interview.interviews
+            CASCADE
+            """
+        );
     }
 
     @AfterAll
@@ -99,10 +110,19 @@ class InterviewSchedulingPostgresIT {
     void cleanMigrationJpaValidationAndSecondFlywayRunAreStable() {
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(flyway.info().current().getVersion().getVersion())
-            .isEqualTo("1");
+            .isEqualTo("2");
         assertThat(flyway.migrate().migrationsExecuted).isZero();
         assertThat(jdbc.queryForObject(
             "SELECT COUNT(*) FROM pg_extension WHERE extname = 'btree_gist'",
+            Integer.class
+        )).isEqualTo(1);
+        assertThat(jdbc.queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_schema = 'interview'
+              AND table_name = 'interview_event_outbox'
+            """,
             Integer.class
         )).isEqualTo(1);
     }
@@ -183,6 +203,7 @@ class InterviewSchedulingPostgresIT {
         assertThat(replay.replayed()).isTrue();
         assertThat(replay.interview().id()).isEqualTo(first.interview().id());
         assertThat(interviews.count()).isOne();
+        assertThat(outboxCount()).isOne();
 
         CreateInterviewRequest changed = request(
             applicationId,
@@ -201,6 +222,61 @@ class InterviewSchedulingPostgresIT {
                 "INTERVIEW_IDEMPOTENCY_CONFLICT"
             )
         );
+    }
+
+    @Test
+    void outboxFailureRollsBackTheInterviewTransaction() {
+        UUID actor = UUID.randomUUID();
+        UUID applicationId = UUID.randomUUID();
+        stub(applicationId, UUID.randomUUID());
+        jdbc.execute(
+            """
+            CREATE OR REPLACE FUNCTION interview.reject_test_outbox()
+            RETURNS TRIGGER
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                RAISE EXCEPTION USING
+                    ERRCODE = 'check_violation',
+                    MESSAGE = 'forced test outbox failure';
+            END;
+            $$
+            """
+        );
+        jdbc.execute(
+            """
+            CREATE TRIGGER reject_test_outbox
+            BEFORE INSERT ON interview.interview_event_outbox
+            FOR EACH ROW EXECUTE FUNCTION interview.reject_test_outbox()
+            """
+        );
+        try {
+            assertThatThrownBy(() -> scheduling.schedule(
+                actor,
+                "token",
+                request(
+                    applicationId,
+                    UUID.randomUUID(),
+                    1,
+                    futureStart(),
+                    45,
+                    "Room A"
+                )
+            )).isInstanceOf(DataIntegrityViolationException.class);
+        } finally {
+            jdbc.execute(
+                """
+                DROP TRIGGER IF EXISTS reject_test_outbox
+                ON interview.interview_event_outbox
+                """
+            );
+            jdbc.execute(
+                "DROP FUNCTION IF EXISTS interview.reject_test_outbox()"
+            );
+        }
+
+        assertThat(interviews.count()).isZero();
+        assertThat(outboxCount()).isZero();
     }
 
     @Test
@@ -302,6 +378,39 @@ class InterviewSchedulingPostgresIT {
             start.toInstant(),
             start.toInstant().plus(30, ChronoUnit.MINUTES)
         )).isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void databaseRejectsNullAndNonV4OutboxIdentity() {
+        UUID actor = UUID.randomUUID();
+        UUID applicationId = UUID.randomUUID();
+        stub(applicationId, UUID.randomUUID());
+        ScheduleInterviewResult scheduled = scheduling.schedule(
+            actor,
+            "token",
+            request(
+                applicationId,
+                UUID.randomUUID(),
+                1,
+                futureStart(),
+                45,
+                "Room A"
+            )
+        );
+
+        assertThatThrownBy(() -> insertOutboxCopy(
+            scheduled.interview().id(),
+            UUID.randomUUID(),
+            1,
+            true
+        )).isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> insertOutboxCopy(
+            scheduled.interview().id(),
+            UUID.fromString("11111111-1111-1111-8111-111111111111"),
+            1,
+            false
+        )).isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(outboxCount()).isOne();
     }
 
     @Test
@@ -432,6 +541,14 @@ class InterviewSchedulingPostgresIT {
             loserCode.equals(code) || "INTERVIEW_SCHEDULE_CONFLICT".equals(code)
         );
         assertThat(interviews.count()).isOne();
+        assertThat(outboxCount()).isOne();
+    }
+
+    private Long outboxCount() {
+        return jdbc.queryForObject(
+            "SELECT COUNT(*) FROM interview.interview_event_outbox",
+            Long.class
+        );
     }
 
     private void stub(UUID applicationId, UUID candidateId) {
@@ -511,6 +628,43 @@ class InterviewSchedulingPostgresIT {
             "a".repeat(64),
             java.sql.Timestamp.from(start),
             java.sql.Timestamp.from(end)
+        );
+    }
+
+    private void insertOutboxCopy(
+        UUID interviewId,
+        UUID eventId,
+        long aggregateVersion,
+        boolean nullEventId
+    ) {
+        jdbc.update("""
+            INSERT INTO interview.interview_event_outbox (
+                event_id, interview_id, aggregate_version, action,
+                topic, event_key, payload, next_attempt_at, created_at
+            )
+            SELECT ?, interview_id, ?, action, topic, event_key,
+                   jsonb_set(
+                       jsonb_set(
+                           payload,
+                           '{event_id}',
+                           CASE WHEN ?
+                               THEN 'null'::jsonb
+                               ELSE to_jsonb(CAST(? AS text))
+                           END
+                       ),
+                       '{aggregate_version}',
+                       to_jsonb(CAST(? AS bigint))
+                   ),
+                   created_at, created_at
+            FROM interview.interview_event_outbox
+            WHERE interview_id = ?
+            """,
+            eventId,
+            aggregateVersion,
+            nullEventId,
+            eventId,
+            aggregateVersion,
+            interviewId
         );
     }
 

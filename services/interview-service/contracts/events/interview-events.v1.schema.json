@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://recruitment-system.local/contracts/events/interview-events.v1.schema.json",
+  "title": "Recruitment Interview Event v1",
+  "description": "Strict foundation event emitted for a newly scheduled interview. The Kafka key is the canonical interview_id.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "action",
+    "interview_id",
+    "application_id",
+    "candidate_id",
+    "interviewer_id",
+    "actor_id",
+    "round_number",
+    "schedule_revision",
+    "scheduled_start_at",
+    "scheduled_end_at",
+    "status",
+    "aggregate_version",
+    "occurred_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "event_id": {
+      "$ref": "#/$defs/uuid_v4"
+    },
+    "action": {
+      "const": "SCHEDULED"
+    },
+    "interview_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "application_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "candidate_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "interviewer_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "actor_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "round_number": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20
+    },
+    "schedule_revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "scheduled_start_at": {
+      "$ref": "#/$defs/utc_millis"
+    },
+    "scheduled_end_at": {
+      "$ref": "#/$defs/utc_millis"
+    },
+    "status": {
+      "const": "SCHEDULED"
+    },
+    "aggregate_version": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "occurred_at": {
+      "$ref": "#/$defs/utc_millis"
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "uuid_v4": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "utc_millis": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    }
+  }
+}

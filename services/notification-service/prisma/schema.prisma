@@ -13,6 +13,7 @@ enum NotificationType {
   OFFER_RECEIVED
   OFFER_ACCEPTED
   OFFER_DECLINED
+  INTERVIEW_SCHEDULED
 }
 
 enum DeliveryChannel {
