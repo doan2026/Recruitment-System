@@ -8,6 +8,8 @@ import { CvEventPublisherService } from './cv-event-publisher.service';
 import { CvMediaCleanupService } from './cv-media-cleanup.service';
 import { InternalCvController } from './internal-cv.controller';
 import { InternalCvService } from './internal-cv.service';
+import { InternalCvV2Controller } from './internal-cv-v2.controller';
+import { InternalCvV2Service } from './internal-cv-v2.service';
 import { ProfileMediaController } from './profile-media.controller';
 import { ProfileMediaService } from './profile-media.service';
 import { ProfileController } from './profile.controller';
@@ -17,6 +19,7 @@ import { ProfileService } from './profile.service';
   imports: [ApplicationClientModule, MediaClientModule],
   controllers: [
     InternalCvController,
+    InternalCvV2Controller,
     CvBuilderController,
     ProfileMediaController,
     ProfileController,
@@ -29,6 +32,7 @@ import { ProfileService } from './profile.service';
     CvEventPublisherService,
     CvMediaCleanupService,
     InternalCvService,
+    InternalCvV2Service,
   ],
   exports: [ProfileService],
 })

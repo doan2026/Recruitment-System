@@ -205,8 +205,51 @@ before(async () => {
   const updatedAt = new Date('2026-08-27T01:01:00.000Z');
   await prisma.profile.createMany({
     data: [
-      { userId: CANDIDATE_A, createdAt, updatedAt },
+      {
+        userId: CANDIDATE_A,
+        aggregateVersion: 8,
+        createdAt,
+        updatedAt,
+      },
       { userId: CANDIDATE_B, createdAt, updatedAt },
+    ],
+  });
+  const candidateAProfile = await prisma.profile.findUniqueOrThrow({
+    where: { userId: CANDIDATE_A },
+    select: { id: true },
+  });
+  await prisma.skill.createMany({
+    data: [
+      {
+        id: '50000000-0000-4000-8000-000000000061',
+        profileId: candidateAProfile.id,
+        name: 'PostgreSQL',
+        normalizedName: 'postgresql',
+        level: 'Expert',
+        sortOrder: 0,
+        createdAt,
+        updatedAt,
+      },
+      {
+        id: '50000000-0000-4000-8000-000000000062',
+        profileId: candidateAProfile.id,
+        name: 'TypeScript',
+        normalizedName: 'typescript',
+        level: 'Advanced',
+        sortOrder: 0,
+        createdAt,
+        updatedAt,
+      },
+      {
+        id: '50000000-0000-4000-8000-000000000063',
+        profileId: candidateAProfile.id,
+        name: 'NestJS',
+        normalizedName: 'nestjs',
+        level: null,
+        sortOrder: 2,
+        createdAt,
+        updatedAt,
+      },
     ],
   });
   await prisma.cv.create({
@@ -309,7 +352,7 @@ after(async () => {
   }
 });
 
-test('Profile internal CV v1 contract', async (t) => {
+test('Profile internal CV v1/v2 contracts', async (t) => {
   const candidateToken = accessToken(CANDIDATE_A);
 
   await t.test('fails closed unless the exact internal identity is present', async () => {
@@ -431,6 +474,138 @@ test('Profile internal CV v1 contract', async (t) => {
         cvId: cvId.toLowerCase(),
         available: false,
         cv: null,
+      });
+    }
+  });
+
+  await t.test('v2 requires both exact service auth and the matching Candidate JWT', async () => {
+    const body = { candidateId: CANDIDATE_A, cvId: ACTIVE_CV_ID };
+    const missingService = await api('POST', '/internal/v2/cvs/verify', {
+      headers: { authorization: `Bearer ${candidateToken}` },
+      body,
+    });
+    assert.equal(missingService.status, 401);
+    assert.equal(missingService.body.code, 'INTERNAL_AUTH_INVALID');
+
+    const missingJwt = await api('POST', '/internal/v2/cvs/verify', {
+      headers: internalHeaders(),
+      body,
+    });
+    assert.equal(missingJwt.status, 401);
+
+    const wrongRole = await api('POST', '/internal/v2/cvs/verify', {
+      headers: internalHeaders({
+        authorization: `Bearer ${accessToken(CANDIDATE_A, 'RECRUITER')}`,
+      }),
+      body,
+    });
+    assert.equal(wrongRole.status, 403);
+
+    const wrongSubject = await api('POST', '/internal/v2/cvs/verify', {
+      headers: internalHeaders({
+        authorization: `Bearer ${accessToken(CANDIDATE_B)}`,
+      }),
+      body,
+    });
+    assert.equal(wrongSubject.status, 403);
+    assert.equal(wrongSubject.body.code, 'PROFILE_OWNER_REQUIRED');
+  });
+
+  await t.test('v2 returns an exact ordered names-only skill snapshot for an available CV', async () => {
+    const verified = success(
+      await api('POST', '/internal/v2/cvs/verify', {
+        headers: internalHeaders({
+          authorization: `Bearer ${candidateToken}`,
+        }),
+        body: {
+          candidateId: CANDIDATE_A.toUpperCase(),
+          cvId: ACTIVE_CV_ID.toUpperCase(),
+        },
+      }),
+    );
+
+    assert.deepEqual(Object.keys(verified).sort(), [
+      'available',
+      'candidateId',
+      'cv',
+      'cvId',
+      'profileSkillSnapshot',
+    ]);
+    assert.equal(verified.candidateId, CANDIDATE_A);
+    assert.equal(verified.cvId, ACTIVE_CV_ID);
+    assert.equal(verified.available, true);
+    assertInternalCv(verified.cv);
+    assert.deepEqual(
+      Object.keys(verified.profileSkillSnapshot).sort(),
+      ['profileAggregateVersion', 'schemaVersion', 'skills'],
+    );
+    assert.deepEqual(verified.profileSkillSnapshot, {
+      schemaVersion: 1,
+      profileAggregateVersion: 8,
+      skills: ['PostgreSQL', 'TypeScript', 'NestJS'],
+    });
+    assert.ok(
+      verified.profileSkillSnapshot.skills.every(
+        (skill) => typeof skill === 'string',
+      ),
+    );
+    assert.ok(verified.profileSkillSnapshot.skills.length <= 100);
+    assert.equal('fullName' in verified, false);
+    assert.equal('phone' in verified, false);
+    assert.equal('address' in verified, false);
+    assert.equal('normalizedName' in verified.profileSkillSnapshot, false);
+    assert.equal('level' in verified.profileSkillSnapshot, false);
+    assert.equal('id' in verified.profileSkillSnapshot, false);
+    assert.equal(JSON.stringify(verified).includes('Expert'), false);
+    assert.equal(JSON.stringify(verified).includes('Advanced'), false);
+  });
+
+  await t.test('v2 represents an available profile with zero skills as an empty snapshot', async () => {
+    const candidateBToken = accessToken(CANDIDATE_B);
+    const verified = success(
+      await api('POST', '/internal/v2/cvs/verify', {
+        headers: internalHeaders({
+          authorization: `Bearer ${candidateBToken}`,
+        }),
+        body: { candidateId: CANDIDATE_B, cvId: OTHER_CV_ID },
+      }),
+    );
+
+    assert.deepEqual(Object.keys(verified).sort(), [
+      'available',
+      'candidateId',
+      'cv',
+      'cvId',
+      'profileSkillSnapshot',
+    ]);
+    assert.deepEqual(verified.profileSkillSnapshot, {
+      schemaVersion: 1,
+      profileAggregateVersion: 1,
+      skills: [],
+    });
+  });
+
+  await t.test('v2 returns a null snapshot for every unavailable CV variant', async () => {
+    for (const cvId of [
+      randomUUID(),
+      OTHER_CV_ID,
+      DELETED_CV_ID,
+      LEGACY_CV_ID,
+    ]) {
+      const unavailable = success(
+        await api('POST', '/internal/v2/cvs/verify', {
+          headers: internalHeaders({
+            authorization: `Bearer ${candidateToken}`,
+          }),
+          body: { candidateId: CANDIDATE_A, cvId },
+        }),
+      );
+      assert.deepEqual(unavailable, {
+        candidateId: CANDIDATE_A,
+        cvId: cvId.toLowerCase(),
+        available: false,
+        cv: null,
+        profileSkillSnapshot: null,
       });
     }
   });
