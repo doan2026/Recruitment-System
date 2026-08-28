@@ -39,13 +39,18 @@ The gate does all of the following:
 2. Records table counts and a data checksum, creates a custom-format mode-0600
    pre-upgrade archive, calculates SHA-256 and validates `pg_restore --list`.
 3. Runs `prisma migrate deploy` twice against the original database and checks
-   status, each migration-file checksum, no schema drift, new media constraints,
-   unchanged legacy data, and unchanged catalog/ledger on the second deploy.
+   status, each migration-file checksum, no schema drift, Media and audit
+   constraints, unchanged legacy data, and unchanged catalog/ledger on the
+   second deploy. The audit probe covers valid decisions/OWNER transfer,
+   invalid action shapes, duplicate aggregate evidence, FK restriction,
+   append-only `UPDATE`/`DELETE`/`TRUNCATE`, failed-audit transaction rollback
+   and the partial unique OWNER index, then rolls the whole probe back.
 4. Creates and validates an upgraded backup, then restores the pre-upgrade and
    upgraded archives in a single transaction into two new, empty and different
    databases. The pre-upgrade restore must have only two migrations and pass an
    old-schema database read/write/cascade probe. The upgraded restore must
-   match the source catalog and data.
+   match the source catalog and data, including audit trigger/function
+   definitions, and pass the audit probe again.
 5. Truncates a private archive copy and requires `pg_restore --list` to reject
    it before a restore target is created.
 

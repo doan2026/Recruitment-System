@@ -68,3 +68,214 @@ BEGIN
     RAISE EXCEPTION 'legacy defaults changed during upgrade';
   END IF;
 END $$;
+
+DO $$
+DECLARE
+  actions text[];
+  columns_contract text[];
+  migrations text[];
+BEGIN
+  SELECT array_agg(e.enumlabel ORDER BY e.enumsortorder)
+  INTO actions
+  FROM pg_type t
+  JOIN pg_namespace n ON n.oid = t.typnamespace
+  JOIN pg_enum e ON e.enumtypid = t.oid
+  WHERE n.nspname = 'company' AND t.typname = 'CompanyAuditAction';
+  IF actions IS DISTINCT FROM ARRAY[
+    'VERIFICATION_APPROVED',
+    'VERIFICATION_REJECTED',
+    'OWNERSHIP_TRANSFERRED'
+  ] THEN
+    RAISE EXCEPTION 'company audit action enum contract mismatch';
+  END IF;
+
+  SELECT array_agg(
+    concat_ws('|',
+      column_name,
+      data_type,
+      udt_name,
+      is_nullable,
+      CASE WHEN column_default IS NULL THEN 'NO_DEFAULT' ELSE 'HAS_DEFAULT' END
+    ) ORDER BY ordinal_position
+  )
+  INTO columns_contract
+  FROM information_schema.columns
+  WHERE table_schema = 'company' AND table_name = 'company_audit_logs';
+  IF columns_contract IS DISTINCT FROM ARRAY[
+    'id|uuid|uuid|NO|NO_DEFAULT',
+    'company_id|uuid|uuid|NO|NO_DEFAULT',
+    'action|USER-DEFINED|CompanyAuditAction|NO|NO_DEFAULT',
+    'actor_id|uuid|uuid|NO|NO_DEFAULT',
+    'target_user_id|uuid|uuid|YES|NO_DEFAULT',
+    'resulting_aggregate_version|integer|int4|NO|NO_DEFAULT',
+    'from_verification_status|USER-DEFINED|CompanyVerificationStatus|YES|NO_DEFAULT',
+    'to_verification_status|USER-DEFINED|CompanyVerificationStatus|YES|NO_DEFAULT',
+    'reason|character varying|varchar|YES|NO_DEFAULT',
+    'created_at|timestamp with time zone|timestamptz|NO|HAS_DEFAULT'
+  ] THEN
+    RAISE EXCEPTION 'company audit column contract mismatch: %', columns_contract;
+  END IF;
+
+  IF to_regclass('company.company_audit_logs') IS NULL
+     OR NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint con
+       WHERE con.conrelid = 'company.company_audit_logs'::regclass
+         AND con.conname = 'company_audit_logs_pkey'
+         AND con.contype = 'p'
+         AND con.convalidated
+     )
+     OR NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint con
+       WHERE con.conrelid = 'company.company_audit_logs'::regclass
+         AND con.conname = 'company_audit_logs_positive_version_check'
+         AND con.contype = 'c'
+         AND con.convalidated
+     )
+     OR NOT EXISTS (
+       SELECT 1
+       FROM pg_constraint con
+       WHERE con.conrelid = 'company.company_audit_logs'::regclass
+         AND con.conname = 'company_audit_logs_action_shape_check'
+         AND con.contype = 'c'
+         AND con.convalidated
+     ) THEN
+    RAISE EXCEPTION 'company audit table/check constraint contract mismatch';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint con
+    WHERE con.conrelid = 'company.company_audit_logs'::regclass
+      AND con.confrelid = 'company.companies'::regclass
+      AND con.conname = 'company_audit_logs_company_id_fkey'
+      AND con.contype = 'f'
+      AND con.confdeltype = 'r'
+      AND con.confupdtype = 'r'
+      AND con.convalidated
+  ) THEN
+    RAISE EXCEPTION 'company audit FK must RESTRICT company delete/update';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_index i
+    WHERE i.indexrelid = 'company.company_members_one_owner_per_company_key'::regclass
+      AND i.indrelid = 'company.company_members'::regclass
+      AND i.indisunique
+      AND i.indisvalid
+      AND i.indisready
+      AND i.indnkeyatts = 1
+      AND pg_get_indexdef(i.indexrelid, 1, true) = 'company_id'
+      AND pg_get_expr(i.indpred, i.indrelid) LIKE '%OWNER%'
+  ) THEN
+    RAISE EXCEPTION 'partial unique one-OWNER index contract mismatch';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_index i
+    WHERE i.indexrelid = 'company.company_audit_logs_company_id_created_at_id_idx'::regclass
+      AND i.indrelid = 'company.company_audit_logs'::regclass
+      AND NOT i.indisunique
+      AND i.indisvalid
+      AND i.indisready
+      AND i.indpred IS NULL
+      AND i.indnkeyatts = 3
+      AND pg_get_indexdef(i.indexrelid, 1, true) = 'company_id'
+      AND pg_get_indexdef(i.indexrelid, 2, true) = 'created_at'
+      AND pg_get_indexdef(i.indexrelid, 3, true) = 'id'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM pg_index i
+    WHERE i.indexrelid = 'company.company_audit_logs_actor_id_created_at_idx'::regclass
+      AND i.indrelid = 'company.company_audit_logs'::regclass
+      AND NOT i.indisunique
+      AND i.indisvalid
+      AND i.indisready
+      AND i.indpred IS NULL
+      AND i.indnkeyatts = 2
+      AND pg_get_indexdef(i.indexrelid, 1, true) = 'actor_id'
+      AND pg_get_indexdef(i.indexrelid, 2, true) = 'created_at'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM pg_index i
+    WHERE i.indexrelid = 'company.company_audit_logs_company_id_resulting_aggregate_version_key'::regclass
+      AND i.indrelid = 'company.company_audit_logs'::regclass
+      AND i.indisunique
+      AND i.indisvalid
+      AND i.indisready
+      AND i.indpred IS NULL
+      AND i.indnkeyatts = 2
+      AND pg_get_indexdef(i.indexrelid, 1, true) = 'company_id'
+      AND pg_get_indexdef(i.indexrelid, 2, true) = 'resulting_aggregate_version'
+  ) THEN
+    RAISE EXCEPTION 'company audit index contract mismatch';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    JOIN pg_language l ON l.oid = p.prolang
+    WHERE n.nspname = 'company'
+      AND p.proname = 'reject_company_audit_log_mutation'
+      AND pg_get_function_identity_arguments(p.oid) = ''
+      AND p.prorettype = 'trigger'::regtype
+      AND l.lanname = 'plpgsql'
+      AND NOT p.prosecdef
+      AND p.prosrc LIKE '%55000%'
+      AND p.prosrc LIKE '%append-only%'
+  ) THEN
+    RAISE EXCEPTION 'company audit append-only trigger function contract mismatch';
+  END IF;
+
+  IF (
+    SELECT count(*)
+    FROM pg_trigger t
+    WHERE t.tgrelid = 'company.company_audit_logs'::regclass
+      AND NOT t.tgisinternal
+      AND t.tgenabled = 'O'
+      AND t.tgfoid = 'company.reject_company_audit_log_mutation()'::regprocedure
+      AND t.tgname IN (
+        'company_audit_logs_reject_update_delete',
+        'company_audit_logs_reject_truncate'
+      )
+  ) <> 2 OR NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger t
+    WHERE t.tgrelid = 'company.company_audit_logs'::regclass
+      AND t.tgname = 'company_audit_logs_reject_update_delete'
+      AND t.tgtype = 27
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger t
+    WHERE t.tgrelid = 'company.company_audit_logs'::regclass
+      AND t.tgname = 'company_audit_logs_reject_truncate'
+      AND t.tgtype = 34
+  ) THEN
+    RAISE EXCEPTION 'company audit append-only trigger contract mismatch';
+  END IF;
+
+  SELECT array_agg(migration_name ORDER BY started_at, migration_name)
+  INTO migrations
+  FROM company."_prisma_migrations"
+  WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL;
+  IF migrations IS DISTINCT FROM ARRAY[
+    '20260822000000_company_profile',
+    '20260824000000_company_members',
+    '20260828000000_company_media_ownership',
+    '20260829000000_company_audit_log'
+  ] OR EXISTS (
+    SELECT 1
+    FROM company."_prisma_migrations"
+    WHERE finished_at IS NULL OR rolled_back_at IS NOT NULL
+  ) THEN
+    RAISE EXCEPTION 'company migration order/ledger contract mismatch: %', migrations;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM company.company_audit_logs) THEN
+    RAISE EXCEPTION 'legacy upgrade must not synthesize company audit actors/events';
+  END IF;
+END $$;

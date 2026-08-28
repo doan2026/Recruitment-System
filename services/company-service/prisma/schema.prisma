@@ -42,31 +42,57 @@ enum CompanyMediaOperationKind {
   UPLOAD_INTENT_CLEANUP
 }
 
+enum CompanyAuditAction {
+  VERIFICATION_APPROVED
+  VERIFICATION_REJECTED
+  OWNERSHIP_TRANSFERRED
+}
+
 model Company {
-  id                   String                    @id @default(uuid()) @db.Uuid
-  name                 String                    @db.VarChar(160)
-  normalizedName       String                    @unique @map("normalized_name") @db.VarChar(160)
-  slug                 String                    @unique @db.VarChar(190)
-  description          String                    @db.Text
-  industry             String                    @db.VarChar(120)
-  size                 String                    @db.VarChar(50)
-  address              String                    @db.VarChar(500)
-  website              String?                   @db.VarChar(2048)
-  taxCode              String                    @unique @map("tax_code") @db.VarChar(32)
-  logoFileId           String?                   @map("logo_file_id") @db.Uuid
-  logoUrl              String?                   @map("logo_url") @db.Text
-  logoMediaReferenceId String?                   @unique @map("logo_media_reference_id") @db.Uuid
-  aggregateVersion     Int                       @default(0) @map("aggregate_version")
-  verifiedStatus       CompanyVerificationStatus @default(PENDING) @map("verified_status")
-  rejectReason         String?                   @map("reject_reason") @db.Text
-  createdAt            DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt            DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                   String                     @id @default(uuid()) @db.Uuid
+  name                 String                     @db.VarChar(160)
+  normalizedName       String                     @unique @map("normalized_name") @db.VarChar(160)
+  slug                 String                     @unique @db.VarChar(190)
+  description          String                     @db.Text
+  industry             String                     @db.VarChar(120)
+  size                 String                     @db.VarChar(50)
+  address              String                     @db.VarChar(500)
+  website              String?                    @db.VarChar(2048)
+  taxCode              String                     @unique @map("tax_code") @db.VarChar(32)
+  logoFileId           String?                    @map("logo_file_id") @db.Uuid
+  logoUrl              String?                    @map("logo_url") @db.Text
+  logoMediaReferenceId String?                    @unique @map("logo_media_reference_id") @db.Uuid
+  aggregateVersion     Int                        @default(0) @map("aggregate_version")
+  verifiedStatus       CompanyVerificationStatus  @default(PENDING) @map("verified_status")
+  rejectReason         String?                    @map("reject_reason") @db.Text
+  createdAt            DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(3)
   members              CompanyMember[]
   media                CompanyMedia[]
   mediaUploadIntents   CompanyMediaUploadIntent[]
   invitations          CompanyInvitation[]
+  auditLogs            CompanyAuditLog[]
 
   @@map("companies")
+}
+
+model CompanyAuditLog {
+  id                        String                     @id @default(uuid()) @db.Uuid
+  companyId                 String                     @map("company_id") @db.Uuid
+  action                    CompanyAuditAction
+  actorId                   String                     @map("actor_id") @db.Uuid
+  targetUserId              String?                    @map("target_user_id") @db.Uuid
+  resultingAggregateVersion Int                        @map("resulting_aggregate_version")
+  fromVerificationStatus    CompanyVerificationStatus? @map("from_verification_status")
+  toVerificationStatus      CompanyVerificationStatus? @map("to_verification_status")
+  reason                    String?                    @db.VarChar(1000)
+  createdAt                 DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+  company                   Company                    @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([companyId, resultingAggregateVersion])
+  @@index([companyId, createdAt, id])
+  @@index([actorId, createdAt])
+  @@map("company_audit_logs")
 }
 
 model CompanyMember {

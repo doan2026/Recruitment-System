@@ -1,0 +1,466 @@
+\set ON_ERROR_STOP on
+
+CREATE OR REPLACE FUNCTION pg_temp.company_audit_fixture_fingerprint()
+RETURNS text
+LANGUAGE sql
+STABLE
+AS $function$
+  WITH r AS (
+    SELECT 'company' AS kind, concat_ws('|',
+      id::text, name, normalized_name, slug, description, industry, size,
+      address, coalesce(website, '<null>'), tax_code,
+      coalesce(logo_file_id::text, '<null>'), coalesce(logo_url, '<null>'),
+      coalesce(logo_media_reference_id::text, '<null>'),
+      aggregate_version::text, verified_status::text,
+      coalesce(reject_reason, '<null>'), created_at::text, updated_at::text
+    ) AS value
+    FROM company.companies
+
+    UNION ALL
+    SELECT 'member', concat_ws('|',
+      id::text, company_id::text, user_id::text, role::text, joined_at::text
+    )
+    FROM company.company_members
+
+    UNION ALL
+    SELECT 'media', concat_ws('|',
+      id::text, company_id::text, file_id::text,
+      coalesce(media_reference_id::text, '<null>'), url, type::text,
+      sort_order::text, created_at::text
+    )
+    FROM company.company_media
+
+    UNION ALL
+    SELECT 'invitation', concat_ws('|',
+      id::text, company_id::text, email, normalized_email, status::text,
+      token_hash, invited_by::text, coalesce(accepted_by::text, '<null>'),
+      expires_at::text, coalesce(accepted_at::text, '<null>'),
+      created_at::text, updated_at::text
+    )
+    FROM company.company_invitations
+
+    UNION ALL
+    SELECT 'media-operation', concat_ws('|',
+      id::text, kind::text, company_id::text, file_id::text,
+      asset_type::text, reference_type, reference_id,
+      coalesce(local_media_id::text, '<null>'),
+      coalesce(media_reference_id::text, '<null>'), attempt_count::text,
+      next_attempt_at::text, coalesce(lease_token::text, '<null>'),
+      coalesce(lease_expires_at::text, '<null>'),
+      coalesce(last_error_code, '<null>'), created_at::text, updated_at::text
+    )
+    FROM company.company_media_operations
+
+    UNION ALL
+    SELECT 'upload-intent', concat_ws('|',
+      file_id::text, company_id::text, requested_by::text, asset_type::text,
+      expires_at::text, cleanup_at::text,
+      coalesce(confirmed_at::text, '<null>'),
+      coalesce(canonical_url, '<null>'), created_at::text, updated_at::text
+    )
+    FROM company.company_media_upload_intents
+
+    UNION ALL
+    SELECT 'audit', concat_ws('|',
+      id::text, company_id::text, action::text, actor_id::text,
+      coalesce(target_user_id::text, '<null>'),
+      resulting_aggregate_version::text,
+      coalesce(from_verification_status::text, '<null>'),
+      coalesce(to_verification_status::text, '<null>'),
+      coalesce(reason, '<null>'), created_at::text
+    )
+    FROM company.company_audit_logs
+  )
+  SELECT md5(coalesce(string_agg(kind || ':' || value, E'\n' ORDER BY kind, value), ''))
+  FROM r
+$function$;
+
+CREATE TEMP TABLE migration_verification_audit_snapshot
+ON COMMIT PRESERVE ROWS
+AS
+SELECT
+  pg_temp.company_audit_fixture_fingerprint() AS fingerprint,
+  (SELECT count(*) FROM company.companies) AS company_count,
+  (SELECT count(*) FROM company.company_members) AS member_count,
+  (SELECT count(*) FROM company.company_audit_logs) AS audit_count;
+
+DO $$
+BEGIN
+  IF (SELECT company_count FROM migration_verification_audit_snapshot) <> 2
+     OR (SELECT member_count FROM migration_verification_audit_snapshot) <> 3
+     OR (SELECT audit_count FROM migration_verification_audit_snapshot) <> 0 THEN
+    RAISE EXCEPTION 'audit verification requires the untouched legacy fixture';
+  END IF;
+END $$;
+
+BEGIN;
+
+UPDATE company.companies
+SET verified_status = 'VERIFIED', reject_reason = NULL,
+    aggregate_version = aggregate_version + 1
+WHERE id = '22222222-2222-4222-8222-222222222222'
+  AND verified_status = 'PENDING' AND aggregate_version = 0;
+
+INSERT INTO company.company_audit_logs (
+  id, company_id, action, actor_id, target_user_id,
+  resulting_aggregate_version, from_verification_status,
+  to_verification_status, reason
+) VALUES (
+  '88888888-8888-4888-8888-888888888801',
+  '22222222-2222-4222-8222-222222222222',
+  'VERIFICATION_APPROVED',
+  '88888888-8888-4888-8888-888888888901',
+  NULL, 1, 'PENDING', 'VERIFIED', NULL
+);
+
+-- A recruiter resubmission/profile reset is intentionally outside the audit scope.
+UPDATE company.companies
+SET verified_status = 'PENDING', reject_reason = NULL,
+    aggregate_version = aggregate_version + 1
+WHERE id = '11111111-1111-4111-8111-111111111111'
+  AND verified_status = 'VERIFIED' AND aggregate_version = 0;
+
+UPDATE company.companies
+SET verified_status = 'REJECTED', reject_reason = 'Missing legal evidence',
+    aggregate_version = aggregate_version + 1
+WHERE id = '11111111-1111-4111-8111-111111111111'
+  AND verified_status = 'PENDING' AND aggregate_version = 1;
+
+INSERT INTO company.company_audit_logs (
+  id, company_id, action, actor_id, target_user_id,
+  resulting_aggregate_version, from_verification_status,
+  to_verification_status, reason
+) VALUES (
+  '88888888-8888-4888-8888-888888888802',
+  '11111111-1111-4111-8111-111111111111',
+  'VERIFICATION_REJECTED',
+  '88888888-8888-4888-8888-888888888902',
+  NULL, 2, 'PENDING', 'REJECTED', 'Missing legal evidence'
+);
+
+UPDATE company.company_members
+SET role = 'MEMBER'
+WHERE company_id = '11111111-1111-4111-8111-111111111111'
+  AND user_id = '66666666-6666-4666-8666-666666666661'
+  AND role = 'OWNER';
+UPDATE company.company_members
+SET role = 'OWNER'
+WHERE company_id = '11111111-1111-4111-8111-111111111111'
+  AND user_id = '66666666-6666-4666-8666-666666666662'
+  AND role = 'MEMBER';
+UPDATE company.companies
+SET aggregate_version = aggregate_version + 1
+WHERE id = '11111111-1111-4111-8111-111111111111'
+  AND aggregate_version = 2;
+
+INSERT INTO company.company_audit_logs (
+  id, company_id, action, actor_id, target_user_id,
+  resulting_aggregate_version, from_verification_status,
+  to_verification_status, reason
+) VALUES (
+  '88888888-8888-4888-8888-888888888803',
+  '11111111-1111-4111-8111-111111111111',
+  'OWNERSHIP_TRANSFERRED',
+  '66666666-6666-4666-8666-666666666661',
+  '66666666-6666-4666-8666-666666666662',
+  3, NULL, NULL, NULL
+);
+
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM company.company_audit_logs) <> 3
+     OR NOT EXISTS (
+       SELECT 1 FROM company.company_audit_logs
+       WHERE action = 'VERIFICATION_APPROVED'
+         AND company_id = '22222222-2222-4222-8222-222222222222'
+         AND actor_id = '88888888-8888-4888-8888-888888888901'
+         AND resulting_aggregate_version = 1
+     )
+     OR NOT EXISTS (
+       SELECT 1 FROM company.company_audit_logs
+       WHERE action = 'VERIFICATION_REJECTED'
+         AND company_id = '11111111-1111-4111-8111-111111111111'
+         AND actor_id = '88888888-8888-4888-8888-888888888902'
+         AND reason = 'Missing legal evidence'
+         AND resulting_aggregate_version = 2
+     )
+     OR NOT EXISTS (
+       SELECT 1 FROM company.company_audit_logs
+       WHERE action = 'OWNERSHIP_TRANSFERRED'
+         AND actor_id = '66666666-6666-4666-8666-666666666661'
+         AND target_user_id = '66666666-6666-4666-8666-666666666662'
+         AND resulting_aggregate_version = 3
+     ) THEN
+    RAISE EXCEPTION 'valid audit row contract failed';
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO company.company_audit_logs (
+      id, company_id, action, actor_id, resulting_aggregate_version,
+      from_verification_status, to_verification_status, reason
+    ) VALUES (
+      '88888888-8888-4888-8888-888888888811',
+      '22222222-2222-4222-8222-222222222222',
+      'VERIFICATION_APPROVED', '88888888-8888-4888-8888-888888888901',
+      11, 'PENDING', 'VERIFIED', 'reason-not-allowed'
+    );
+    RAISE EXCEPTION 'approval with a reason unexpectedly succeeded';
+  EXCEPTION WHEN SQLSTATE '23514' THEN NULL;
+  END;
+
+  BEGIN
+    INSERT INTO company.company_audit_logs (
+      id, company_id, action, actor_id, resulting_aggregate_version,
+      from_verification_status, to_verification_status, reason
+    ) VALUES (
+      '88888888-8888-4888-8888-888888888812',
+      '22222222-2222-4222-8222-222222222222',
+      'VERIFICATION_REJECTED', '88888888-8888-4888-8888-888888888901',
+      12, 'PENDING', 'REJECTED', E' \t\n\r '
+    );
+    RAISE EXCEPTION 'rejection with a blank reason unexpectedly succeeded';
+  EXCEPTION WHEN SQLSTATE '23514' THEN NULL;
+  END;
+
+  BEGIN
+    INSERT INTO company.company_audit_logs (
+      id, company_id, action, actor_id, target_user_id,
+      resulting_aggregate_version
+    ) VALUES (
+      '88888888-8888-4888-8888-888888888813',
+      '22222222-2222-4222-8222-222222222222',
+      'OWNERSHIP_TRANSFERRED',
+      '88888888-8888-4888-8888-888888888903',
+      '88888888-8888-4888-8888-888888888903', 13
+    );
+    RAISE EXCEPTION 'self ownership transfer unexpectedly succeeded';
+  EXCEPTION WHEN SQLSTATE '23514' THEN NULL;
+  END;
+
+  BEGIN
+    INSERT INTO company.company_audit_logs (
+      id, company_id, action, actor_id, target_user_id,
+      resulting_aggregate_version, from_verification_status
+    ) VALUES (
+      '88888888-8888-4888-8888-888888888814',
+      '22222222-2222-4222-8222-222222222222',
+      'OWNERSHIP_TRANSFERRED',
+      '88888888-8888-4888-8888-888888888903',
+      '88888888-8888-4888-8888-888888888904', 14, 'PENDING'
+    );
+    RAISE EXCEPTION 'ownership transfer with verification state unexpectedly succeeded';
+  EXCEPTION WHEN SQLSTATE '23514' THEN NULL;
+  END;
+
+  BEGIN
+    INSERT INTO company.company_audit_logs (
+      id, company_id, action, actor_id, resulting_aggregate_version,
+      from_verification_status, to_verification_status
+    ) VALUES (
+      '88888888-8888-4888-8888-888888888815',
+      '22222222-2222-4222-8222-222222222222',
+      'VERIFICATION_APPROVED', '88888888-8888-4888-8888-888888888901',
+      0, 'PENDING', 'VERIFIED'
+    );
+    RAISE EXCEPTION 'non-positive audit version unexpectedly succeeded';
+  EXCEPTION WHEN SQLSTATE '23514' THEN NULL;
+  END;
+
+  BEGIN
+    INSERT INTO company.company_audit_logs (
+      id, company_id, action, actor_id, resulting_aggregate_version,
+      from_verification_status, to_verification_status
+    ) VALUES (
+      '88888888-8888-4888-8888-888888888816',
+      '99999999-9999-4999-8999-999999999999',
+      'VERIFICATION_APPROVED', '88888888-8888-4888-8888-888888888901',
+      16, 'PENDING', 'VERIFIED'
+    );
+    RAISE EXCEPTION 'orphan audit row unexpectedly succeeded';
+  EXCEPTION WHEN SQLSTATE '23503' THEN NULL;
+  END;
+
+  BEGIN
+    INSERT INTO company.company_audit_logs (
+      id, company_id, action, actor_id, resulting_aggregate_version,
+      from_verification_status, to_verification_status
+    ) VALUES (
+      '88888888-8888-4888-8888-888888888817',
+      '22222222-2222-4222-8222-222222222222',
+      'VERIFICATION_APPROVED', '88888888-8888-4888-8888-888888888901',
+      1, 'PENDING', 'VERIFIED'
+    );
+    RAISE EXCEPTION 'duplicate company aggregate version unexpectedly succeeded';
+  EXCEPTION WHEN SQLSTATE '23505' THEN NULL;
+  END;
+END $$;
+
+DO $$
+BEGIN
+  BEGIN
+    UPDATE company.company_audit_logs
+    SET reason = NULL
+    WHERE id = '88888888-8888-4888-8888-888888888802';
+    RAISE EXCEPTION 'audit UPDATE unexpectedly succeeded';
+  EXCEPTION WHEN SQLSTATE '55000' THEN NULL;
+  END;
+
+  BEGIN
+    DELETE FROM company.company_audit_logs
+    WHERE id = '88888888-8888-4888-8888-888888888801';
+    RAISE EXCEPTION 'audit DELETE unexpectedly succeeded';
+  EXCEPTION WHEN SQLSTATE '55000' THEN NULL;
+  END;
+
+  BEGIN
+    TRUNCATE TABLE company.company_audit_logs;
+    RAISE EXCEPTION 'audit TRUNCATE unexpectedly succeeded';
+  EXCEPTION WHEN SQLSTATE '55000' THEN NULL;
+  END;
+
+  IF (SELECT count(*) FROM company.company_audit_logs) <> 3 THEN
+    RAISE EXCEPTION 'append-only negative tests changed audit rows';
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  BEGIN
+    UPDATE company.companies
+    SET verified_status = 'PENDING', aggregate_version = 2
+    WHERE id = '22222222-2222-4222-8222-222222222222';
+    INSERT INTO company.company_audit_logs (
+      id, company_id, action, actor_id, resulting_aggregate_version,
+      from_verification_status, to_verification_status
+    ) VALUES (
+      '88888888-8888-4888-8888-888888888821',
+      '22222222-2222-4222-8222-222222222222',
+      'VERIFICATION_APPROVED', '88888888-8888-4888-8888-888888888901',
+      0, 'PENDING', 'VERIFIED'
+    );
+    RAISE EXCEPTION 'review/audit rollback probe unexpectedly succeeded';
+  EXCEPTION WHEN SQLSTATE '23514' THEN NULL;
+  END;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM company.companies
+    WHERE id = '22222222-2222-4222-8222-222222222222'
+      AND verified_status = 'VERIFIED' AND aggregate_version = 1
+  ) THEN
+    RAISE EXCEPTION 'audit rejection did not roll back review state';
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  BEGIN
+    UPDATE company.company_members SET role = 'MEMBER'
+    WHERE user_id = '66666666-6666-4666-8666-666666666662';
+    UPDATE company.company_members SET role = 'OWNER'
+    WHERE user_id = '66666666-6666-4666-8666-666666666661';
+    UPDATE company.companies SET aggregate_version = 4
+    WHERE id = '11111111-1111-4111-8111-111111111111';
+    INSERT INTO company.company_audit_logs (
+      id, company_id, action, actor_id, target_user_id,
+      resulting_aggregate_version
+    ) VALUES (
+      '88888888-8888-4888-8888-888888888822',
+      '11111111-1111-4111-8111-111111111111',
+      'OWNERSHIP_TRANSFERRED',
+      '66666666-6666-4666-8666-666666666662',
+      '66666666-6666-4666-8666-666666666661', 0
+    );
+    RAISE EXCEPTION 'ownership/audit rollback probe unexpectedly succeeded';
+  EXCEPTION WHEN SQLSTATE '23514' THEN NULL;
+  END;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM company.company_members
+    WHERE user_id = '66666666-6666-4666-8666-666666666662' AND role = 'OWNER'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM company.company_members
+    WHERE user_id = '66666666-6666-4666-8666-666666666661' AND role = 'MEMBER'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM company.companies
+    WHERE id = '11111111-1111-4111-8111-111111111111'
+      AND aggregate_version = 3
+  ) THEN
+    RAISE EXCEPTION 'audit rejection did not roll back ownership state';
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  BEGIN
+    UPDATE company.company_members SET role = 'OWNER'
+    WHERE user_id = '66666666-6666-4666-8666-666666666661';
+    RAISE EXCEPTION 'second OWNER unexpectedly succeeded';
+  EXCEPTION WHEN SQLSTATE '23505' THEN NULL;
+  END;
+
+  IF (SELECT count(*) FROM company.company_members
+      WHERE company_id = '11111111-1111-4111-8111-111111111111'
+        AND role = 'OWNER') <> 1 THEN
+    RAISE EXCEPTION 'partial unique OWNER negative test changed ownership';
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  BEGIN
+    DELETE FROM company.companies
+    WHERE id = '22222222-2222-4222-8222-222222222222';
+    RAISE EXCEPTION 'company with audit history unexpectedly deleted';
+  EXCEPTION WHEN SQLSTATE '23503' THEN NULL;
+  END;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM company.companies
+    WHERE id = '22222222-2222-4222-8222-222222222222'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM company.company_audit_logs
+    WHERE company_id = '22222222-2222-4222-8222-222222222222'
+  ) THEN
+    RAISE EXCEPTION 'RESTRICT negative test changed company/audit history';
+  END IF;
+END $$;
+
+ROLLBACK;
+
+DO $$
+DECLARE
+  snapshot migration_verification_audit_snapshot%ROWTYPE;
+BEGIN
+  SELECT * INTO STRICT snapshot FROM migration_verification_audit_snapshot;
+  IF pg_temp.company_audit_fixture_fingerprint() IS DISTINCT FROM snapshot.fingerprint
+     OR (SELECT count(*) FROM company.companies) <> snapshot.company_count
+     OR (SELECT count(*) FROM company.company_members) <> snapshot.member_count
+     OR (SELECT count(*) FROM company.company_audit_logs) <> snapshot.audit_count
+     OR EXISTS (SELECT 1 FROM company.company_audit_logs)
+     OR NOT EXISTS (
+       SELECT 1 FROM company.companies
+       WHERE id = '11111111-1111-4111-8111-111111111111'
+         AND verified_status = 'VERIFIED' AND aggregate_version = 0
+     )
+     OR NOT EXISTS (
+       SELECT 1 FROM company.companies
+       WHERE id = '22222222-2222-4222-8222-222222222222'
+         AND verified_status = 'PENDING' AND aggregate_version = 0
+     )
+     OR NOT EXISTS (
+       SELECT 1 FROM company.company_members
+       WHERE user_id = '66666666-6666-4666-8666-666666666661' AND role = 'OWNER'
+     )
+     OR NOT EXISTS (
+       SELECT 1 FROM company.company_members
+       WHERE user_id = '66666666-6666-4666-8666-666666666662' AND role = 'MEMBER'
+     ) THEN
+    RAISE EXCEPTION 'outer rollback changed the fixture or audit ledger';
+  END IF;
+END $$;
+
+DROP TABLE migration_verification_audit_snapshot;
+DROP FUNCTION pg_temp.company_audit_fixture_fingerprint();

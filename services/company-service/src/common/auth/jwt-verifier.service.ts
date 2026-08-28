@@ -2,7 +2,7 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService, JwtVerifyOptions } from '@nestjs/jwt';
 import { isUUID } from 'class-validator';
-import { createPublicKey } from 'crypto';
+import { createHash, createPublicKey, KeyObject } from 'crypto';
 import { readFileSync } from 'fs';
 import { ApiException } from '../errors/api-exception';
 import { AuthUser } from './auth-user.interface';
@@ -13,6 +13,7 @@ interface AccessTokenClaims extends Record<string, unknown> {
   role?: string;
   iat?: number;
   exp?: number;
+  jti?: string;
 }
 
 interface Jwk {
@@ -30,12 +31,18 @@ interface JwksResponse {
 
 interface JwtHeader {
   alg?: unknown;
+  typ?: unknown;
   kid?: unknown;
+}
+
+interface StaticVerificationKey {
+  kid: string;
+  pem: string;
 }
 
 @Injectable()
 export class JwtVerifierService {
-  private staticPublicKey?: string;
+  private staticKey?: StaticVerificationKey;
   private readonly jwksKeys = new Map<string, string>();
   private jwksExpiresAt = 0;
 
@@ -45,37 +52,48 @@ export class JwtVerifierService {
   ) {}
 
   async verify(token: string): Promise<AuthUser> {
-    const options: JwtVerifyOptions = {
-      secret: await this.getVerificationKey(token),
-      algorithms: ['RS256'],
-    };
     const issuer = this.config.get<string>('JWT_ISSUER')?.trim();
     const audience = this.config.get<string>('JWT_AUDIENCE')?.trim();
 
-    if (issuer) {
-      options.issuer = issuer;
+    if (!issuer || !audience) {
+      throw new ApiException(
+        'AUTH_CONFIGURATION_ERROR',
+        'JWT issuer and audience must be configured',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
-    if (audience) {
-      options.audience = audience;
-    }
+
+    const header = this.readHeader(token);
+    const options: JwtVerifyOptions = {
+      secret: await this.getVerificationKey(header),
+      algorithms: ['RS256'],
+      issuer,
+      audience,
+    };
 
     const claims = await this.jwtService.verifyAsync<AccessTokenClaims>(
       token,
       options,
     );
-    const role = claims.role?.toUpperCase() as SystemRole | undefined;
+    const role = claims.role as SystemRole | undefined;
+    const now = Math.floor(Date.now() / 1000);
 
     if (
       !claims.sub ||
-      !isUUID(claims.sub) ||
+      !isUUID(claims.sub, '4') ||
       !role ||
       !Object.values(SystemRole).includes(role) ||
       typeof claims.iat !== 'number' ||
       typeof claims.exp !== 'number' ||
-      claims.exp <= claims.iat
+      !Number.isInteger(claims.iat) ||
+      !Number.isInteger(claims.exp) ||
+      claims.iat > now + 60 ||
+      claims.exp <= claims.iat ||
+      !claims.jti ||
+      !isUUID(claims.jti, '4')
     ) {
       throw new Error(
-        'Access token does not contain valid sub, role, iat and exp claims',
+        'Access token claims do not match the canonical contract',
       );
     }
 
@@ -86,20 +104,24 @@ export class JwtVerifierService {
     };
   }
 
-  private async getVerificationKey(token: string): Promise<string> {
+  private async getVerificationKey(header: JwtHeader): Promise<string> {
+    const keyId = header.kid as string;
     const jwksUri = this.config.get<string>('JWT_JWKS_URI')?.trim();
     if (jwksUri) {
-      return this.getJwksPublicKey(token, jwksUri);
+      return this.getJwksPublicKey(keyId, jwksUri);
     }
 
-    return this.getStaticPublicKey();
+    const staticKey = this.getStaticPublicKey();
+    if (staticKey.kid !== keyId) {
+      throw new Error('JWT kid does not match the configured public key');
+    }
+    return staticKey.pem;
   }
 
   private async getJwksPublicKey(
-    token: string,
+    keyId: string,
     jwksUri: string,
   ): Promise<string> {
-    const keyId = this.readKeyId(token);
     const cachedKey = this.jwksKeys.get(keyId);
 
     if (cachedKey && Date.now() < this.jwksExpiresAt) {
@@ -110,6 +132,7 @@ export class JwtVerifierService {
     try {
       response = await fetch(jwksUri, {
         headers: { accept: 'application/json' },
+        redirect: 'error',
         signal: AbortSignal.timeout(3000),
       });
     } catch {
@@ -161,8 +184,8 @@ export class JwtVerifierService {
       if (
         !jwk.kid ||
         jwk.kty !== 'RSA' ||
-        (jwk.use && jwk.use !== 'sig') ||
-        (jwk.alg && jwk.alg !== 'RS256') ||
+        jwk.use !== 'sig' ||
+        jwk.alg !== 'RS256' ||
         !jwk.n ||
         !jwk.e
       ) {
@@ -174,10 +197,10 @@ export class JwtVerifierService {
           key: jwk,
           format: 'jwk',
         } as never);
-        const pem = keyObject
-          .export({ type: 'spki', format: 'pem' })
-          .toString();
-        this.jwksKeys.set(jwk.kid, pem);
+        const materialized = this.materializeKeyObject(keyObject);
+        if (materialized.kid === jwk.kid) {
+          this.jwksKeys.set(jwk.kid, materialized.pem);
+        }
       } catch {
         continue;
       }
@@ -200,26 +223,31 @@ export class JwtVerifierService {
     return publicKey;
   }
 
-  private readKeyId(token: string): string {
-    const encodedHeader = token.split('.')[0];
-    if (!encodedHeader) {
-      throw new Error('JWT header is missing');
+  private readHeader(token: string): JwtHeader {
+    const segments = token.split('.');
+    if (segments.length !== 3 || !segments[0]) {
+      throw new Error('JWT compact serialization is invalid');
     }
 
     let header: JwtHeader;
     try {
       header = JSON.parse(
-        Buffer.from(encodedHeader, 'base64url').toString('utf8'),
+        Buffer.from(segments[0], 'base64url').toString('utf8'),
       ) as JwtHeader;
     } catch {
       throw new Error('JWT header is invalid');
     }
 
-    if (header.alg !== 'RS256' || typeof header.kid !== 'string' || !header.kid) {
-      throw new Error('JWT header must contain RS256 alg and kid');
+    if (
+      header.alg !== 'RS256' ||
+      header.typ !== 'JWT' ||
+      typeof header.kid !== 'string' ||
+      !header.kid
+    ) {
+      throw new Error('JWT header must contain alg=RS256, typ=JWT and kid');
     }
 
-    return header.kid;
+    return header;
   }
 
   private getJwksCacheTtl(): number {
@@ -231,9 +259,9 @@ export class JwtVerifierService {
       : 300_000;
   }
 
-  private getStaticPublicKey(): string {
-    if (this.staticPublicKey) {
-      return this.staticPublicKey;
+  private getStaticPublicKey(): StaticVerificationKey {
+    if (this.staticKey) {
+      return this.staticKey;
     }
 
     const inlineKey = this.config
@@ -241,13 +269,8 @@ export class JwtVerifierService {
       ?.replace(/\\n/g, '\n')
       .trim();
 
-    if (inlineKey) {
-      this.staticPublicKey = inlineKey;
-      return this.staticPublicKey;
-    }
-
     const keyPath = this.config.get<string>('JWT_PUBLIC_KEY_PATH')?.trim();
-    if (!keyPath) {
+    if (!inlineKey && !keyPath) {
       throw new ApiException(
         'AUTH_CONFIGURATION_ERROR',
         'JWT JWKS URI or public key must be configured',
@@ -255,8 +278,9 @@ export class JwtVerifierService {
       );
     }
 
+    let pem: string;
     try {
-      this.staticPublicKey = readFileSync(keyPath, 'utf8').trim();
+      pem = inlineKey || readFileSync(keyPath as string, 'utf8').trim();
     } catch {
       throw new ApiException(
         'AUTH_CONFIGURATION_ERROR',
@@ -265,7 +289,7 @@ export class JwtVerifierService {
       );
     }
 
-    if (!this.staticPublicKey) {
+    if (!pem) {
       throw new ApiException(
         'AUTH_CONFIGURATION_ERROR',
         'JWT public key is empty',
@@ -273,6 +297,43 @@ export class JwtVerifierService {
       );
     }
 
-    return this.staticPublicKey;
+    try {
+      this.staticKey = this.materializeKeyObject(createPublicKey(pem));
+      return this.staticKey;
+    } catch {
+      throw new ApiException(
+        'AUTH_KEY_INVALID',
+        'Configured JWT public key is invalid',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+  }
+
+  private materializeKeyObject(key: KeyObject): StaticVerificationKey {
+    if (
+      key.asymmetricKeyType !== 'rsa' ||
+      (key.asymmetricKeyDetails?.modulusLength ?? 0) < 2048
+    ) {
+      throw new Error('JWT public key must be RSA with at least 2048 bits');
+    }
+
+    const jwk = key.export({ format: 'jwk' });
+    if (!jwk.n || !jwk.e || jwk.kty !== 'RSA') {
+      throw new Error('JWT RSA public key cannot be exported');
+    }
+    const thumbprint = JSON.stringify({
+      e: jwk.e,
+      kty: 'RSA',
+      n: jwk.n,
+    });
+    return {
+      kid: createHash('sha256')
+        .update(thumbprint)
+        .digest('base64url'),
+      pem: key
+        .export({ type: 'spki', format: 'pem' })
+        .toString()
+        .trim(),
+    };
   }
 }
