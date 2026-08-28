@@ -53,7 +53,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** hoàn thiện hồ sơ; upload CV PDF; tạo CV online; đặt CV mặc định; xem/xóa CV; phục vụ CV cho Application Service; phát `cv-events`.
 - **Chức năng chính:** CRUD hồ sơ cá nhân, kỹ năng, học vấn, kinh nghiệm, chứng chỉ, dự án; quản lý nhiều CV; soft delete CV đã được sử dụng; Candidate API và versioned internal verify/list/detail/download contract cho Application.
 - **Phụ thuộc:** Auth Service và File/Media Service; AI và Application phụ thuộc dữ liệu của service này.
-- **Trạng thái:** Persistence, Candidate Profile CRUD/completion, tích hợp Media bằng confirmed `fileId` và canonical internal verify/list/detail/download cho Application đã merge qua PR #39. Rename, atomic default switch, soft delete/deterministic default reassignment và Application usage lookup/`firstUsedAt` mirror đã merge qua PR #40. Backend CV Builder với JSON version 1, immutable revision lineage và Media `fileId` đã hoàn thành/verify ở task 2.21; hard-delete fence, frontend Builder/PDF renderer và event publisher còn pending.
+- **Trạng thái:** Persistence, Candidate Profile CRUD/completion, tích hợp Media bằng confirmed `fileId` và canonical internal verify/list/detail/download cho Application đã merge qua PR #39. Rename, atomic default switch, soft delete/deterministic default reassignment và Application usage lookup/`firstUsedAt` mirror đã merge qua PR #40. Backend CV Builder với JSON version 1, immutable revision lineage, retained snapshot quota và Media `fileId` đã merge qua PR #41; hard-delete fence, frontend Builder/PDF renderer và event publisher còn pending.
 
 ## T03 — File/Media Service
 
@@ -473,7 +473,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Docker PostgreSQL 16 sạch đạt **29/29 unit + 53/53 integration test**. Coverage mới gồm validation/CAS/no-op, rename/default/delete concurrency, deterministic reassignment, last-CV/repeated delete, used/unused đều soft-delete, `firstUsedAt` mirror, usage failure không mutation, historical detail/download sau delete, direct-SQL exact-one-default/hard-delete guards và migration race với legacy writer đang in-flight. `prisma migrate deploy` lần hai không còn migration pending.
 - Đây là service-level implementation/test đã merge qua PR #40; P17 deployed cross-service REST/E2E chưa được đánh dấu hoàn tất. Backend CV Builder/revision được tiếp tục ở task 2.21; transactional `cv-events` và hard-delete deletion fence vẫn là backlog riêng.
 
-## 2.21 Profile Online CV Builder & Immutable Revisions — đã hoàn thành và verify
+## 2.21 Profile Online CV Builder & Immutable Revisions — đã merge vào `develop` qua PR #41
 
 - Bổ sung Candidate API `POST /cvs/online`, `GET /cvs/:id/builder` và `POST /cvs/:id/revisions`, kèm alias singular `/cv`. Create nhận `title`, `templateId`, `contentSchemaVersion=1`, object `contentJson` và confirmed private PDF `fileId`; revision nhận full snapshot mới, `expectedAggregateVersion` và optional `makeDefault`.
 - Luồng có thật là frontend render PDF rồi upload/confirm trực tiếp qua Media trước khi gọi Profile. Profile verify exact owner/type/ACTIVE/private delivery và bind `PROFILE_CV`; không nhận URL/reference/default do client tự khai. Media hiện không có renderer và không chứng minh PDF khớp ngữ nghĩa với JSON, nên task backend này không tuyên bố UI/template/browser renderer hoặc live Cloudinary preset đã hoàn tất.
@@ -585,7 +585,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [x] Đăng ký/list/detail/download CV upload, giới hạn năm CV dưới Profile lock và tự đặt CV đầu tiên làm mặc định.
 - [x] Hoàn thiện và merge rename, atomic default switch, soft delete, deterministic default reassignment, CV compare-and-set và Application usage lookup/`firstUsedAt` mirror qua PR #40.
 - [ ] Thiết kế deletion fence/reservation atomic với Application submission trước khi mở hard delete; không dùng một kết quả lookup `used=false` rời rạc để xóa vật lý.
-- [x] Implement backend CV Builder và dữ liệu JSON version 1: publish Media-backed Online snapshot, owner-only reopen, immutable linear revision, CAS/default handover, retry/race compensation và PostgreSQL migration/test. UI/template/PDF renderer vẫn thuộc P16/frontend.
+- [x] Implement và merge backend CV Builder qua PR #41: publish Media-backed Online snapshot, owner-only reopen, immutable linear revision, CAS/default handover, retained quota, retry/race compensation và PostgreSQL migration/test. UI/template/PDF renderer vẫn thuộc P16/frontend.
 - [x] Triển khai và merge canonical Profile–Application CV contract qua PR #39: dual-auth verify cho submission, service-auth list/detail/download, Application recruiter APIs, durable V6 usage ledger và Profile-only usage lookup; không đồng nghĩa P17 E2E đã hoàn tất.
 - [ ] Publish `cv-events` idempotent cho AI.
 - [x] Bổ sung strict JWT/role guard, validation, Swagger và PostgreSQL/concurrency/security test cho Candidate CRUD, avatar/CV upload, internal CV authorization, lifecycle và Builder revisions; full Profile task 2.21 đạt 33 unit + 62 integration test.
