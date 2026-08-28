@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import unicodedata
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.job_events import JobType
+from app.recommendation import JobRecommendationReason
 
 
 class StrictModel(BaseModel):
@@ -39,6 +44,67 @@ class MatchData(StrictModel):
 
 class MatchResponse(StrictModel):
     data: MatchData
+    meta: None = None
+
+
+class RecommendJobsRequest(StrictModel):
+    cv_id: UUID
+    limit: int = Field(default=10, ge=1, le=50, strict=True)
+    cursor: str | None = Field(default=None, min_length=1, max_length=1024)
+    location: str | None = Field(default=None, min_length=1, max_length=255)
+    salary_min: Decimal | None = Field(
+        default=None,
+        ge=Decimal("0"),
+        le=Decimal("9999999999999.99"),
+        decimal_places=2,
+    )
+    job_type: JobType | None = None
+
+    @field_validator("location", mode="before")
+    @classmethod
+    def normalize_location(cls, value: object) -> object:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            return value
+        normalized = unicodedata.normalize("NFKC", value)
+        if any(
+            ord(character) < 32 or 127 <= ord(character) <= 159
+            for character in normalized
+        ):
+            raise ValueError("location must not contain control characters")
+        normalized = " ".join(normalized.split())
+        if not normalized:
+            raise ValueError("location must not be blank")
+        if len(normalized) > 255:
+            raise ValueError("location must contain at most 255 normalized characters")
+        if any(character in normalized for character in ("%", "_", "\\")):
+            raise ValueError("location must not contain wildcard characters")
+        return normalized
+
+
+class JobRecommendationItem(StrictModel):
+    job_id: UUID
+    score: float = Field(ge=0.0, le=1.0)
+
+
+class RecommendJobsData(StrictModel):
+    cv_id: UUID
+    items: list[JobRecommendationItem]
+    next_cursor: str | None = Field(default=None, max_length=1024)
+    reason: JobRecommendationReason | None = None
+
+    @model_validator(mode="after")
+    def require_items_or_reason(self) -> RecommendJobsData:
+        if bool(self.items) == (self.reason is not None):
+            raise ValueError("exactly one of items or reason must be provided")
+        if not self.items and self.next_cursor is not None:
+            raise ValueError("an empty result cannot have a next cursor")
+        return self
+
+
+class RecommendJobsResponse(StrictModel):
+    data: RecommendJobsData
     meta: None = None
 
 

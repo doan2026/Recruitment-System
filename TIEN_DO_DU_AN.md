@@ -2,7 +2,7 @@
 
 > Ngày cập nhật: 28/08/2026
 > Nhánh đối chiếu chính: `develop`
-> Pull Request lần cập nhật: PR #44 từ `feature/ai/historical-embedding-baseline` vào `develop`
+> Pull Request lần cập nhật: PR #45 từ `feature/ai/job-recommendations-v1` vào `develop`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -19,17 +19,17 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 | Nhóm task | Người phụ trách | Trạng thái hiện tại |
 | --- | --- | --- |
 | Auth Service | Người 1 | ✅ Core Auth đã hoàn thành gồm đăng ký/OTP, password login, Google OIDC, JWT/JWKS, refresh rotation, logout, reset password, `/auth/me` và Admin account control; account-link Google chỉ còn là hạng mục tùy chọn nếu sản phẩm yêu cầu |
-| User/Profile Service | Người 1 | 🟡 Persistence, Candidate CRUD/completion, Media, Application contract, lifecycle, backend Builder, deletion fence và transactional `cv-events` đã hoàn thành; controlled historical CV baseline đã hoàn thành trên feature branch; frontend Builder/PDF renderer còn pending |
+| User/Profile Service | Người 1 | 🟡 Persistence, Candidate CRUD/completion, Media, Application contract, lifecycle, backend Builder, deletion fence, transactional `cv-events` và controlled historical CV baseline đã merge; baseline chưa execute trên dữ liệu thật, frontend Builder/PDF renderer còn pending |
 | File/Media Service | Người 1 | 🟡 Core signed upload/confirm, Profile consumer, AI private-download consumer contract, durable cleanup/reconciliation và guarded six-policy Cloudinary smoke runner đã hoàn thành; live staging execution, Offer letter, các consumer khác và production hardening còn pending |
 | Admin & Statistics Service | Người 1 | ⏳ Scaffold |
 | Company Service | Người 2 | ✅ Nghiệp vụ chính đã merge |
-| Job & Search Service | Người 2 | 🟡 CRUD/search, transactional `job-events`, controlled historical Job baseline và Redis/BullMQ/Elasticsearch integration đã hoàn thành; AI recommendation còn thiếu |
+| Job & Search Service | Người 2 | 🟡 CRUD/search, transactional `job-events`, controlled historical Job baseline, Redis/BullMQ/Elasticsearch integration và Candidate job recommendation v1 đã hoàn thành; fallback theo lĩnh vực quan tâm và load test còn thiếu |
 | Application Service | Người 2 | 🟡 Các luồng từ Submission đến AI Match phía consumer, canonical Profile CV contract và durable usage ledger đã merge; Flyway V7 permanent deletion gate, internal acquire endpoint và submit/fence serialization đã merge qua PR #42; filter kỹ năng còn thiếu |
-| AI Service | Người 2 | 🟡 Provider `/match`, consumer `job-events` và strict `cv-events` private-PDF embedding worker đã hoàn thành; source-side baseline tooling đã sẵn sàng nhưng chưa chạy trên môi trường dữ liệu thật; recommendation/chat còn thiếu |
+| AI Service | Người 2 | 🟡 Provider `/match`, consumer `job-events`, strict `cv-events` private-PDF embedding worker và internal `/recommend/jobs` đã hoàn thành; source-side baseline chưa chạy trên dữ liệu thật, còn candidate recommendation, load/rate-limit và chatbot |
 | Interview & Video Call Service | Người 3 | ⏳ Scaffold |
 | Chat Service | Người 3 | ⏳ Prototype realtime |
 | Notification Service | Người 3 | ⏳ Scaffold |
-| Hạ tầng dùng chung | Người 3 | 🟡 Docker Compose, Nginx, database và Kafka base đã có |
+| Hạ tầng dùng chung | Người 3 | 🟡 Docker Compose, Nginx, database và Kafka base đã có; public AI match/recommendation bị chặn và Job→AI/Profile dùng scoped key cùng outbound host allowlist |
 | Frontend | Phối hợp cả nhóm | ⏳ Trang khởi tạo |
 | Tích hợp, kiểm thử và vận hành | Phối hợp cả nhóm | ⏳ Chưa chạy end-to-end |
 
@@ -89,7 +89,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** recruiter tạo/sửa tin nháp; gửi duyệt; Admin duyệt/từ chối; đóng/hết hạn tin; tìm kiếm và lọc; đồng bộ Elasticsearch; phát `job-events`; lấy gợi ý từ AI.
 - **Chức năng chính:** Job CRUD, state machine `DRAFT → PENDING_APPROVAL → PUBLISHED/REJECTED → CLOSED/EXPIRED`, tìm kiếm full-text và filter, reindex, PostgreSQL fallback, endpoint kiểm tra job còn nhận hồ sơ.
 - **Phụ thuộc:** Auth, Company, Admin, Elasticsearch, Redis, Kafka và AI.
-- **Trạng thái:** CRUD, publishing, search, durable Elasticsearch indexing, availability, thống kê job active và `job-events` v1 qua transactional outbox đã hoàn thành; recommendation từ AI còn thiếu.
+- **Trạng thái:** CRUD, publishing, search, durable Elasticsearch indexing, availability, thống kê job active, `job-events` v1 qua transactional outbox và Candidate job recommendation v1 đã hoàn thành. Fallback theo lĩnh vực quan tâm và benchmark tải/search sâu còn thiếu.
 
 ## T07 — Application Service
 
@@ -106,9 +106,9 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Công nghệ theo tài liệu:** Python, FastAPI, sentence-transformers `all-MiniLM-L6-v2`, pgvector, Redis, Kafka và Anthropic Claude.
 - **Công nghệ hiện tại:** FastAPI, Psycopg 3, Alembic, PostgreSQL/pgvector, confluent-kafka và sentence-transformers CPU với model/revision bất biến; `google-genai` được tách riêng cho task chatbot.
 - **Luồng hoạt động:** consume `cv-events`; consume `job-events`; cập nhật/xóa vector; cosine similarity; recommend jobs/CVs; match CV-job; chatbot có lịch sử ngắn hạn.
-- **Chức năng chính:** `/ai/recommend/jobs`, `/ai/recommend/candidates`, `/ai/match`, `/ai/chat` và consumer idempotent.
+- **Chức năng chính:** đã có `/ai/match`, internal `/recommend/jobs` và consumer idempotent; recruiter-facing `/recommend/candidates` cùng `/chat` là planned surface chưa public.
 - **Phụ thuộc:** schema `cv-events`, `job-events`, Kafka, PostgreSQL pgvector và Redis.
-- **Trạng thái:** đã có vector store/migration, internal auth, readiness, provider `/match`, worker Job embedding và dedicated CV embedding worker dùng private Media download; recommendation và chatbot còn pending.
+- **Trạng thái:** đã có vector store/migration, internal auth/readiness, provider `/match`, worker Job embedding, dedicated CV embedding worker dùng private Media download và internal `/recommend/jobs`. Recruiter-facing `/recommend/candidates`, benchmark/rate limit và chatbot còn pending.
 
 ## T09 — Interview & Video Call Service
 
@@ -143,7 +143,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Công nghệ:** Docker Compose, Nginx, PostgreSQL/pgvector, MongoDB, Redis, Kafka KRaft, Elasticsearch và Jitsi.
 - **Luồng hoạt động:** khởi động database/broker; tạo schema và Kafka topic; build 11 service; gateway route; health check; lưu volume; dựng Jitsi.
 - **Chức năng chính:** mạng nội bộ, env/secrets, service dependency, topic initialization, persistent volumes, gateway HTTP/WebSocket.
-- **Trạng thái:** Compose, Nginx base, schema PostgreSQL, Kafka topics, Redis/MongoDB/Elasticsearch và volumes đã có; Jitsi và hardening còn thiếu.
+- **Trạng thái:** Compose, Nginx base, schema PostgreSQL, Kafka topics, Redis/MongoDB/Elasticsearch và volumes đã có. Job→AI scoped key, outbound Profile/AI host allowlist và public AI internal-route blocking/header stripping đã hoàn thành; Jitsi và production hardening còn thiếu.
 
 ## T13 — Frontend Web
 
@@ -158,7 +158,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Mục tiêu:** chứng minh các luồng xuyên service chạy thật, ổn định và có thể triển khai.
 - **Công nghệ/công cụ:** unit/integration/E2E test, Docker Compose, CI/CD, Swagger/OpenAPI, logging/metrics/tracing.
 - **Đầu ra:** test contract REST/Kafka; migration sạch; test concurrency/idempotency; security test; smoke test; tài liệu môi trường; backup/restore; monitoring.
-- **Trạng thái:** đã có unit/integration test tập trung ở Company, Job/Search, Application, AI, Profile và Media. Sau task 2.24, Profile đạt **51 unit + 70 integration test**; Media đạt **26 unit + 26 integration test** trên clean PostgreSQL Compose; Job/Search đạt **89 unit** và **3 targeted PostgreSQL baseline integration test**. AI giữ **238 unit/non-integration + 38 PostgreSQL/Kafka integration test (276 tổng)**; Application giữ **219 unit + 50 integration test**. Full Job Compose gặp một lỗi Docker bridge làm database mất kết nối sau khi các suite indexing/outbox/baseline đã qua, nên không được ghi nhận là full-suite PASS. Đây là bằng chứng service-level, không đồng nghĩa deployed E2E toàn hệ thống và P17 vẫn pending.
+- **Trạng thái:** đã có unit/integration test tập trung ở Company, Job/Search, Application, AI, Profile và Media. Profile đạt **51 unit + 70 integration test**; Media đạt **26 unit + 26 integration test** trên clean PostgreSQL Compose; Job/Search hiện có **189 unit test**, còn integration suite chứa **18 test**; trong task recommendation đã chạy **2/2 targeted PostgreSQL integration** trên database sạch, mốc baseline trước đó là **3/3 targeted PostgreSQL integration**. AI đạt **297 unit/non-integration + 50 PostgreSQL/Kafka integration test (347 tổng)**; Application giữ **219 unit + 50 integration test**. Full 18-test Job Compose chưa được ghi nhận PASS vì lần chạy toàn bộ trước đó gặp lỗi Docker bridge sau khi các suite indexing/outbox/baseline đã qua. Đây là bằng chứng service-level, không đồng nghĩa deployed E2E toàn hệ thống và P17 vẫn pending.
 
 ---
 
@@ -520,7 +520,21 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Profile Service có one-shot CLI mặc định dry-run, execute chỉ khi khớp exact confirmation `CV_EVENTS_BASELINE_V1`, bounded batch và hai pha để gọi Media ngoài transaction. Pha ghi khóa Profile rồi CV bằng Serializable transaction, recheck active/private/Media-backed/current leaf và bỏ qua CV đã có bất kỳ historical outbox event nào; event `UPSERTED` dùng đúng current version, không bump aggregate/version. Legacy URL-only CV chỉ được đếm và bỏ qua, không được đưa URL vào event/log.
 - Media Service có guarded Cloudinary live-smoke runner cho đúng sáu policy hiện hành. Runner chỉ chạy khi `CLOUDINARY_LIVE_SMOKE=1`, confirmation cloud name khớp, đủ credentials/internal keys/fixture; audit exact preset trước khi upload, chạy tuần tự signed upload → Media confirm/verify → public/private access → exact delete, và finally cleanup đúng asset/file/context đã tạo. Runner không log secret, signature, private URL hay raw provider response và không có broad folder/prefix deletion.
 - Verify: Profile **51/51 unit + 70/70 integration** với PostgreSQL 16/Kafka 3.8; Job **89/89 unit + 3/3 targeted PostgreSQL baseline integration**; Media **26/26 unit + 26/26 PostgreSQL integration**, clean migration/deploy lặp và runtime image fail-closed đúng khi chưa bật live smoke. Full Job Compose chưa được tính PASS vì Docker bridge mất kết nối giữa suite dù các suite indexing/outbox/baseline đã qua.
-- Phạm vi vận hành còn lại: chưa execute hai baseline CLI trên môi trường có dữ liệu thật; chưa chạy six-policy smoke trên Cloudinary staging vì repository không có credential/preset/fixture thật. Deployed E2E, outbox retention/alert, Kafka TLS/SASL và recommendation vẫn pending.
+- Phạm vi vận hành còn lại: chưa execute hai baseline CLI trên môi trường có dữ liệu thật; chưa chạy six-policy smoke trên Cloudinary staging vì repository không có credential/preset/fixture thật. Tại mốc PR #44, deployed E2E, outbox retention/alert, Kafka TLS/SASL và recommendation còn pending; Candidate job recommendation được hoàn thành tiếp ở mục 2.25.
+
+---
+
+## 2.25 Candidate Job Recommendations v1 — hoàn thành qua PR #45
+
+> Implementation được bàn giao từ `feature/ai/job-recommendations-v1` vào `develop` qua PR #45 ngày 28/08/2026. Phạm vi này hoàn thành gợi ý việc làm cho Candidate; không mở API gợi ý Candidate cho Recruiter khi chưa có consent/capability contract.
+
+- AI Service cung cấp internal `POST /recommend/jobs` chỉ cho exact caller `job-search-service` bằng direction-scoped key riêng 32–512 printable ASCII bytes. Request chỉ nhận `cv_id`, limit/cursor và ba filter bounded `location/salary_min/job_type`; response chỉ có Job ID, score, cursor hoặc stable empty reason, không trả vector, CV metadata hay nội dung nguồn.
+- Alembic `20260828_05` tạo hai transactional generation `JOBS/CVS` và bốn trigger row/TRUNCATE. Readiness fail-closed nếu table/row/function/event shape hoặc trigger origin/always bị thiếu/sai. Recommendation đọc bằng repeatable-read snapshot, hash cả vector nguồn vào source fingerprint và dùng exact target scan; cursor HMAC-SHA256 canonical gắn endpoint/filter/source/target generation, keyset `(distance, UUID)` và giới hạn mười trang. Target/source mutation, cursor giả hoặc filter đổi trả `409 RECOMMENDATION_CURSOR_STALE`.
+- Job Service cung cấp Candidate-only `GET /jobs/recommended`, lấy identity từ JWT và không nhận `userId/cvId`. Service forward nguyên Candidate bearer token chỉ tới allowlisted Profile `GET /cvs`, chọn CV mặc định active Media-backed hoặc CV mới nhất deterministic, sau đó gọi AI qua scoped key; hai client đều timeout bounded, body bounded, redirect-off và không retry.
+- PostgreSQL Job vẫn là nguồn sự thật: một query chỉ chọn public job-card fields, revalidate `PUBLISHED`, deadline UTC, location literal không wildcard, salary và job type, rồi khôi phục đúng AI order. Trang đầu fail-soft sang danh sách `LATEST` deterministic khi chưa có CV hoặc Profile/AI lỗi/not-ready/response stale; continuation không trộn nguồn và trả đúng `409/503`. Response có `source/fallbackReason/nextCursor`, `private, no-store` và `Vary: Authorization`.
+- Nginx chặn public `/ai/match` và `/ai/recommend/*` kể cả case/repeated slash/path parameter/residual encoding, đồng thời xóa internal headers ở generic AI proxy. Root Compose wiring distinct Job→AI key, timeout và exact outbound allowlist cho Profile/AI; `nginx -t`, route-bypass smoke và Compose config đều PASS.
+- Verify: Job build PASS, **189/189 unit test**; riêng task mới có **100/100 targeted unit/contract + 2/2 PostgreSQL recommendation integration** trên database sạch. AI Ruff check/format PASS, **297/297 unit/non-integration + 50/50 PostgreSQL/Kafka integration test (347 tổng)**, gồm migration head/deploy lặp, hơn 50 target rows, filter, hai trang không skip/duplicate, source/target mutation, rollback/zero-row/TRUNCATE generation và trigger readiness.
+- Phạm vi còn lại: Profile chưa có lĩnh vực quan tâm nên fallback v1 mới dùng job mới nhất; recruiter-facing `/recommend/candidates` và CV nearest-neighbor index chờ consent/visibility/company/job authorization. Exact scan, global generation, distributed per-user/IP rate limit, latency/load/quality tiếng Việt, ANN benchmark và deployed Profile–Job–AI E2E vẫn là acceptance gate trước production.
 
 ---
 
@@ -561,7 +575,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## P04 — Application Recruiter Dashboard và AI Match
 
-> Recruiter Dashboard và AI Match phía Application đã merge vào `develop`. Provider `/ai/match`, schema/migration pgvector cùng Job/CV embedding consumers đã hoàn thành trong P11; filter kỹ năng vẫn chờ recommendation/profile-skill contract.
+> Recruiter Dashboard và AI Match phía Application đã merge vào `develop`. Provider `/ai/match`, Job/CV embedding consumers và Candidate job recommendation đã hoàn thành trong P11; filter kỹ năng chỉ còn chờ minimal Profile skill contract.
 
 - [x] Implement `GET /applications/stats?company_id=`.
 - [x] Tổng hợp số đơn theo job/status, tỷ lệ chuyển đổi, biểu đồ thời gian và nguồn Candidate.
@@ -576,8 +590,9 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## P05 — Hoàn thiện Job & Search
 
-- [ ] Tích hợp `GET /jobs/recommended` với AI Service và CV mặc định.
-- [ ] Fallback sang job mới nhất/lĩnh vực quan tâm khi AI lỗi hoặc Candidate chưa có CV.
+- [x] Tích hợp Candidate-only `GET /jobs/recommended` với AI Service và CV mặc định/eligible; identity chỉ lấy từ JWT, không nhận `userId/cvId`.
+- [x] First-page fallback deterministic sang job mới nhất khi không có active CV hoặc Profile/AI unavailable/not-ready/invalid/stale; response có `source/fallbackReason`, còn continuation trả `409/503` và không fallback.
+- [ ] Fallback theo lĩnh vực/sở thích Candidate; Profile chưa có preferences contract.
 - [x] Bổ sung controlled historical `job-events` baseline CLI: dry-run mặc định, exact execute confirmation, bounded batch, exact-version anti-join, row lock/`SKIP LOCKED`, status mapping và expired-published preflight.
 - [x] Chạy integration transactional outbox với PostgreSQL 16 và Kafka 3.8 thật: migration sạch, rollback atomic, CAS cạnh tranh, thứ tự version và publish đủ event.
 - [x] Bổ sung Redis 7 có auth, BullMQ và Elasticsearch 8.14.3 tắt auto-create vào integration suite Docker thật.
@@ -655,13 +670,13 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## P11 — AI Service
 
-> Ba vertical slice pgvector/provider `/match`, Job embedding và CV embedding đã hoàn thành. Sau PR #43, AI Service đạt **238 unit/non-integration + 38 PostgreSQL/Kafka integration test (276 tổng)**; production model worker đã có smoke test riêng.
+> Bốn vertical slice pgvector/provider `/match`, Job embedding, CV embedding và Candidate-facing Job recommendation đã hoàn thành. Sau PR #45, AI Service đạt **297 unit/non-integration + 50 PostgreSQL/Kafka integration test (347 tổng)**; production model worker vẫn có smoke test riêng.
 
 - [ ] Chốt nhà cung cấp LLM: tài liệu ghi Claude nhưng dependency tùy chọn hiện khai báo Gemini.
 - [x] Tạo schema pgvector và migration cho provider `/match`.
   - [x] Alembic quản lý `ai.cv_embeddings`, `ai.job_embeddings`, `vector(384)` và partial HNSW cosine index.
   - [x] Alembic `20260826_03` nâng `salary_min`/`salary_max` của Job embedding lên `NUMERIC(15,2)` để khớp producer.
-  - [x] Migration chạy trước Uvicorn; readiness kiểm tra extension và cả hai bảng.
+  - [x] Migration chạy trước Uvicorn; readiness kiểm tra extension, hai embedding table, recommendation generation rows và đúng function/event/enabled mode của bốn trigger.
 - [ ] Bổ sung CV nearest-neighbor index và benchmark index/filter khi làm recommendation candidates.
 - [x] Hoàn thiện consumer `cv-events` và `job-events`.
   - [x] Consumer `job-events` kiểm tra key/payload flat snake_case, chuẩn hóa nội dung, sinh vector và upsert/deactivate Job embedding.
@@ -672,7 +687,8 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
   - [x] Lookup event trước inference, transaction atomic cho embedding/cursor/ledger và redacted-metadata DLQ không giữ raw content; commit Kafka đồng bộ chỉ sau durable terminal outcome.
   - [x] Job và Profile producer dùng `aggregate_version` đơn điệu cùng transactional outbox; publisher có bounded Kafka retry, lease heartbeat và chặn version sau khi version trước chưa publish.
 - [x] `job-events` v1 phát đủ `requirements`, `salary_min`, `salary_max` và `job_type`; salary là decimal string hai chữ số hoặc `null`.
-- [ ] Implement recommend jobs và recommend candidates.
+- [x] Implement internal `POST /recommend/jobs` bằng scoped auth, exact same-model ranking, HMAC cursor, deterministic pagination và stable empty reason.
+- [ ] Implement recruiter-facing `/recommend/candidates` sau khi chốt Candidate consent/visibility cùng recruiter/company/job capability; hiện không expose HTTP/Swagger.
 - [x] Hoàn thiện source-side controlled historical baseline tooling cho Job/CV embeddings; dry-run/execute trên môi trường dữ liệu thật vẫn là bước vận hành chưa chạy.
 - [x] Implement provider `POST /ai/match` cho Application Service.
   - [x] Bảo vệ bằng shared `X-Internal-Api-Key`, so sánh constant-time; request UUID snake_case và response envelope echo IDs.
@@ -685,7 +701,8 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
   - [x] Kafka integration thật cho CV kiểm `UPSERTED → DEACTIVATED`, source unavailable rồi `DELETED`, malformed/oversized JSON, redacted DLQ và offset commit; Job Kafka integration tiếp tục kiểm duplicate không inference lại.
   - [x] PostgreSQL CV integration kiểm duplicate/order, inactive historical vector và owner bất biến qua DLQ/tombstone; unit test kiểm poison PDF bounded cùng transient Media không commit.
   - [x] Production worker image sinh thành công vector chuẩn hóa 384 chiều bằng đúng model revision đã pin.
-- [ ] Test chất lượng recommendation, latency tải thật, fallback và dữ liệu tiếng Việt sau khi consumer/model hoàn thành.
+- [x] Test service-level recommendation auth/validation/filter/fallback, exact hai trang, cursor tamper/stale, source/target mutation và transactional generation trên PostgreSQL thật.
+- [ ] Test relevance/chất lượng dữ liệu tiếng Việt, latency/load thật, distributed rate limit và filter-aware ANN trước production.
 
 ## P12 — Interview & Video Call Service
 
@@ -725,6 +742,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [x] Bổ sung route chính thức `/offers/`, giữ nguyên prefix khi forward tới Application Service.
 - [x] Bổ sung route `/files`, chặn case-insensitive internal Media path và xóa internal identity headers tại public gateway; cấu hình Nginx đã qua `nginx -t`.
 - [x] Qua PR #39, chặn public internal paths của Profile/Application kể cả case/repeated slash/matrix-semicolon/double-encoding, strip `X-Internal-Service`/`X-Internal-Api-Key` trên public routes và wiring hai key riêng cho Application ↔ Profile.
+- [x] Qua PR #45, chặn public `/ai/match` và `/ai/recommend/*` kể cả case/repeated slash/path parameter/residual encoding; generic AI proxy strip internal headers, còn Job→AI/Profile dùng scoped key và exact outbound host allowlist.
 - [ ] Bổ sung route chính thức `/bookmarks`; hiện Bookmark đi qua `/applications/bookmarks`.
 - [ ] Xử lý cả URL có và không có dấu `/` cuối, ví dụ `/applications` và `/applications/`.
 - [ ] Thêm healthcheck cho từng service và `depends_on` theo trạng thái healthy.
@@ -769,13 +787,13 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## Thứ tự ưu tiên đề xuất
 
-1. Implement recommendation jobs/candidates trên active Job/CV embeddings, nối `GET /jobs/recommended` và bổ sung fallback khi Candidate chưa có CV.
+1. Chốt minimal Profile skills/preferences contract, bổ sung filter kỹ năng của Application và interest/preference fallback cho Job recommendation.
 2. Chạy dry-run/review/execute controlled Job/CV baseline và six-policy Cloudinary smoke trên staging khi có dữ liệu, credentials, preset và fixture thật.
-3. Chốt Profile skill/recommendation contract rồi bổ sung filter kỹ năng của Application.
+3. Chốt Candidate consent/visibility cùng recruiter/company/job capability cho `/recommend/candidates`, rồi mới thêm CV nearest-neighbor index và filtered ANN/load benchmark.
 4. Làm Interview, Notification và Chat theo hợp đồng event đã chốt.
 5. Hoàn thiện Candidate CV Builder UI/template/browser PDF renderer, sau đó tiếp tục Admin, Frontend, Jitsi và kiểm thử end-to-end.
 
-Live Cloudinary smoke với sáu preset thật vẫn là hạng mục P09 độc lập cần credential/preset ngoài repository; không chặn unit/service contract bằng fake provider deterministic, nhưng là staging acceptance gate trước khi nghiệm thu recommendation và bắt buộc hoàn tất trước production.
+Live Cloudinary smoke với sáu preset thật vẫn là hạng mục P09 độc lập cần credential/preset ngoài repository; không chặn unit/service contract bằng fake provider deterministic, nhưng là staging/production rollout gate và bắt buộc hoàn tất trước production.
 
 ## Rủi ro và điểm cần chốt ngay
 
@@ -794,16 +812,20 @@ Live Cloudinary smoke với sáu preset thật vẫn là hạng mục P09 độc
 - Candidate Profile đã có cap transactionally cho từng collection; production vẫn cần distributed rate limit theo user/IP và load test các response ở sát giới hạn trước khi chạy nhiều gateway replica.
 - Root Compose hiện dùng một PostgreSQL chung và tách bằng schema, khác yêu cầu kiến trúc cố định `profile-db` container/database riêng. Compose local còn opt-in JWKS HTTP; production phải dùng HTTPS/mTLS hoặc static PEM được mount tin cậy. Nhóm phải chính thức chấp nhận schema-per-service hoặc tách database/credential trước production.
 - Nhà cung cấp LLM chưa thống nhất giữa tài liệu (Claude) và dependency tùy chọn hiện tại (Gemini); khác biệt này không ảnh hưởng provider `/match` thuần pgvector.
+- Candidate job recommendation v1 đã hoàn thành service contract, nhưng exact target scan và một generation row dùng chung cho mỗi target type là lựa chọn correctness-first chưa benchmark concurrency/load. Limit 50, page cap mười và timeout không thay thế distributed rate limit theo user/IP; relevance tiếng Việt, latency dữ liệu thật, deep pagination, false-stale rate và filter-aware ANN vẫn phải được đo trước production.
+- Cursor recommendation gắn HMAC scoped key, canonical filter, hash vector nguồn và transactional target generation. Đổi key hoặc embedding mutation làm cursor cũ stale; rollout bắt buộc migrate `20260828_05`, xác nhận readiness bốn trigger rồi mới nhận traffic. Trigger disabled/replica-only làm readiness fail thay vì tiếp tục phân trang không an toàn.
+- First page cố ý fail-soft sang deterministic `LATEST` và luôn trả `source/fallbackReason`; continuation dùng `409/503` để không trộn nguồn, skip hoặc duplicate. Fallback theo lĩnh vực/sở thích chưa có vì Profile chưa chốt preferences contract.
+- Recruiter-facing `/recommend/candidates` cố ý không có HTTP/Swagger dù repository query private có thể tái sử dụng; phải chốt Candidate consent/visibility và recruiter/company/job capability trước khi public. Job→AI/Profile hiện dùng scoped key, exact host allowlist và gateway strip/block, nhưng production vẫn cần TLS/mTLS, network policy, secret rotation và distributed ingress protection.
 - `job-events` v1 đã khóa key `job_id`/16 trường; `cv-events` v1 đã khóa key `cv_id`/chín trường, exact UTC millisecond timestamp và `UPSERTED|DEACTIVATED|DELETED`. Các topic khác vẫn phải chốt riêng; Event Offer đã bổ sung `actor_id`, `offer_id`, `offer_status`, `offer_version`, còn `recruiter_id` là recruiter gắn với Application/job.
 - Pipeline, Kafka và hợp đồng quyền MEMBER/OWNER đã được kiểm chứng; Application Pipeline dùng quyền toàn công ty, còn quyền sửa/xóa Job vẫn do Job Service kiểm soát.
 - Application Evaluation đã được kiểm chứng với JSONB trên PostgreSQL thật, gồm quyền công ty, validation, chống đánh giá trùng và Candidate privacy; P02 đã merge vào `develop` theo xác nhận của người dùng.
 - Application Offer đã verify đạt 100 unit test và 23 integration test. Event không lộ salary/note/file; Media core đã có internal verify nhưng policy v1 chưa có `OFFER_LETTER` và Application chưa được nối, nên Offer vẫn chưa xác minh canonical file metadata/ownership.
-- Application hiện đạt 219 unit + 50 integration test sau permanent deletion gate; AI Service đạt **238 unit/non-integration + 38 PostgreSQL/Kafka integration test** sau CV worker PR #43. Job/CV ingestion đều đã chạy với broker/database thật ở service suite; controlled source baseline tooling đã có nhưng chưa execute trên dữ liệu thật. Live Profile–Media–AI/Cloudinary E2E và recommendation quality/latency vẫn pending.
+- Application hiện đạt 219 unit + 50 integration test sau permanent deletion gate; AI Service đạt **297 unit/non-integration + 50 PostgreSQL/Kafka integration test** sau Candidate job recommendation PR #45. Job/CV ingestion đều đã chạy với broker/database thật ở service suite; controlled source baseline tooling đã có nhưng chưa execute trên dữ liệu thật. Live Profile–Media–AI/Cloudinary E2E cùng recommendation quality/latency/load vẫn pending.
 - Publisher `job-events` và `cv-events` dùng at-least-once: nếu broker đã ACK nhưng process dừng trước khi ghi `published_at`, cùng `event_id` có thể được phát lại; consumer bắt buộc dedupe theo `event_id` và chặn event cũ theo `aggregate_version`.
 - Migration outbox Kafka không tự tạo historical `job-events` hoặc `cv-events`; hai controlled one-shot baseline CLI đã được bổ sung nhưng chưa chạy trên môi trường dữ liệu thật. Mỗi môi trường phải dry-run, review counters, execute bằng exact confirmation rồi theo dõi outbox/consumer lag. Riêng Elasticsearch `job_index_v3` dùng cặp marker bền vững `mappings._meta.baselineVersion=3` và `baselineIndexUuid`, tự enqueue/resume baseline cho cả index mới và index tương thích đã tồn tại sau restart. Khi marker chưa hoàn tất, search chuyển sang PostgreSQL và health ở `DEGRADED`; cần theo dõi tải fallback, pending/failed intent và chỉ coi rollout hoàn tất khi health trở lại `UP`.
 - Cấu hình Elasticsearch sai field/type/analyzer hoặc alias trỏ nhiều concrete index hiện bị từ chối trước khi ghi; checklist rollout phải kiểm tra mapping/alias. Graceful shutdown đã release intent nếu gặp race ngay sau claim, nhưng deployment vẫn cần dành thời gian drain dispatcher/worker thay vì kill cưỡng bức.
 - Outbox chưa có job retention tự động; payload chứa cả description/requirements. Các FK từ outbox và `job_index_sync` tới Job đang là `RESTRICT`, nên hard-delete Job sẽ bị chặn; cần chốt soft-delete hoặc thiết kế tombstone intent độc lập trước khi triển khai xóa cứng, không được đổi sang `CASCADE` khi chưa bảo đảm sự kiện/index xóa vẫn được phát.
 - Pipeline chung vẫn cho phép Application ở `OFFER` chuyển thẳng sang `REJECTED` hoặc `WITHDRAWN`; khi đó bản ghi Offer có thể còn `SENT` dù phản hồi tiếp theo đã bị chặn. Cần chốt quy tắc đồng bộ/hủy Offer trong task lifecycle tiếp theo.
 - Media confirm hiện có per-file cooldown và atomic 60 upload intent/requester/giờ; scheduler/reconciliation đã có DB-clock, distributed cycle/job lease-fencing, watchdog, exact orphan/sibling sweep, timeout cancellation và capped retry. Guarded six-policy Cloudinary runner cùng offline/runtime tests đã có, nhưng chưa được chạy với staging credentials/preset/fixture thật. Distributed token bucket toàn cục cho Cloudinary Admin API, alert backlog, cleanup audit/archive retention, malware/deep parser và staging/promote public asset vẫn là điều kiện trước production.
-- Docker daemon/Testcontainers đã hoạt động; AI API/worker đã verify migration, non-root, readiness, Kafka 3.8, PostgreSQL 16/pgvector và model thật; Media đã verify **26 unit + 26 PostgreSQL integration**, clean migration, runtime image và Nginx riêng. Job targeted baseline integration đạt 3/3, nhưng một lần full Job Compose gặp Docker bridge mất kết nối giữa suite nên không được tính full-suite PASS. Docker Compose toàn hệ thống vẫn chưa được kiểm chứng và hiện thiếu file môi trường runtime của một số service.
+- Docker daemon/Testcontainers đã hoạt động; AI API/worker đã verify migration, non-root, readiness, Kafka 3.8, PostgreSQL 16/pgvector và model thật; Media đã verify **26 unit + 26 PostgreSQL integration**, clean migration, runtime image và Nginx riêng. Job hiện đạt **189 unit**, targeted recommendation PostgreSQL **2/2** và mốc baseline **3/3**; full 18-test Job Compose chưa được rerun thành công sau lần Docker bridge mất kết nối nên không được tính full-suite PASS. Docker Compose toàn hệ thống vẫn chưa được kiểm chứng và hiện thiếu file môi trường runtime của một số service.
 - Nginx đã có route độc lập `/offers/`; route `/bookmarks` và exact path không có dấu `/` cuối vẫn còn pending.

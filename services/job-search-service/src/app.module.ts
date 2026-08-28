@@ -13,6 +13,9 @@ import { CompanyClientService } from './company-client.service';
 import { JobController } from './job.controller';
 import { JobExpiryService } from './job-expiry.service';
 import { JobIndexingService } from './job-indexing.service';
+import { AiRecommendationClientService } from './ai-recommendation-client.service';
+import { JobRecommendationService } from './job-recommendation.service';
+import { ProfileRecommendationClientService } from './profile-recommendation-client.service';
 import { JobSearchService } from './job-search.service';
 import { JobService } from './job.service';
 import { PrismaService } from './prisma.service';
@@ -31,6 +34,9 @@ import { PrismaService } from './prisma.service';
     JobIndexingService,
     JobEventPublisherService,
     JobSearchService,
+    JobRecommendationService,
+    AiRecommendationClientService,
+    ProfileRecommendationClientService,
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_INTERCEPTOR, useClass: ApiResponseInterceptor },

@@ -127,10 +127,64 @@ class PsycopgMatchRepository:
                                 WHERE extname = 'vector'
                             ),
                             to_regclass('ai.cv_embeddings') IS NOT NULL,
-                            to_regclass('ai.job_embeddings') IS NOT NULL
+                            to_regclass('ai.job_embeddings') IS NOT NULL,
+                            to_regclass(
+                                'ai.recommendation_generations'
+                            ) IS NOT NULL
                         """
                     )
-                    row = cursor.fetchone()
+                    storage = cursor.fetchone()
+                    if storage != (True, True, True, True):
+                        raise MatchStoreUnavailable
+                    cursor.execute(
+                        """
+                        SELECT
+                            count(*) = 2
+                            AND count(*) FILTER (
+                                WHERE target_type IN ('JOBS', 'CVS')
+                                  AND generation > 0
+                            ) = 2
+                        FROM ai.recommendation_generations
+                        """
+                    )
+                    generations = cursor.fetchone()
+                    cursor.execute(
+                        """
+                        SELECT count(*) = 4
+                        FROM pg_trigger
+                        WHERE NOT tgisinternal
+                          AND tgenabled IN ('O', 'A')
+                          AND tgfoid =
+                            'ai.bump_recommendation_generation()'::regprocedure
+                          AND (
+                            (
+                                tgrelid = 'ai.job_embeddings'::regclass
+                                AND tgname =
+                                  'job_embeddings_recommendation_generation'
+                                AND tgtype = 29
+                            )
+                            OR (
+                                tgrelid = 'ai.job_embeddings'::regclass
+                                AND tgname =
+                                  'job_embeddings_recommendation_truncate'
+                                AND tgtype = 32
+                            )
+                            OR (
+                                tgrelid = 'ai.cv_embeddings'::regclass
+                                AND tgname =
+                                  'cv_embeddings_recommendation_truncate'
+                                AND tgtype = 32
+                            )
+                            OR (
+                                tgrelid = 'ai.cv_embeddings'::regclass
+                                AND tgname =
+                                  'cv_embeddings_recommendation_generation'
+                                AND tgtype = 29
+                            )
+                          )
+                        """
+                    )
+                    triggers = cursor.fetchone()
         except psycopg.Error as error:
             logger.warning(
                 "AI vector store readiness check failed (%s)",
@@ -138,5 +192,5 @@ class PsycopgMatchRepository:
             )
             raise MatchStoreUnavailable from error
 
-        if row != (True, True, True):
+        if generations != (True,) or triggers != (True,):
             raise MatchStoreUnavailable

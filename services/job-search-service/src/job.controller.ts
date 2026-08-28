@@ -10,20 +10,25 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
+  Req,
   Put,
+  Res,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiConflictResponse,
   ApiExtraModels,
   ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiQuery,
+  ApiServiceUnavailableResponse,
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger';
+
 import {
   ApiException,
   AuthUser,
@@ -51,9 +56,22 @@ import {
   JobSearchQueryDto,
   JobSearchResultDto,
 } from './job-search.dto';
+import {
+  JobRecommendationItemDto,
+  JobRecommendationQueryDto,
+  JobRecommendationResultDto,
+} from './job-recommendation.dto';
+import { JobRecommendationService } from './job-recommendation.service';
 import { JobSearchService } from './job-search.service';
 import { JobIndexFailure, JobIndexingService } from './job-indexing.service';
 import { JobService } from './job.service';
+
+interface HeaderResponse {
+  setHeader(name: string, value: string): void;
+}
+interface AuthorizationRequest {
+  headers: { authorization: string };
+}
 
 const JOB_ID_PIPE = new ParseUUIDPipe({
   version: '4',
@@ -89,6 +107,13 @@ const searchEnvelope = {
     meta: { type: 'object', nullable: true },
   },
 };
+const recommendationEnvelope = {
+  type: 'object',
+  properties: {
+    data: { $ref: getSchemaPath(JobRecommendationResultDto) },
+    meta: { type: 'object', nullable: true },
+  },
+};
 const availabilityEnvelope = {
   type: 'object',
   properties: {
@@ -120,12 +145,15 @@ const bulkJobDetailEnvelope = {
   ActiveJobStatsDto,
   JobSearchItemDto,
   JobSearchResultDto,
+  JobRecommendationItemDto,
+  JobRecommendationResultDto,
 )
 @Controller()
 export class JobController {
   constructor(
     private readonly jobs: JobService,
     private readonly jobSearch: JobSearchService,
+    private readonly recommendations: JobRecommendationService,
     private readonly indexing: JobIndexingService,
   ) {}
   @Public()
@@ -135,12 +163,17 @@ export class JobController {
     service: string;
     status: string;
     searchIndexReady: boolean;
+    recommendationConfigured: boolean;
   } {
     const searchIndexReady = this.indexing.isSearchReady();
+    const recommendationConfigured = this.recommendations.isConfigured();
     return {
       service: 'job-search-service',
-      status: searchIndexReady ? 'UP' : 'DEGRADED',
+      status: searchIndexReady && recommendationConfigured
+        ? 'UP'
+        : 'DEGRADED',
       searchIndexReady,
+      recommendationConfigured,
     };
   }
   @Post()
@@ -188,6 +221,78 @@ export class JobController {
   @ApiOkResponse({ schema: searchEnvelope })
   search(@Query() query: JobSearchQueryDto): Promise<JobSearchResultDto> {
     return this.jobSearch.search(query);
+  }
+
+  @Get('recommended')
+  @Roles(SystemRole.CANDIDATE)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get AI-ranked jobs with a deterministic latest fallback',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    schema: { type: 'integer', minimum: 1, maximum: 50, default: 10 },
+  })
+  @ApiOkResponse({
+    schema: recommendationEnvelope,
+    headers: {
+      'Cache-Control': {
+        schema: { type: 'string', example: 'private, no-store' },
+      },
+      Vary: {
+        schema: { type: 'string', example: 'Authorization' },
+      },
+    },
+  })
+  @ApiConflictResponse({
+    description: 'The opaque recommendation cursor is stale',
+    schema: {
+      type: 'object',
+      required: ['code', 'message'],
+      additionalProperties: false,
+      properties: {
+        code: { type: 'string', example: 'RECOMMENDATION_CURSOR_STALE' },
+        message: { type: 'string' },
+        details: { type: 'object', nullable: true },
+      },
+      example: {
+        code: 'RECOMMENDATION_CURSOR_STALE',
+        message: 'Recommendation cursor is stale',
+      },
+    },
+  })
+  @ApiServiceUnavailableResponse({
+    description: 'A continuation page cannot be resolved safely',
+    schema: {
+      type: 'object',
+      required: ['code', 'message'],
+      additionalProperties: false,
+      properties: {
+        code: { type: 'string', example: 'RECOMMENDATION_UNAVAILABLE' },
+        message: { type: 'string' },
+        details: { type: 'object', nullable: true },
+      },
+      example: {
+        code: 'RECOMMENDATION_UNAVAILABLE',
+        message: 'Recommendation service is temporarily unavailable',
+      },
+    },
+  })
+  recommended(
+    @CurrentUser() user: AuthUser,
+    @Req() request: AuthorizationRequest,
+    @Query() query: JobRecommendationQueryDto,
+    @Res({ passthrough: true }) response: HeaderResponse,
+  ): Promise<JobRecommendationResultDto> {
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.setHeader('Pragma', 'no-cache');
+    response.setHeader('Vary', 'Authorization');
+    return this.recommendations.recommend(
+      user.id,
+      request.headers.authorization,
+      query,
+    );
   }
 
   @Post('reindex')
