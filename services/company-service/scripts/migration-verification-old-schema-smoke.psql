@@ -1,0 +1,50 @@
+BEGIN;
+INSERT INTO company.companies (
+  id, name, normalized_name, slug, description, industry, size, address, website,
+  tax_code, logo_file_id, logo_url, verified_status, reject_reason, created_at, updated_at
+) VALUES (
+  '99999999-9999-4999-8999-999999999991', 'Rollback Probe', 'rollback probe',
+  'rollback-probe', 'Probe', 'Technology', '1-10', 'Probe address', NULL,
+  'ROLLBACK-PROBE', NULL, NULL, 'PENDING', NULL,
+  '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z'
+);
+INSERT INTO company.company_members (id, company_id, user_id, role, joined_at) VALUES (
+  '99999999-9999-4999-8999-999999999992', '99999999-9999-4999-8999-999999999991',
+  '99999999-9999-4999-8999-999999999993', 'OWNER', '2026-08-20T00:00:00Z'
+);
+INSERT INTO company.company_media (id, company_id, file_id, url, type, sort_order, created_at) VALUES (
+  '99999999-9999-4999-8999-999999999994', '99999999-9999-4999-8999-999999999991',
+  '99999999-9999-4999-8999-999999999995', 'https://cdn.invalid/probe.png',
+  'IMAGE', 0, '2026-08-20T00:00:00Z'
+);
+INSERT INTO company.company_invitations (
+  id, company_id, email, normalized_email, status, token_hash, invited_by,
+  accepted_by, expires_at, accepted_at, created_at, updated_at
+) VALUES (
+  '99999999-9999-4999-8999-999999999996', '99999999-9999-4999-8999-999999999991',
+  'probe@example.invalid', 'probe@example.invalid', 'PENDING',
+  'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+  '99999999-9999-4999-8999-999999999993', NULL, '2026-09-20T00:00:00Z', NULL,
+  '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z'
+);
+UPDATE company.companies SET description = 'Updated probe'
+WHERE id = '99999999-9999-4999-8999-999999999991';
+DO $$ BEGIN
+  IF (SELECT count(*) FROM company.companies
+      WHERE id = '99999999-9999-4999-8999-999999999991'
+        AND description = 'Updated probe') <> 1 THEN
+    RAISE EXCEPTION 'old-schema read/update failed';
+  END IF;
+END $$;
+DELETE FROM company.companies WHERE id = '99999999-9999-4999-8999-999999999991';
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM company.company_members
+             WHERE company_id = '99999999-9999-4999-8999-999999999991')
+     OR EXISTS (SELECT 1 FROM company.company_media
+                WHERE company_id = '99999999-9999-4999-8999-999999999991')
+     OR EXISTS (SELECT 1 FROM company.company_invitations
+                WHERE company_id = '99999999-9999-4999-8999-999999999991') THEN
+    RAISE EXCEPTION 'old-schema cascade cleanup failed';
+  END IF;
+END $$;
+ROLLBACK;
