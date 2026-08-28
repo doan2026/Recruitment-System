@@ -1,9 +1,10 @@
 # Interview Service
 
 Spring Boot/Java 21 service for interview scheduling. The current vertical
-slice implements the production foundation for **offline scheduling** and its
-transactional `SCHEDULED` event; it does not claim that the complete
-interview/video lifecycle is finished.
+slices implement the production foundation for **offline scheduling**, its
+transactional `SCHEDULED` event, and role-aware query/calendar/availability
+APIs. They do not claim that the complete interview/video lifecycle is
+finished.
 
 ## Implemented in scheduling foundation v1
 
@@ -31,6 +32,35 @@ interview/video lifecycle is finished.
 Online scheduling deliberately returns `INTERVIEW_ONLINE_NOT_READY`. Jitsi
 room/token generation must be implemented with its lifecycle task; this
 service never generates a fake or reusable room URL.
+
+## Query, calendar and availability v1
+
+- Candidate detail/history/my queries are scoped in SQL to the JWT subject.
+  Candidate projections omit Company/Candidate/interviewer/scheduler identity,
+  internal notes and audit metadata; an out-of-scope ID returns the same `404`
+  as a missing Interview.
+- Recruiter requests revalidate the caller's current MEMBER/OWNER Company
+  membership on every request. Detail/history/calendar are Company-scoped;
+  `/interviews/my` is additionally restricted to the caller as interviewer.
+- History requires only `applicationId` for Candidate. Recruiter history must
+  include at least one of `applicationId`, `jobId`, `candidateId` or
+  `interviewerId`.
+- `/interviews/my` accepts `UPCOMING` (default), `PAST`, `ALL` or `RANGE`;
+  `RANGE` requires `from` and `to`. Company calendar requires a half-open
+  `from`/`to` window of at most 42 days.
+- Availability is Recruiter-only and always evaluates the caller as
+  interviewer. Candidate/Company identity comes from Application's scheduling
+  authorization; the request requires `applicationId`, offset `from`/`to`, an
+  IANA `timeZone` and a 30/45/60-minute duration. It searches at most 26 hours
+  within the next 92 days on a 15-minute grid.
+- Availability is advisory: it neither reserves a slot nor reveals which
+  Candidate/interviewer interval is busy. `POST /interviews` and PostgreSQL
+  exclusion constraints remain the final concurrency authority.
+- Pagination uses an HMAC-SHA256 signed keyset cursor bound to endpoint,
+  caller/role/current Company membership, filters, order, limit and a
+  first-page `asOf` creation cutoff. The cutoff prevents later-created rows
+  entering the page sequence; mutable lifecycle fields remain live. Tampered
+  or cross-scope cursors are rejected.
 
 ## `interview-events` v1
 
@@ -81,6 +111,20 @@ New rows return `201`; an exact idempotent replay returns `200` and
 `INTERVIEW_CANDIDATE_CONFLICT`, `INTERVIEW_INTERVIEWER_CONFLICT`,
 `INTERVIEW_ROUND_ALREADY_SCHEDULED` and `INTERVIEW_IDEMPOTENCY_CONFLICT`.
 
+Read endpoints:
+
+```http
+GET /interviews?applicationId=<uuid>&status=SCHEDULED&limit=20
+GET /interviews/my?period=UPCOMING&limit=20
+GET /interviews/calendar?from=<offset-date-time>&to=<offset-date-time>
+GET /interviews/availability?applicationId=<uuid>&from=<offset-date-time>&to=<offset-date-time>&timeZone=Asia%2FHo_Chi_Minh&durationMinutes=45
+GET /interviews/{interviewId}
+```
+
+`status` is the only repeatable query parameter. Unknown parameters, repeated
+scalar parameters and duplicate statuses return `400`; `limit` is `1..50`.
+All read responses and errors are private/no-store and vary on `Authorization`.
+
 OpenAPI is available at `/docs`; readiness is
 `/actuator/health/readiness`.
 
@@ -94,18 +138,23 @@ Copy `.env.example` to the runtime secret configuration. At minimum configure:
 - a non-placeholder `APPLICATION_INTERNAL_API_KEY` of at least 32 bytes. It
   must equal Application's inbound `INTERNAL_API_KEY_INTERVIEW` and must differ
   from every other service-direction key;
-- exact frontend `CORS_ORIGINS`.
+- `COMPANY_SERVICE_URL`, exact host allowlist and bounded request timeout;
+- a non-placeholder `INTERVIEW_CURSOR_HMAC_KEY` of at least 32 bytes, distinct
+  from service-to-service keys. Rotating it intentionally invalidates cursors;
+- exact frontend `CORS_ORIGINS`;
 - Kafka brokers/topic and `INTERVIEW_EVENT_PUBLISHER_ENABLED`; outbox poll,
   lease, batch, retry, publish-timeout and backlog-age bounds have safe local
   defaults documented in `.env.example`.
 
-The HTTP client rejects redirects, credentials/path/query/fragment in its base
-URL, non-allowlisted hosts, responses over 16 KiB, wrong content type, unknown
-fields and mismatched Application IDs. Connect/read timeout defaults to 2 s.
+The outbound HTTP clients reject redirects, credentials/path/query/fragment in
+their base URL, non-allowlisted hosts, responses over 16 KiB, wrong content
+type and unknown fields. Application also requires an echoed ID; Company uses
+an exact membership envelope and fails closed on malformed/unavailable data.
+Connect/read timeout defaults to 2 s.
 
 ## Verification
 
-Unit/WebMvc/security/client/event suite (51 tests):
+Unit/WebMvc/security/client/event/query suite (143 tests):
 
 ```bash
 docker run --rm \
@@ -115,7 +164,7 @@ docker run --rm \
   mvn test
 ```
 
-Full suite, including twelve PostgreSQL 16/Kafka 3.8 integration tests:
+Full suite, including sixteen PostgreSQL 16/Kafka 3.8 integration tests:
 
 ```bash
 docker run --rm --network host \
@@ -130,12 +179,13 @@ docker run --rm --network host \
 The integration gate covers clean/repeated Flyway deployment, JPA validation,
 UTC persistence, adjacent slots, idempotency collision, active round, cancelled
 slot release, direct-SQL protection, parallel Candidate/interviewer races,
-Interview/outbox rollback and exact outbox-to-Kafka key/payload delivery.
+Interview/outbox rollback, exact outbox-to-Kafka key/payload delivery, V3
+snapshot immutability, SQL-scoped detail/redaction, tied keyset pagination,
+half-open Company calendar and privacy-preserving advisory availability.
 
 ## Explicit backlog
 
 `InterviewFeedback`, arbitrary interviewer/panel membership authorization,
-list/detail/calendar/availability, Candidate confirmation/reschedule,
-cancel/no-show, Jitsi, remaining lifecycle event actions, reminders and
-frontend/deployed E2E remain separate tasks in
+Candidate confirmation/reschedule, cancel/no-show, Jitsi, remaining lifecycle
+event actions, reminders and frontend/deployed E2E remain separate tasks in
 `TIEN_DO_DU_AN.md`.
