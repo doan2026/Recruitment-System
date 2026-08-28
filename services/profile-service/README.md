@@ -66,6 +66,30 @@ Deploy Application V7 before enabling the new Profile deletion path. Wait for th
 - Multiple replicas claim due events with `FOR UPDATE SKIP LOCKED`, block a later unpublished version of the same CV, and use owner plus monotonic lease fencing for renew/success/retry compare-and-set. Kafka request/retry bounds fit inside the validated lease, long sends heartbeat the lease, failures persist only a sanitized error code with bounded exponential jitter, and an ACK-before-database-mark crash may safely redeliver the same event ID.
 - `CV_EVENT_PUBLISHER_ENABLED=false` pauses dispatch without disabling transactional append. This is the safe rollout switch: migrate and deploy Profile writers first, deploy the strict AI consumer and its distinct Media key, then enable dispatch. The migration intentionally does not synthesize events for historical active CVs; a reviewed active Media-backed baseline/replay is required for an already populated environment. Published-row retention, Kafka TLS/SASL, backlog/oldest-age alerts, and deployed Profile–Media–AI E2E remain production rollout requirements.
 
+### Controlled historical CV baseline
+
+The one-shot baseline command covers active private CVs created before the transactional producer was deployed. It never exposes an HTTP route, never downloads a PDF, and never publishes Kafka itself. It lists only active Media-backed rows with no deletion/revision blocker and no existing outbox row for that `cvId`, then verifies exact `fileId`/Candidate ownership/type/ACTIVE/private-delivery metadata through Media outside the database transaction. A verified row is re-read after taking the Profile lock and then the CV lock in a Serializable transaction; only then is one `UPSERTED` intent appended at the CV's current `aggregateVersion`. The command does not bump Profile or CV versions.
+
+Active legacy rows that still have `fileUrl` instead of a Media reference are counted separately and never published. Output contains aggregate counters only: it never includes CV IDs, Candidate IDs, file IDs, URLs, titles, filenames, builder JSON, Media responses, or error details. Multiple command instances are safe because every transaction rechecks for any existing event and the outbox retains its `(cvId, aggregateVersion)` uniqueness guard.
+
+Run a bounded dry-run first; `max-batches` deliberately defaults to one:
+
+```bash
+npm run baseline:cv-events -- --batch-size 25 --max-batches 1
+```
+
+Execute requires both flags and the exact confirmation phrase:
+
+```bash
+npm run baseline:cv-events -- \
+  --execute \
+  --confirm CV_EVENTS_BASELINE_V1 \
+  --batch-size 25 \
+  --max-batches 1
+```
+
+`batch-size` is bounded to 1–100 and `max-batches` to 1–100. Exit status is non-zero while eligible rows remain or any Media verification failed, so operators must rerun the same bounded command until `eligibleRemaining=0` and `mediaErrors=0`. The active legacy count is informational and does not itself fail the command. Run this only after all old Profile writers have drained. Keep the normal Profile deployment available to dispatch the appended intents; the CLI forcibly disables its own publisher context.
+
 ## Online CV Builder implemented
 
 - `POST /cvs/online` publishes an owner-only Online CV snapshot from `title`, safe `templateId`, `contentSchemaVersion=1`, object `contentJson`, and a confirmed private PDF `fileId`. `GET /cvs/:id/builder` reopens only the Candidate's active Online snapshot. `POST /cvs/:id/revisions` accepts a full replacement snapshot plus `expectedAggregateVersion` and always returns a new `cvId`; singular `/cv` aliases are supported.
