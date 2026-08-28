@@ -29,6 +29,7 @@ const DEFAULT_KAFKA_RETRY_MAX_MS = 500;
 export class JobEventPublisherService
 implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(JobEventPublisherService.name);
+  private readonly enabled: boolean;
   private readonly topic: string;
   private readonly pollIntervalMs: number;
   private readonly leaseMs: number;
@@ -48,6 +49,11 @@ implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     config: ConfigService,
   ) {
+    this.enabled = booleanValue(
+      config,
+      'JOB_EVENT_PUBLISHER_ENABLED',
+      true,
+    );
     const topic = config.get<string>('KAFKA_JOB_TOPIC')?.trim() ||
       'job-events';
     if (
@@ -158,6 +164,7 @@ implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleInit(): void {
+    if (!this.enabled) return;
     this.timer = setInterval(() => this.wake(), this.pollIntervalMs);
     this.timer.unref();
     this.wake();
@@ -176,26 +183,28 @@ implements OnModuleInit, OnModuleDestroy {
     job: Job,
     action: JobEventAction,
   ): Promise<string> {
-    const eventId = randomUUID();
-    const occurredAt = new Date();
-    const payload = buildJobEvent(job, action, eventId, occurredAt);
+    const snapshot = this.prepareSnapshot(job, action);
     await transaction.jobEventOutbox.create({
-      data: {
-        id: eventId,
-        jobId: job.id,
-        aggregateVersion: job.aggregateVersion,
-        action,
-        topic: this.topic,
-        eventKey: job.id,
-        payload: payload as unknown as Prisma.InputJsonObject,
-        nextAttemptAt: occurredAt,
-        createdAt: occurredAt,
-      },
+      data: snapshot.data,
     });
-    return eventId;
+    return snapshot.eventId;
+  }
+
+  async appendBaselineSnapshot(
+    transaction: Prisma.TransactionClient,
+    job: Job,
+    action: JobEventAction,
+  ): Promise<string | null> {
+    const snapshot = this.prepareSnapshot(job, action);
+    const result = await transaction.jobEventOutbox.createMany({
+      data: [snapshot.data],
+      skipDuplicates: true,
+    });
+    return result.count === 1 ? snapshot.eventId : null;
   }
 
   wake(): void {
+    if (!this.enabled) return;
     void this.flushPending().catch((error: unknown) => {
       this.logger.warn(
         `Job event outbox flush deferred (${errorName(error)})`,
@@ -204,6 +213,7 @@ implements OnModuleInit, OnModuleDestroy {
   }
 
   async flushPending(): Promise<number> {
+    if (!this.enabled) return 0;
     if (this.flushPromise) return this.flushPromise;
     const current = this.drain();
     this.flushPromise = current;
@@ -391,6 +401,44 @@ implements OnModuleInit, OnModuleDestroy {
     }
     await this.producerConnection;
   }
+
+  private prepareSnapshot(
+    job: Job,
+    action: JobEventAction,
+  ): {
+    eventId: string;
+    data: Prisma.JobEventOutboxUncheckedCreateInput;
+  } {
+    const eventId = randomUUID();
+    const occurredAt = new Date();
+    const payload = buildJobEvent(job, action, eventId, occurredAt);
+    return {
+      eventId,
+      data: {
+        id: eventId,
+        jobId: job.id,
+        aggregateVersion: job.aggregateVersion,
+        action,
+        topic: this.topic,
+        eventKey: job.id,
+        payload: payload as unknown as Prisma.InputJsonObject,
+        nextAttemptAt: occurredAt,
+        createdAt: occurredAt,
+      },
+    };
+  }
+}
+
+function booleanValue(
+  config: ConfigService,
+  key: string,
+  fallback: boolean,
+): boolean {
+  const raw = config.get<string>(key);
+  if (raw === undefined || raw.trim() === '') return fallback;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  throw new Error(`${key} must be true or false`);
 }
 
 function positiveInteger(

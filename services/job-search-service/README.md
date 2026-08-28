@@ -99,6 +99,51 @@ and renews that lease while Kafka is in flight. Each Kafka attempt has a finite
 request timeout and retry limit; failure releases the row for a later outbox
 attempt with capped exponential backoff.
 
+`JOB_EVENT_PUBLISHER_ENABLED` defaults to `true`. Set it to the exact value
+`false` during a controlled rollout to pause polling and Kafka delivery while
+normal Job mutations and the historical baseline continue appending durable
+outbox rows. Any other non-empty value fails startup. Re-enable the publisher
+on a separately deployed normal service instance only after the AI consumer
+and baseline have been verified.
+
+## Controlled historical Job event baseline
+
+The one-shot command appends snapshots for Jobs created before the
+transactional producer was deployed. It does not expose an HTTP route, start
+the expiry/index dispatchers, connect to Kafka, or publish events. Build once,
+then inspect counts with the default dry-run:
+
+```bash
+npm run build
+npm run baseline:job-events
+```
+
+Execution is fail-closed and requires the exact confirmation token:
+
+```bash
+npm run baseline:job-events -- \
+  --execute \
+  --confirm JOB_EVENTS_BASELINE_V1 \
+  --batch-size 100 \
+  --max-batches 1
+```
+
+`--batch-size` is limited to 1–500 and `--max-batches` to 1–10,000; one
+batch is the safe default. Output is JSON counts only. Exit code `2` means
+rows remain or a `PUBLISHED` Job has a deadline before the current UTC date.
+In the latter case execute mode writes nothing: run the normal expiry process
+first, then repeat the dry-run.
+
+Progress is the durable anti-join between each Job's current
+`aggregate_version` and the unique outbox key. Every transaction rescans from
+the beginning, locks one missing batch with `FOR UPDATE SKIP LOCKED`, and
+appends without changing the Job version or `updated_at`. Repeated and
+concurrent runs are therefore safe. `DRAFT`, `PENDING_APPROVAL`, and
+`PUBLISHED` snapshots use `UPDATED`; `CLOSED` uses `CLOSED`; `EXPIRED` uses
+`EXPIRED`. All statuses are included so downstream consumers receive the
+current source-of-truth state. This command is not a general Elasticsearch
+reindex or AI model rebuild.
+
 Every Job mutation also upserts one durable index-sync intent in the same
 PostgreSQL transaction as the Job and Kafka event outbox. After commit, a
 leased dispatcher transfers that intent to BullMQ. The row stays pending until
@@ -147,16 +192,22 @@ intents. A populated environment must complete this release checklist:
    If this setting is an alias, stop and drain all instances before changing
    its target, then restart every instance so the new concrete index is
    resolved, fully validated, and baseline-gated.
-3. Run an environment-specific historical Kafka/AI baseline or replay plan that
-   has been reviewed for duplicate and ordering behavior. Elasticsearch v3 is
-   baselined automatically by the service in the next step.
-4. Start the new service. Its new-index bootstrap queues the Elasticsearch
-   baseline automatically; calling `POST /jobs/reindex` remains a safe,
-   idempotent reconciliation. Wait until every durable index-sync row is
-   completed with no failed rows.
-5. Verify the Elasticsearch and AI projection/version baselines before
+3. Deploy the new writer with `JOB_EVENT_PUBLISHER_ENABLED=false`. New
+   mutations remain transactional and accumulate in the outbox, but nothing
+   is sent to Kafka yet.
+4. Deploy and verify the strict AI consumer. Run the Job event baseline dry-run,
+   then execute bounded batches until the command exits `0`. The CLI only
+   appends outbox snapshots; do not expect it to drain Kafka itself.
+5. Enable `JOB_EVENT_PUBLISHER_ENABLED=true` on a normal service deployment and
+   monitor pending/oldest outbox age, consumer lag, and the AI dead-letter path
+   while the backlog drains in per-Job version order.
+6. Start the new service's Elasticsearch path. Its new-index bootstrap queues
+   the Elasticsearch baseline automatically; calling `POST /jobs/reindex`
+   remains a safe, idempotent reconciliation. Wait until every durable
+   index-sync row is completed with no failed rows.
+7. Verify both Elasticsearch and AI projection/version baselines before
    restoring normal traffic.
-6. Retain the legacy index for the agreed rollback window, then remove it using
+8. Retain the legacy index for the agreed rollback window, then remove it using
    the environment's reviewed retention procedure.
 
 Published outbox-row retention cleanup is not automated yet; operators must plan
@@ -192,12 +243,13 @@ npm test
 npm run build
 ```
 
-The verified local suite contains 57 unit tests. The isolated Docker gate
+The verified local suite contains 89 unit tests. The isolated Docker gate
 applies migrations to disposable PostgreSQL 16 and starts Kafka 3.8, authenticated
 Redis 7, and Elasticsearch 8.14.3 with index auto-creation disabled. It runs
-13 integration tests: one transaction/order/delivery outbox test, one
-PostgreSQL bulk-detail contract test, and 11 indexing, search, ordering,
-reindex, retry/dead-letter, outage, recovery, and restart tests:
+16 integration tests: three historical event baseline/resume/concurrency tests,
+one transaction/order/delivery outbox test, one PostgreSQL bulk-detail contract
+test, and 11 indexing, search, ordering, reindex, retry/dead-letter, outage,
+recovery, and restart tests:
 
 ```bash
 docker compose -f compose.test.yml up \

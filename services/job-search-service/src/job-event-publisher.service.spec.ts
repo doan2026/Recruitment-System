@@ -7,6 +7,7 @@ import {
   JobType,
   Prisma,
 } from '@prisma/client';
+import { JOB_EVENT_PAYLOAD_FIELDS } from './job-event';
 import { Kafka } from 'kafkajs';
 import { JobEventPublisherService } from './job-event-publisher.service';
 import { PrismaService } from './prisma.service';
@@ -168,6 +169,55 @@ describe('JobEventPublisherService', () => {
         }),
       }),
     });
+  });
+
+  it('appends an exact idempotent snapshot for the historical baseline',
+  async () => {
+    const createMany = jest.fn()
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    const transaction = {
+      jobEventOutbox: { createMany },
+    } as unknown as Prisma.TransactionClient;
+
+    const inserted = await service.appendBaselineSnapshot(
+      transaction,
+      persistedJob(),
+      JobEventAction.UPDATED,
+    );
+    const duplicate = await service.appendBaselineSnapshot(
+      transaction,
+      persistedJob(),
+      JobEventAction.UPDATED,
+    );
+
+    expect(inserted).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(duplicate).toBeNull();
+    const request = createMany.mock.calls[0][0];
+    expect(request.skipDuplicates).toBe(true);
+    expect(request.data).toHaveLength(1);
+    expect(request.data[0]).toEqual(expect.objectContaining({
+      id: inserted,
+      jobId: JOB_ID,
+      aggregateVersion: 2,
+      action: JobEventAction.UPDATED,
+      topic: 'job-events-test',
+      eventKey: JOB_ID,
+    }));
+    expect(Object.keys(request.data[0].payload).sort()).toEqual(
+      [...JOB_EVENT_PAYLOAD_FIELDS].sort(),
+    );
+    expect(request.data[0].payload).toEqual(expect.objectContaining({
+      event_id: inserted,
+      action: 'UPDATED',
+      job_id: JOB_ID,
+      status: 'PUBLISHED',
+      aggregate_version: 2,
+      schema_version: 1,
+    }));
+    expect(request.data[0].payload).not.toHaveProperty('benefits');
   });
 
   it('claims in aggregate order, publishes exact bytes and marks success',
@@ -365,6 +415,44 @@ describe('JobEventPublisherService', () => {
       await second.onModuleDestroy();
       jest.useRealTimers();
     }
+  });
+
+  it('fails closed on an invalid flag and never claims when disabled',
+  async () => {
+    const base: Record<string, string> = {
+      KAFKA_BROKERS: 'kafka:9092',
+      KAFKA_JOB_TOPIC: 'job-events-test',
+      JOB_EVENT_OUTBOX_LEASE_MS: '30000',
+    };
+    const invalidConfig = {
+      get: jest.fn((key: string) => ({
+        ...base,
+        JOB_EVENT_PUBLISHER_ENABLED: 'yes',
+      })[key]),
+    } as unknown as ConfigService;
+    expect(() => new JobEventPublisherService(
+      {} as PrismaService,
+      invalidConfig,
+    )).toThrow('must be true or false');
+
+    const claim = jest.fn();
+    const disabledConfig = {
+      get: jest.fn((key: string) => ({
+        ...base,
+        JOB_EVENT_PUBLISHER_ENABLED: 'false',
+      })[key]),
+    } as unknown as ConfigService;
+    const disabled = new JobEventPublisherService(
+      { $queryRaw: claim } as unknown as PrismaService,
+      disabledConfig,
+    );
+    disabled.onModuleInit();
+    disabled.wake();
+
+    await expect(disabled.flushPending()).resolves.toBe(0);
+    expect(claim).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    await disabled.onModuleDestroy();
   });
 
 });
