@@ -249,8 +249,10 @@ services:
     environment:
       PROFILE_SERVICE_URL: http://profile-service:3000
       PROFILE_REQUEST_TIMEOUT_MS: ${JOB_PROFILE_REQUEST_TIMEOUT_MS:-1000}
+      PROFILE_SERVICE_ALLOWED_HOSTS: ${JOB_PROFILE_ALLOWED_HOSTS:-profile-service}
       AI_SERVICE_URL: http://ai-service:8000
       AI_REQUEST_TIMEOUT_MS: ${JOB_AI_REQUEST_TIMEOUT_MS:-2500}
+      AI_SERVICE_ALLOWED_HOSTS: ${JOB_AI_ALLOWED_HOSTS:-ai-service}
       AI_INTERNAL_API_KEY: ${AI_INTERNAL_API_KEY_JOB_SEARCH:?AI_INTERNAL_API_KEY_JOB_SEARCH is required}
     secrets:
       - source: jwt-public-key
