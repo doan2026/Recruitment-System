@@ -408,27 +408,34 @@ Gộp từ Interview Service và Video Call Service vì lịch phỏng vấn và
 tục — đặt lịch xong vào thẳng phòng gọi, gộp giúp quản lý trạng thái phiên phỏng vấn dễ hơn.
 
 Chức năng chi tiết
-        •   Recruiter đặt lịch phỏng vấn: chọn slot thời gian, mời candidate
-        •   Tự động tạo phòng phỏng vấn video riêng cho mỗi application (room_url theo
-            application_id)
-        •   Gửi link phỏng vấn qua Notification Service khi lịch được xác nhận
-        •   Recruiter điền feedback/đánh giá sau buổi phỏng vấn
-        •   Xem lịch sử các buổi phỏng vấn theo candidate hoặc theo job
+        •   Đã triển khai Recruiter đặt lịch OFFLINE self-interviewer với authoritative Application
+            snapshot và PostgreSQL chống trùng Candidate/interviewer
+        •   Đã triển khai role-aware detail/history/my, Recruiter Company calendar và advisory
+            availability không giữ chỗ/không lộ nguồn busy
+        •   Đã publish transactional `SCHEDULED interview-events` cho Notification in-app
+        •   Tự động tạo phòng video, arbitrary interviewer/panel, feedback và các mutation
+            lifecycle vẫn là target pending
 
 Data model gợi ý
         •   Interview(id, application_id, scheduled_at, room_url, status, feedback)
 
 API / event chính
         •   POST /interviews
-        •   GET /interviews/:id
-
+        •   GET /interviews
+        •   GET /interviews/my
+        •   GET /interviews/calendar
+        •   GET /interviews/availability
+        •   GET /interviews/{id}
         •   PATCH /interviews/:id/feedback
 
 Giao tiếp với service khác
-Liên kết application_id từ Application Service; Interview và transactional outbox cùng commit rồi
-publish `SCHEDULED interview-events` v1 cho Notification tạo in-app item. Event không chứa location,
-notes, room URL/token hoặc contact/CV data. Khi Jitsi được triển khai, room credential ngắn hạn phải
-được lấy qua endpoint join đã xác thực; service không xử lý/lưu trữ luồng media vì Jitsi đảm nhiệm.
+Liên kết application_id từ Application Service; scheduling/availability lấy authoritative
+Company/Candidate context qua purpose-scoped Application authorization. Recruiter query chuyển caller
+JWT sang Company Service để revalidate current MEMBER/OWNER membership mỗi request; service không đọc
+database của service khác. Interview và transactional outbox cùng commit rồi publish `SCHEDULED
+interview-events` v1 cho Notification tạo in-app item. Event không chứa location, notes, room URL/token
+hoặc contact/CV data. Khi Jitsi được triển khai, room credential ngắn hạn phải được lấy qua endpoint join
+đã xác thực; service không xử lý/lưu trữ luồng media vì Jitsi đảm nhiệm.
 
 7. Chat Service
         •    Công nghệ cố định: Node.js + Socket.IO · MongoDB + Mongoose · Redis Adapter

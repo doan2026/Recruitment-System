@@ -2,7 +2,7 @@
 
 > Ngày cập nhật: 28/08/2026
 > Nhánh đối chiếu chính: `develop`
-> Pull Request lần cập nhật: PR #52 từ `feature/interview-service/interview-events-v1` vào `develop`
+> Pull Request lần cập nhật: PR #53 từ `feature/interview-service/interview-query-calendar-v1` vào `develop`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -26,7 +26,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 | Job & Search Service | Người 2 | 🟡 CRUD/search, transactional `job-events`, controlled historical Job baseline, Redis/BullMQ/Elasticsearch integration, Candidate job recommendation và consent-scoped Recruiter candidate recommendation đã hoàn thành; load/quality/deep-pagination benchmark còn thiếu |
 | Application Service | Người 2 | 🟡 Các luồng từ Submission đến AI Match, canonical Profile CV contract, durable usage/deletion gate, Application-time skill snapshot và canonical `application-events` v1 đã hoàn thành; còn P17 deployed E2E/load/production rollout |
 | AI Service | Người 2 | 🟡 Provider `/match`, consumer `job-events`, strict `cv-events` private-PDF embedding worker cùng internal `/recommend/jobs` và `/recommend/candidates` đã hoàn thành; source-side baseline chưa chạy trên dữ liệu thật, còn ANN/load/distributed-rate-limit benchmark và chatbot |
-| Interview & Video Call Service | Người 3 | 🟡 Scheduling foundation v1 và transactional `SCHEDULED interview-events` v1 đã hoàn thành; lifecycle/Jitsi/feedback/calendar và các event action còn lại pending |
+| Interview & Video Call Service | Người 3 | 🟡 Scheduling foundation, transactional `SCHEDULED interview-events`, role-aware detail/history/my, Recruiter Company calendar và advisory availability v1 đã hoàn thành; arbitrary interviewer/panel, lifecycle/Jitsi/feedback và các event action còn lại pending |
 | Chat Service | Người 3 | ⏳ Prototype realtime |
 | Notification Service | Người 3 | 🟡 `application-events` v1 và `SCHEDULED interview-events` v1 → private in-app inbox đã hoàn thành với PostgreSQL/Kafka thật; BullMQ, FCM, SMTP, device/settings API, Chat/remaining Interview lifecycle và reminder còn pending |
 | Hạ tầng dùng chung | Người 3 | 🟡 Docker Compose, Nginx, database và Kafka base đã có; Notification có one-shot migration, non-root runtime, readiness DB/Kafka, static JWT PEM và route no-store/query-free; distributed limiter, Kafka TLS/SASL, Jitsi và production hardening còn pending |
@@ -117,7 +117,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** HR đặt lịch; Candidate xác nhận/đề nghị đổi lịch; vào phòng video; đánh giá sau phỏng vấn; hủy/no-show; xem lịch.
 - **Chức năng chính:** kiểm tra quyền theo application; chống trùng lịch; vòng phỏng vấn; feedback; room URL/token; phát `interview-events`.
 - **Phụ thuộc:** Auth, Application, Notification và Jitsi.
-- **Trạng thái:** scheduling foundation v1 hoàn thành qua PR #51; transactional `SCHEDULED interview-events` v1 và Notification Candidate projection hoàn thành qua PR #52. List/detail/calendar, chọn interviewer khác, confirm/reschedule/cancel/no-show, feedback, Jitsi, lifecycle events/reminder còn pending.
+- **Trạng thái:** scheduling foundation v1 hoàn thành qua PR #51; transactional `SCHEDULED interview-events` v1 và Notification Candidate projection hoàn thành qua PR #52; role-aware detail/history/my, Recruiter Company calendar và advisory availability v1 hoàn thành qua PR #53. Chọn interviewer khác/panel, confirm/reschedule/cancel/no-show, feedback, Jitsi và lifecycle events/reminder còn pending.
 
 ## T10 — Chat Service
 
@@ -158,7 +158,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Mục tiêu:** chứng minh các luồng xuyên service chạy thật, ổn định và có thể triển khai.
 - **Công nghệ/công cụ:** unit/integration/E2E test, Docker Compose, CI/CD, Swagger/OpenAPI, logging/metrics/tracing.
 - **Đầu ra:** test contract REST/Kafka; migration sạch; test concurrency/idempotency; security test; smoke test; tài liệu môi trường; backup/restore; monitoring.
-- **Trạng thái:** đã có unit/integration test tập trung ở Company, Job/Search, Application, AI, Profile, Media, Interview và Notification. Profile hiện đạt **62/62 unit + 89/89 PostgreSQL/Kafka integration test**, Media **26 + 26**, Job/Search **292 + 19**, AI **331 unit/non-integration + 54 integration (385 tổng)**, Application **260 unit + 63 PostgreSQL/Kafka integration**, Interview **51 unit + 12 PostgreSQL/Kafka integration**, Notification **51 unit + 7 PostgreSQL/Kafka integration** với migration deploy lặp sạch. Đây là bằng chứng service-level, không đồng nghĩa deployed E2E toàn hệ thống và P17 vẫn pending.
+- **Trạng thái:** đã có unit/integration test tập trung ở Company, Job/Search, Application, AI, Profile, Media, Interview và Notification. Profile hiện đạt **62/62 unit + 89/89 PostgreSQL/Kafka integration test**, Media **26 + 26**, Job/Search **292 + 19**, AI **331 unit/non-integration + 54 integration (385 tổng)**, Application **260 unit + 63 PostgreSQL/Kafka integration**, Interview **143/143 unit/WebMvc/security/client/event/query + 16/16 PostgreSQL/Kafka integration**, Notification **51 unit + 7 PostgreSQL/Kafka integration** với migration deploy lặp sạch. Đây là bằng chứng service-level, không đồng nghĩa deployed E2E toàn hệ thống và P17 vẫn pending.
 
 ---
 
@@ -621,7 +621,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Inbound JWT của Interview khóa `typ=JWT`, RS256, RFC 7638 `kid`, issuer, exact single audience, UUIDv4 `sub/jti`, exact string role và `iat/exp`. Outbound Application client khóa allowlist HTTP(S) origin, no redirect, connect/read timeout, body 16 KiB, content type/exact schema/echoed ID và fail closed khi downstream lỗi.
 - Root Compose cấp cùng một directional secret cho Interview outbound/Application inbound, mount trusted public key và wiring URL/timeout. Nginx giữ nguyên prefix cho exact `/interviews` và nested route, strip forged internal headers, dùng query/referrer-free log, ép private/no-store và chặn biến thể public internal path. Runtime image chạy user `interview`, có DB-backed readiness; `.dockerignore` không đưa `.env`/`target` vào build context.
 - Verify cuối: Application **260/260 unit test**; Interview **43/43 unit/WebMvc/security/client + 8/8 PostgreSQL migration/concurrency integration test**. Clean migration, JPA validate, second Flyway deploy, UTC/DST, half-open adjacency, idempotency collision, active round, cancelled release, direct SQL và hai race Candidate/interviewer đều PASS. Image build/non-root/healthcheck, Compose static config, `nginx -t` và `git diff --check` PASS.
-- Tại mốc PR #51, transactional `interview-events` outbox/Notification consumer còn pending và đã được hoàn thành tiếp cho action `SCHEDULED` ở mục 2.32. `InterviewFeedback`, arbitrary interviewer/panel authorization, list/detail/my/calendar/availability, Candidate confirm/reschedule, cancel/no-show, Jitsi join/token, các action/reminder khác và frontend/deployed E2E vẫn pending. Local Compose vẫn dùng schema `interview` trong PostgreSQL chung; production cần chốt database/credential isolation riêng như tài liệu kiến trúc.
+- Tại mốc PR #51, transactional `interview-events` outbox/Notification consumer còn pending và đã được hoàn thành tiếp cho action `SCHEDULED` ở mục 2.32; backlog list/detail/my/calendar/availability được hoàn thành tiếp ở mục 2.33. `InterviewFeedback`, arbitrary interviewer/panel authorization, Candidate confirm/reschedule, cancel/no-show, Jitsi join/token, các action/reminder khác và frontend/deployed E2E vẫn pending. Local Compose vẫn dùng schema `interview` trong PostgreSQL chung; production cần chốt database/credential isolation riêng như tài liệu kiến trúc.
 
 ---
 
@@ -636,6 +636,21 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Readiness Notification yêu cầu cả Application và Interview group đã join. Root Compose provision cùng configurable Interview topic cho `kafka-init`, producer và consumer; rollout phải giữ cố định `NOTIFICATION_INTERVIEW_REPLAY_AFTER` cho group này và deploy consumer/migration trước khi bật publisher.
 - Verify cuối: Interview **51/51 unit/WebMvc/security/client/event + 12/12 PostgreSQL/Kafka integration**; Notification clean Docker **51/51 unit + 7/7 PostgreSQL/Kafka integration**, hai Prisma migration áp dụng và lần deploy thứ hai không còn pending. Hai review độc lập không còn finding correctness; `git diff --check` và root Compose config thuộc gate bàn giao cuối.
 - Còn pending: deployed Interview→Kafka→Notification E2E trong một stack, production TLS/SASL/ACL/retention/alert, lifecycle event action, reminder/BullMQ, FCM/SMTP, Jitsi và frontend.
+
+---
+
+## 2.33 Interview Query, Calendar & Availability v1 — hoàn thành qua PR #53
+
+> Implementation được bàn giao từ `feature/interview-service/interview-query-calendar-v1` vào `develop` qua PR #53 ngày 28/08/2026. Phạm vi là read-side và gợi ý slot cho Interview OFFLINE hiện có; availability không giữ chỗ và không tuyên bố hoàn thành lifecycle/Jitsi/frontend.
+
+- Thêm năm GET API: `/interviews`, `/interviews/my`, `/interviews/calendar`, `/interviews/availability` và `/interviews/{id}`. History/detail/my hỗ trợ Candidate và Recruiter; Company calendar cùng availability chỉ cho Recruiter, còn Admin/anonymous bị chặn.
+- Candidate được DB-scope theo exact JWT `sub`; projection loại Company/Candidate/interviewer/scheduler identity, notes và audit metadata. Recruiter revalidate current MEMBER/OWNER Company membership ở mỗi request; detail/history/calendar chỉ thấy Company hiện tại, còn `/my` khóa thêm `interviewer_id = sub`. Cross-scope và missing cùng trả `404` để chặn IDOR oracle.
+- History Candidate chỉ nhận `applicationId`; Recruiter phải có ít nhất một identity filter. Unknown/repeated scalar query, duplicate/invalid status và limit ngoài `1..50` bị từ chối. Response/lỗi đều private/no-store và `Vary: Authorization`.
+- HMAC-SHA256 keyset cursor gắn endpoint, user/role, current Company/member role, toàn bộ filter, sort, limit và first-page `asOf` creation cutoff; tamper/cross-user/cross-role/cross-filter/đổi membership đều fail closed. Cutoff chặn row tạo sau chen vào chuỗi trang nhưng lifecycle status vẫn là dữ liệu live; cursor input được giới hạn 1024 ký tự.
+- Recruiter Company calendar dùng half-open overlap trong range tối đa 42 ngày. Availability derive authoritative Company/Candidate từ Application, chỉ tìm self-interviewer, nhận IANA/DST-safe window tối đa 26 giờ trong horizon 92 ngày, duration `30|45|60` và grid 15 phút; output không lộ nguồn busy. Atomic `POST /interviews` cùng exclusion constraints vẫn là authority chống race.
+- Flyway V3 thêm Company/Job calendar index và trigger khóa bất biến identity/schedule snapshot lịch sử trong mọi direct SQL update. Company client khóa exact response, allowlisted origin, no redirect, timeout/body cap và fail closed; Compose cấp URL/allowlist/timeout cùng cursor key riêng.
+- Full clean gate đạt **143/143 unit/WebMvc/security/client/event/query + 16/16 PostgreSQL/Kafka integration test**. Bốn Query PostgreSQL IT chứng minh DB scope/redaction, tied keyset không skip/duplicate, half-open calendar/advisory privacy, migration lặp và trigger chặn sửa snapshot.
+- Còn pending: arbitrary interviewer/panel membership, confirm/reschedule/cancel/no-show/feedback, các lifecycle event/reminder, Jitsi join/token, frontend và deployed cross-service E2E.
 
 ---
 
@@ -814,7 +829,9 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [x] Gọi Application Service bằng purpose-scoped dual auth để xác minh MEMBER/OWNER, Company và trạng thái application; chỉ nhận authoritative minimal snapshot.
 - [x] Đặt lịch OFFLINE self-interviewer, chống trùng interviewer/candidate bằng PostgreSQL exclusion constraint và quản lý active interview round.
   - [x] UTC/IANA timezone, DST gap/mismatch, half-open adjacency, direct SQL, idempotency và concurrent race đã có test PostgreSQL thật.
-  - [ ] Chọn interviewer khác/panel, Company membership contract, list/detail/my/calendar và availability/gợi ý slot còn pending.
+  - [x] Role-aware detail/history/my, Recruiter Company calendar và advisory availability; current Recruiter membership được revalidate qua Company mỗi request, Candidate/Company scope và projection được khóa tại SQL/DTO.
+  - [x] HMAC keyset cursor có first-page creation cutoff, strict query/limit/range, redaction/no-store và PostgreSQL integration test cho IDOR, tied pagination, half-open overlap cùng direct-SQL trigger.
+  - [ ] Chọn interviewer khác/panel và contract xác minh membership cho interviewer tùy chọn còn pending.
 - [ ] Candidate confirm/reschedule; HR accept/reject đề nghị đổi lịch.
 - [ ] Cancel/no-show và giới hạn số lần đổi lịch.
 - [ ] Sinh Jitsi room URL/token có hạn dùng; bảo vệ người không liên quan.
@@ -879,7 +896,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [ ] Màn đăng ký/OTP/đăng nhập/quên mật khẩu.
 - [ ] Candidate profile, CV manager/builder, search/detail, bookmark, apply, tracking và offer response.
 - [ ] Recruiter company/verification/member, job management, applicant pipeline, evaluation, offer và dashboard.
-- [ ] Interview calendar/Jitsi, realtime chat và notification center.
+- [ ] Frontend Interview calendar/Jitsi, realtime chat và notification center.
 - [ ] Admin dashboard, company/job approval, user/report management và export.
 - [ ] Loading/error/empty state, responsive UI, accessibility và E2E test.
 
@@ -887,6 +904,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 - [ ] Chốt schema JWT và toàn bộ payload Kafka giữa các thành viên; `job-events` v1 đã khóa key `job_id`/16 trường, `cv-events` v1 đã khóa key `cv_id`/chín trường cùng ba action qua PR #43, `application-events` v1 đã khóa exact Offer trio qua PR #50, và foundation `SCHEDULED interview-events` v1 đã khóa key `interview_id`/15 trường qua PR #52. Các phần Interview lifecycle còn lại, `chat-events` và các consumer Admin vẫn pending.
 - [ ] Contract test REST giữa Auth/Profile/Company/Job/Application/Interview.
+  - [x] Interview Query đã có service-level contract test cho Candidate/Recruiter role, current Company membership, SQL visibility/redaction, Application-derived availability và downstream fail-closed; deployed multi-service REST E2E vẫn pending.
 - [ ] Hoàn thiện contract test Kafka cho tất cả producer/consumer thật và duplicate event.
   - [x] AI Job consumer đã được kiểm tra với payload đúng shape Job producer, broker Kafka thật, duplicate event, DLQ và commit offset.
   - [x] Job producer đã được kiểm tra từ PostgreSQL transaction/outbox tới Kafka thật: rollback khi outbox lỗi, concurrent CAS, version `1/2/3`, salary biên, Kafka key/payload và trạng thái published.
@@ -899,6 +917,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [ ] E2E Admin: duyệt, khóa user, report và dashboard.
 - [ ] Security test JWT giả/hết hạn/sai role, IDOR, injection, file upload và secret leakage.
   - [x] Notification đã test strict RS256/JWKS/static PEM, issuer/audience/header/claim, unknown-`kid` cooldown, owner isolation/404, cursor tamper/cross-owner và no-store.
+  - [x] Interview Query đã test Candidate/Recruiter/Admin/anonymous, cross-Candidate/cross-Company IDOR, DTO redaction, cursor tamper/cross-scope, unknown/repeated query, bounded range/limit và Company/Application fail-closed.
 - [ ] Load test search, chat socket, notification worker và application concurrency.
 - [ ] CI chạy lint, unit test, build, migration check và container scan cho từng Pull Request.
 - [ ] Chuẩn hóa README, OpenAPI, `.env.example`, runbook và checklist release.
@@ -907,11 +926,10 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## Thứ tự ưu tiên đề xuất
 
-1. Hoàn thiện Interview list/detail/my/calendar/availability và quyền xem dữ liệu trước khi mở các mutation lifecycle tiếp theo.
-2. Hoàn thiện confirm/reschedule/cancel/no-show/feedback, lifecycle events, reminder/BullMQ và Jitsi join/token.
-3. Làm Chat persistence/JWT/participant authorization, sau đó chốt `chat-events` và nối Notification.
-4. Chạy các external staging gate đang chờ credential/dữ liệu: controlled Job/CV baseline, six-policy Cloudinary smoke và deployed recommendation E2E/load.
-5. Hoàn thiện Candidate CV Builder/job-preferences UI, Admin/Frontend và các E2E Candidate/Recruiter/Admin trước production.
+1. Hoàn thiện confirm/reschedule/cancel/no-show/feedback, lifecycle events, reminder/BullMQ và Jitsi join/token.
+2. Làm Chat persistence/JWT/participant authorization, sau đó chốt `chat-events` và nối Notification.
+3. Chạy các external staging gate đang chờ credential/dữ liệu: controlled Job/CV baseline, six-policy Cloudinary smoke và deployed recommendation E2E/load.
+4. Hoàn thiện Candidate CV Builder/job-preferences UI, Admin/Frontend và các E2E Candidate/Recruiter/Admin trước production.
 
 Live Cloudinary smoke với sáu preset thật vẫn là hạng mục P09 độc lập cần credential/preset ngoài repository; không chặn unit/service contract bằng fake provider deterministic, nhưng là staging/production rollout gate và bắt buộc hoàn tất trước production.
 
@@ -942,7 +960,8 @@ Live Cloudinary smoke với sáu preset thật vẫn là hạng mục P09 độc
 - Pipeline, Kafka và hợp đồng quyền MEMBER/OWNER đã được kiểm chứng; Application Pipeline dùng quyền toàn công ty, còn quyền sửa/xóa Job vẫn do Job Service kiểm soát.
 - Application Evaluation đã được kiểm chứng với JSONB trên PostgreSQL thật, gồm quyền công ty, validation, chống đánh giá trùng và Candidate privacy; P02 đã merge vào `develop` theo xác nhận của người dùng.
 - Application Offer đã verify đạt 100 unit test và 23 integration test. Event không lộ salary/note/file; Media core đã có internal verify nhưng policy v1 chưa có `OFFER_LETTER` và Application chưa được nối, nên Offer vẫn chưa xác minh canonical file metadata/ownership.
-- Application hiện đạt **260 unit + 63 PostgreSQL/Kafka integration test**; Interview đạt **51 unit/WebMvc/security/client/event + 12 PostgreSQL/Kafka integration test**; AI đạt **331 unit/non-integration + 54 integration**; Notification đạt **51 unit + 7 PostgreSQL/Kafka integration test** cho Application và Interview Scheduled in-app projections. Đây vẫn là service-level evidence; deployed cross-service/recommendation quality/latency/load còn pending.
+- Application hiện đạt **260 unit + 63 PostgreSQL/Kafka integration test**; Interview đạt **143 unit/WebMvc/security/client/event/query + 16 PostgreSQL/Kafka integration test**; AI đạt **331 unit/non-integration + 54 integration**; Notification đạt **51 unit + 7 PostgreSQL/Kafka integration test** cho Application và Interview Scheduled in-app projections. Đây vẫn là service-level evidence; deployed cross-service/recommendation quality/latency/load còn pending.
+- Interview availability chỉ là gợi ý; request tạo lịch và PostgreSQL exclusion constraints mới quyết định slot trong race. Đổi `INTERVIEW_CURSOR_HMAC_KEY` làm cursor cũ vô hiệu; Recruiter query fail closed khi Company không xác minh được membership, còn schedule snapshot lịch sử bất biến nhưng membership luôn được đánh giá lại theo trạng thái hiện tại.
 - Notification có hai stable rollout cutoff độc lập: `NOTIFICATION_APPLICATION_REPLAY_AFTER` và `NOTIFICATION_INTERVIEW_REPLAY_AFTER`; mỗi giá trị phải chốt ngay trước event cần chiếu và giữ nguyên cho group tương ứng. Kafka local còn plaintext; production cần TLS/SASL/ACL, ledger retention, lag/backlog/poison alert và quy trình rotate static PEM. KafkaJS 2.2.4 trên Node 24 còn có thể phát `TimeoutNegativeWarning` upstream dù delivery assertions PASS.
 - Publisher `job-events` và `cv-events` dùng at-least-once: nếu broker đã ACK nhưng process dừng trước khi ghi `published_at`, cùng `event_id` có thể được phát lại; consumer bắt buộc dedupe theo `event_id` và chặn event cũ theo `aggregate_version`.
 - Migration outbox Kafka không tự tạo historical `job-events` hoặc `cv-events`; hai controlled one-shot baseline CLI đã được bổ sung nhưng chưa chạy trên môi trường dữ liệu thật. Mỗi môi trường phải dry-run, review counters, execute bằng exact confirmation rồi theo dõi outbox/consumer lag. Riêng Elasticsearch `job_index_v3` dùng cặp marker bền vững `mappings._meta.baselineVersion=3` và `baselineIndexUuid`, tự enqueue/resume baseline cho cả index mới và index tương thích đã tồn tại sau restart. Khi marker chưa hoàn tất, search chuyển sang PostgreSQL và health ở `DEGRADED`; cần theo dõi tải fallback, pending/failed intent và chỉ coi rollout hoàn tất khi health trở lại `UP`.

@@ -162,9 +162,6 @@ Người 1 sở hữu toàn bộ luồng "một người bước vào hệ thố
  Ưu tiên                     Cao nhất — phải hoàn thành trong 3–5 ngày đầu
 ```
 
-Trạng thái 28/08/2026: Scheduling foundation v1 đã hoàn thành qua PR #51; transactional `SCHEDULED interview-events` v1 và Candidate in-app projection đã hoàn thành qua PR #52. Recruiter có thể đặt lịch OFFLINE cho chính mình; Application xác minh MEMBER/OWNER và trả authoritative snapshot tối thiểu; PostgreSQL khóa active round, chống overlap và ghi Interview + outbox atomically. Phần còn lại của C1 gồm interviewer/panel tùy chọn, list/calendar, confirm/reschedule/cancel/no-show, `InterviewFeedback`, Jitsi, các lifecycle event/reminder và frontend/deployed E2E vẫn pending.
-
-
 ### 1. Luồng hoạt động các chức năng
 #### Luồng 1: Đăng ký tài khoản + xác thực OTP email
 1. Người dùng chọn loại tài khoản (Candidate hoặc Recruiter), nhập email và mật khẩu.
@@ -275,7 +272,6 @@ Trạng thái 28/08/2026: Scheduling foundation v1 đã hoàn thành qua PR #51;
                               Service (tính embedding matching).
  Phụ thuộc                    Auth Service (JWT), File/Media Service (upload CV, avatar)
 ```
-
 
 ### 1. Luồng hoạt động các chức năng
 #### Luồng 1: Tạo và hoàn thiện hồ sơ ứng viên
@@ -1013,6 +1009,8 @@ Người 3 sở hữu tất cả những gì xảy ra SAU khi hồ sơ được 
  Phụ thuộc                   Auth (JWT), Application (application_id), Notification (qua Kafka)
 ```
 
+Trạng thái 28/08/2026: Scheduling foundation v1 đã hoàn thành qua PR #51; transactional `SCHEDULED interview-events` v1 và Candidate in-app projection hoàn thành qua PR #52; role-aware detail/history/my, Recruiter Company calendar và advisory availability v1 hoàn thành qua PR #53. Recruiter đặt lịch OFFLINE cho chính mình; Application cấp authoritative snapshot tối thiểu, Company revalidate current MEMBER/OWNER cho read-side, PostgreSQL khóa active round/overlap và ghi Interview + outbox atomically. Full gate Interview đạt **143 unit/WebMvc/security/client/event/query + 16 PostgreSQL/Kafka integration test**. Phần còn lại của C1 gồm interviewer/panel tùy chọn, confirm/reschedule/cancel/no-show, `InterviewFeedback`, Jitsi, lifecycle event/reminder và frontend/deployed E2E.
+
 
 ### 1. Luồng hoạt động các chức năng
 #### Luồng 1: HR đặt lịch phỏng vấn
@@ -1056,6 +1054,7 @@ Người 3 sở hữu tất cả những gì xảy ra SAU khi hồ sơ được 
 1. Ứng viên: danh sách buổi phỏng vấn sắp tới và đã qua, kèm trạng thái và link phòng.
 2. HR: lịch theo tuần/tháng của cả công ty, lọc theo job hoặc theo người phỏng vấn.
 3. Xem lịch sử phỏng vấn theo từng ứng viên (tất cả các vòng) hoặc theo từng tin tuyển dụng.
+4. Backend v1 đã triển khai detail/history/my, Company calendar và advisory availability; calendar/Jitsi phía frontend vẫn pending.
 
 ### 2. Tài liệu nghiệp vụ
 ### 2.1. Quy tắc nghiệp vụ (business rules)
@@ -1067,6 +1066,10 @@ Người 3 sở hữu tất cả những gì xảy ra SAU khi hồ sơ được 
 - Token vào phòng có hạn dùng, hết buổi phỏng vấn thì không dùng lại được.
 - Đánh giá sau phỏng vấn chỉ HR và OWNER công ty xem được.
 - Dùng @Transactional cho thao tác đặt lịch để kiểm tra trùng và ghi bản ghi diễn ra nguyên tử.
+- Candidate read-side luôn SQL-scope theo JWT subject và dùng projection đã redacted; ID ngoài scope và ID không tồn tại cùng trả `404`.
+- Recruiter read-side revalidate current MEMBER/OWNER Company membership mỗi request; detail/history/calendar chỉ đọc Company hiện tại, còn `/my` chỉ đọc chính Recruiter là interviewer.
+- Query dùng signed keyset cursor, strict filter/limit/range và private/no-store. `asOf` là first-page creation cutoff, không phải snapshot bất biến của lifecycle status.
+- Availability chỉ gợi ý self-interviewer/Candidate được derive từ Application, không giữ slot và không lộ nguồn busy; `POST /interviews` cùng exclusion constraints vẫn quyết định trong race.
 ### 2.2. Mô hình dữ liệu
 - Interview(id, application_id, job_id, candidate_id, interviewer_id, round, scheduled_at, duration_minutes, mode[ONLINE|OFFLINE], location, room_url, status, reschedule_count, cancel_reason, started_at, ended_at, created_at, version)
 - InterviewFeedback(id, interview_id, evaluator_id, criteria_json, overall_score, comment, conclusion[PASS|FAIL|NEXT_ROUND], created_at)
@@ -1078,18 +1081,21 @@ Người 3 sở hữu tất cả những gì xảy ra SAU khi hồ sơ được 
 ```text
  Endpoint                                 Mô tả                                   Quyền truy cập
  POST /interviews                         Đặt lịch phỏng vấn                      Recruiter
- GET /interviews?application_id=          Lịch theo đơn ứng tuyển                 Liên quan
+ GET /interviews?applicationId=           Lịch sử theo identity filter            Candidate / Recruiter
  GET /interviews/my                       Lịch của tôi                            Candidate / Recruiter
- GET /interviews/:id                      Chi tiết buổi phỏng vấn                 Liên quan
+ GET /interviews/calendar?from=&to=       Lịch half-open của Company              Recruiter
+ GET /interviews/availability?            Gợi ý slot self-interviewer             Recruiter
+   applicationId=&from=&to=&
+   timeZone=&durationMinutes=
+ GET /interviews/{id}                     Chi tiết role-aware                     Candidate / Recruiter
  PATCH /interviews/:id/confirm            Ứng viên xác nhận                       Candidate
  PATCH /interviews/:id/reschedule         Xin đổi lịch / đặt lại                  Candidate / Recruiter
  PATCH /interviews/:id/cancel             Huỷ lịch (kèm lý do)                    Candidate / Recruiter
  POST /interviews/:id/join                Lấy token vào phòng Jitsi               Liên quan
  PATCH /interviews/:id/feedback           Ghi đánh giá sau phỏng vấn              Recruiter
- GET                                      Khung giờ trống                         Recruiter
- /interviews/availability?interviewer_i
- d=&date=
 ```
+
+Năm GET endpoint phía trên đã triển khai qua PR #53; các PATCH/POST lifecycle/Jitsi vẫn là target contract, chưa được đánh dấu hoàn thành.
 
 
 ### 2.4. Sự kiện Kafka
@@ -1098,6 +1104,7 @@ Người 3 sở hữu tất cả những gì xảy ra SAU khi hồ sơ được 
 - Consumer: Notification Service (cùng Người 3 — thuận lợi vì không phải chốt hợp đồng liên người).
 ### 2.5. Phụ thuộc giữa các service
 - Phụ thuộc REST: Application Service (Người 2) để xác thực application_id và gợi ý chuyển trạng thái đơn.
+- Query Recruiter gọi Company Service bằng caller JWT để revalidate current membership; availability gọi Application để derive Company/Candidate authoritative, không đọc database của service khác.
 - Phụ thuộc hạ tầng: Jitsi self-host (chính Người 3 dựng).
 ### 2.6. Tiêu chí hoàn thành (Definition of Done)
 - Đặt được lịch, ứng viên nhận email kèm link, hai bên vào cùng một phòng Jitsi và nhìn thấy nhau.
