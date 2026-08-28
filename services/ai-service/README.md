@@ -354,8 +354,8 @@ idempotency, retry/DLQ behavior, strict CV/Media/parser contracts, scoped auth,
 signed/stale cursors, exact filtered pagination and transactional generation
 triggers. Real Kafka tests cover publish → consume → pgvector, duplicate
 delivery, source rejection followed by delete, hash-only malformed DLQ and
-committed offsets. The current suite collects **319 unit/non-integration tests
-and 51 PostgreSQL/Kafka integration tests (370 total)**. The production worker image
+committed offsets. The current suite collects **331 unit/non-integration tests
+and 54 PostgreSQL/Kafka integration tests (385 total)**. The production worker image
 also successfully generated a normalized 384-dimensional vector with the
 pinned model revision.
 
