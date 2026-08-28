@@ -2,8 +2,7 @@
 
 > Ngày cập nhật: 28/08/2026
 > Nhánh đối chiếu chính: `develop`
-> Pull Request gần nhất đã merge: PR #43 từ `feature/profile-ai/cv-events-integration` vào `develop`
-> Nhánh đang hoàn thiện: `feature/ai/historical-embedding-baseline`
+> Pull Request lần cập nhật: PR #44 từ `feature/ai/historical-embedding-baseline` vào `develop`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -159,7 +158,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Mục tiêu:** chứng minh các luồng xuyên service chạy thật, ổn định và có thể triển khai.
 - **Công nghệ/công cụ:** unit/integration/E2E test, Docker Compose, CI/CD, Swagger/OpenAPI, logging/metrics/tracing.
 - **Đầu ra:** test contract REST/Kafka; migration sạch; test concurrency/idempotency; security test; smoke test; tài liệu môi trường; backup/restore; monitoring.
-- **Trạng thái:** đã có unit/integration test tập trung ở Company, Job/Search, Application, AI, Profile và Media. Trên feature branch hiện tại, Profile đạt **51 unit + 70 integration test**; Media đạt **26 unit + 26 integration test** trên clean PostgreSQL Compose; Job/Search đạt **89 unit** và **3 targeted PostgreSQL baseline integration test**. AI giữ **238 unit/non-integration + 38 PostgreSQL/Kafka integration test (276 tổng)**; Application giữ **219 unit + 50 integration test**. Full Job Compose gặp một lỗi Docker bridge làm database mất kết nối sau khi các suite indexing/outbox/baseline đã qua, nên không được ghi nhận là full-suite PASS. Đây là bằng chứng service-level, không đồng nghĩa deployed E2E toàn hệ thống và P17 vẫn pending.
+- **Trạng thái:** đã có unit/integration test tập trung ở Company, Job/Search, Application, AI, Profile và Media. Sau task 2.24, Profile đạt **51 unit + 70 integration test**; Media đạt **26 unit + 26 integration test** trên clean PostgreSQL Compose; Job/Search đạt **89 unit** và **3 targeted PostgreSQL baseline integration test**. AI giữ **238 unit/non-integration + 38 PostgreSQL/Kafka integration test (276 tổng)**; Application giữ **219 unit + 50 integration test**. Full Job Compose gặp một lỗi Docker bridge làm database mất kết nối sau khi các suite indexing/outbox/baseline đã qua, nên không được ghi nhận là full-suite PASS. Đây là bằng chứng service-level, không đồng nghĩa deployed E2E toàn hệ thống và P17 vẫn pending.
 
 ---
 
@@ -513,9 +512,9 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ---
 
-## 2.24 Controlled Historical Event Baseline & Cloudinary Staging Smoke Tooling — hoàn thành trên feature branch
+## 2.24 Controlled Historical Event Baseline & Cloudinary Staging Smoke Tooling — hoàn thành qua PR #44
 
-> Implementation hiện nằm trên `feature/ai/historical-embedding-baseline`; chưa tuyên bố đã chạy trên database production/staging có dữ liệu thật hoặc tài khoản Cloudinary thật.
+> Implementation được bàn giao từ `feature/ai/historical-embedding-baseline` vào `develop` qua PR #44 ngày 28/08/2026; chưa tuyên bố đã chạy trên database production/staging có dữ liệu thật hoặc tài khoản Cloudinary thật.
 
 - Job Service có one-shot CLI mặc định dry-run, execute chỉ khi khớp exact confirmation `JOB_EVENTS_BASELINE_V1`, giới hạn batch/max-batches và dùng `FOR UPDATE SKIP LOCKED`. CLI chỉ tạo event cho đúng `aggregate_version` chưa có trong outbox, không tăng version/`updated_at`; `DRAFT`, `PENDING_APPROVAL`, `PUBLISHED` map sang `UPDATED`, còn `CLOSED`/`EXPIRED` giữ action terminal. Execute preflight chặn published job đã quá deadline UTC. `JOB_EVENT_PUBLISHER_ENABLED=false` chỉ tắt publisher background, không làm mất khả năng append transactional outbox.
 - Profile Service có one-shot CLI mặc định dry-run, execute chỉ khi khớp exact confirmation `CV_EVENTS_BASELINE_V1`, bounded batch và hai pha để gọi Media ngoài transaction. Pha ghi khóa Profile rồi CV bằng Serializable transaction, recheck active/private/Media-backed/current leaf và bỏ qua CV đã có bất kỳ historical outbox event nào; event `UPSERTED` dùng đúng current version, không bump aggregate/version. Legacy URL-only CV chỉ được đếm và bỏ qua, không được đưa URL vào event/log.
@@ -629,7 +628,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [x] Triển khai và merge canonical Profile–Application CV contract qua PR #39: dual-auth verify cho submission, service-auth list/detail/download, Application recruiter APIs, durable V6 usage ledger và Profile-only usage lookup; không đồng nghĩa P17 E2E đã hoàn tất.
 - [x] Publish exact `cv-events` v1 idempotent cho AI qua no-FK transactional outbox, per-CV version ordering, fenced lease/heartbeat và Kafka key `cv_id`; lifecycle create/revision/USED/FENCED đã có PostgreSQL/Kafka test qua PR #43.
 - [x] Bổ sung controlled historical `cv-events` baseline CLI: dry-run mặc định, exact execute confirmation, Media verify ngoài transaction, Serializable recheck/lock và fail-closed với legacy URL hoặc CV đã có event.
-- [x] Bổ sung strict JWT/role guard, validation, Swagger và PostgreSQL/concurrency/security test cho Candidate CRUD, avatar/CV upload, internal CV authorization, lifecycle, Builder revisions, deletion fence, event outbox và historical baseline; feature branch đạt **51 unit + 70 integration test**, Application giữ **219 unit + 50 integration test**.
+- [x] Bổ sung strict JWT/role guard, validation, Swagger và PostgreSQL/concurrency/security test cho Candidate CRUD, avatar/CV upload, internal CV authorization, lifecycle, Builder revisions, deletion fence, event outbox và historical baseline; sau task 2.24 Profile đạt **51 unit + 70 integration test**, Application giữ **219 unit + 50 integration test**.
 
 ## P09 — File/Media Service
 
