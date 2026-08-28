@@ -10,20 +10,25 @@ import { InternalCvController } from './internal-cv.controller';
 import { InternalCvService } from './internal-cv.service';
 import { InternalCvV2Controller } from './internal-cv-v2.controller';
 import { InternalCvV2Service } from './internal-cv-v2.service';
+import { InternalRecruiterDiscoveryController } from './internal-recruiter-discovery.controller';
 import { JobPreferenceController } from './job-preference.controller';
 import { JobPreferenceService } from './job-preference.service';
 import { ProfileMediaController } from './profile-media.controller';
 import { ProfileMediaService } from './profile-media.service';
 import { ProfileController } from './profile.controller';
 import { ProfileService } from './profile.service';
+import { RecruiterDiscoveryController } from './recruiter-discovery.controller';
+import { RecruiterDiscoveryService } from './recruiter-discovery.service';
 
 @Module({
   imports: [ApplicationClientModule, MediaClientModule],
   controllers: [
     InternalCvController,
     InternalCvV2Controller,
+    InternalRecruiterDiscoveryController,
     CvBuilderController,
     JobPreferenceController,
+    RecruiterDiscoveryController,
     ProfileMediaController,
     ProfileController,
   ],
@@ -37,6 +42,7 @@ import { ProfileService } from './profile.service';
     InternalCvService,
     InternalCvV2Service,
     JobPreferenceService,
+    RecruiterDiscoveryService,
   ],
   exports: [ProfileService],
 })

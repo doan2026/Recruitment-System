@@ -2,32 +2,49 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'node:crypto';
 import { ApiException } from '../http/api-exception';
-import { InternalCaller } from './auth-user.interface';
+import {
+  InternalCaller,
+  InternalService,
+} from './auth-user.interface';
 
-const APPLICATION_SERVICE = 'application-service';
-const KEY_ENVIRONMENT = 'INTERNAL_API_KEY_APPLICATION';
-const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
+const APPLICATION_SERVICE: InternalService = 'application-service';
+const KEY_ENVIRONMENTS: Readonly<Record<InternalService, string>> = {
+  'application-service': 'INTERNAL_API_KEY_APPLICATION',
+  'job-search-service': 'INTERNAL_API_KEY_JOB_SEARCH',
+};
+const SAFE_KEY_PATTERN = /^[\x21-\x7e]{32,512}$/;
 
 @Injectable()
 export class InternalAuthService {
   constructor(private readonly config: ConfigService) {}
 
   assertConfiguration(): void {
-    this.getConfiguredKey();
+    const applicationKey = this.getConfiguredKey('application-service');
+    const jobSearchKey = this.getConfiguredKey('job-search-service');
+    if (applicationKey === jobSearchKey) {
+      throw this.configurationError();
+    }
   }
 
   authenticate(
     keyHeader: string | string[] | undefined,
     serviceHeader: string | string[] | undefined,
+    allowedServices: readonly InternalService[] = [APPLICATION_SERVICE],
   ): InternalCaller {
-    const expectedKey = this.getConfiguredKey();
     const providedKey =
-      typeof keyHeader === 'string' ? keyHeader.trim() : '';
+      typeof keyHeader === 'string' ? keyHeader : '';
     const providedService =
-      typeof serviceHeader === 'string' ? serviceHeader.trim() : '';
+      typeof serviceHeader === 'string' ? serviceHeader : '';
+    const service = this.isInternalService(providedService)
+      ? providedService
+      : null;
+    const permitted = service !== null && allowedServices.includes(service);
+    const expectedKey = permitted
+      ? this.getConfiguredKey(service)
+      : this.getConfiguredKey(APPLICATION_SERVICE);
 
     if (
-      providedService !== APPLICATION_SERVICE ||
+      !permitted ||
       !this.matchesKey(providedKey, expectedKey)
     ) {
       throw new ApiException(
@@ -37,20 +54,20 @@ export class InternalAuthService {
       );
     }
 
-    return { service: APPLICATION_SERVICE };
+    return { service };
   }
 
-  private getConfiguredKey(): string {
-    const rawValue = this.config.get<unknown>(KEY_ENVIRONMENT);
+  private getConfiguredKey(service: InternalService): string {
+    const environment = KEY_ENVIRONMENTS[service];
+    const rawValue = this.config.get<unknown>(environment);
     if (typeof rawValue !== 'string') {
       throw this.configurationError();
     }
     const key = rawValue.trim();
     if (
-      CONTROL_CHARACTER_PATTERN.test(rawValue) ||
-      Buffer.byteLength(key, 'utf8') < 32 ||
-      key.toLowerCase().includes('replace-with') ||
-      CONTROL_CHARACTER_PATTERN.test(key)
+      rawValue !== key ||
+      !SAFE_KEY_PATTERN.test(key) ||
+      key.toLowerCase().includes('replace-with')
     ) {
       throw this.configurationError();
     }
@@ -66,10 +83,15 @@ export class InternalAuthService {
     return timingSafeEqual(providedBuffer, expectedBuffer);
   }
 
+  private isInternalService(value: string): value is InternalService {
+    return value === 'application-service' || value === 'job-search-service';
+  }
+
   private configurationError(): ApiException {
     return new ApiException(
       'INTERNAL_AUTH_CONFIGURATION_ERROR',
-      `${KEY_ENVIRONMENT} must be a non-placeholder key of at least 32 bytes`,
+      'Profile internal caller keys must be distinct non-placeholder ' +
+        'printable ASCII values of 32 to 512 bytes',
       HttpStatus.SERVICE_UNAVAILABLE,
     );
   }

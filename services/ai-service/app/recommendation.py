@@ -21,6 +21,7 @@ from app.errors import ServiceError
 _CURSOR_VERSION = 1
 _CURSOR_MAXIMUM_BYTES = 1024
 RECOMMENDATION_MAXIMUM_PAGES = 10
+CANDIDATE_RECOMMENDATION_MAXIMUM_SCOPE = 500
 _HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -65,6 +66,19 @@ class JobRecommendationFilters:
     location: str | None = None
     salary_min: Decimal | None = None
     job_type: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateEligibility:
+    candidate_id: UUID
+    cv_id: UUID
+    discovery_version: int
+    profile_version: int
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateRecommendationFilters:
+    eligible_candidates: tuple[CandidateEligibility, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,7 +135,9 @@ class RecommendationRepository(Protocol):
     def recommend_candidates(
         self,
         job_id: UUID,
+        filters: CandidateRecommendationFilters,
         *,
+        job_version: int,
         limit: int,
         boundary: RecommendationBoundary | None,
         expected_source_fingerprint: str | None,
@@ -300,11 +316,17 @@ class RecommendationService:
     def recommend_candidates(
         self,
         job_id: UUID,
+        filters: CandidateRecommendationFilters,
         *,
+        job_version: int,
         limit: int,
         cursor: str | None,
     ) -> RecommendationOutput:
-        filter_fingerprint = _candidate_filter_fingerprint()
+        _validate_candidate_filters(filters, job_version=job_version)
+        filter_fingerprint = _candidate_filter_fingerprint(
+            filters,
+            job_version=job_version,
+        )
         decoded = self._decode_cursor(
             cursor,
             RecommendationKind.CANDIDATES,
@@ -313,6 +335,8 @@ class RecommendationService:
         try:
             page = self._repository.recommend_candidates(
                 job_id,
+                filters,
+                job_version=job_version,
                 limit=limit,
                 boundary=decoded.boundary if decoded else None,
                 expected_source_fingerprint=(
@@ -323,7 +347,7 @@ class RecommendationService:
             raise _service_unavailable() from error
         except StaleRecommendationCursor as error:
             raise _stale_cursor() from error
-        return self._build_output(
+        output = self._build_output(
             page,
             kind=RecommendationKind.CANDIDATES,
             filter_fingerprint=filter_fingerprint,
@@ -332,6 +356,12 @@ class RecommendationService:
             expected_next_page=decoded.boundary.page + 1 if decoded else 1,
             incoming_boundary=decoded.boundary if decoded else None,
         )
+        allowed_candidates = {
+            candidate.candidate_id for candidate in filters.eligible_candidates
+        }
+        if any(item.item_id not in allowed_candidates for item in output.items):
+            raise _service_unavailable()
+        return output
 
     def _decode_cursor(
         self,
@@ -427,6 +457,15 @@ def get_recommendation_service(request: Request) -> RecommendationService:
     )
 
 
+def get_candidate_recommendation_service(
+    request: Request,
+) -> RecommendationService:
+    return RecommendationService(
+        request.app.state.recommendation_repository,
+        request.app.state.settings.internal_api_key_job_search_candidates,
+    )
+
+
 def _job_filter_fingerprint(filters: JobRecommendationFilters) -> str:
     return _sha256_json(
         {
@@ -441,8 +480,60 @@ def _job_filter_fingerprint(filters: JobRecommendationFilters) -> str:
     )
 
 
-def _candidate_filter_fingerprint() -> str:
-    return _sha256_json({})
+def _candidate_filter_fingerprint(
+    filters: CandidateRecommendationFilters,
+    *,
+    job_version: int,
+) -> str:
+    return _sha256_json(
+        {
+            "job_version": job_version,
+            "eligible_candidates": [
+                {
+                    "candidate_id": str(candidate.candidate_id),
+                    "cv_id": str(candidate.cv_id),
+                    "discovery_version": candidate.discovery_version,
+                    "profile_version": candidate.profile_version,
+                }
+                for candidate in filters.eligible_candidates
+            ],
+        }
+    )
+
+
+def _validate_candidate_filters(
+    filters: CandidateRecommendationFilters,
+    *,
+    job_version: int,
+) -> None:
+    candidates = filters.eligible_candidates
+    candidate_ids = [candidate.candidate_id for candidate in candidates]
+    cv_ids = [candidate.cv_id for candidate in candidates]
+    if (
+        not isinstance(job_version, int)
+        or isinstance(job_version, bool)
+        or not 1 <= job_version <= 2_147_483_647
+        or not candidates
+        or len(candidates) > CANDIDATE_RECOMMENDATION_MAXIMUM_SCOPE
+        or any(
+            not isinstance(candidate.candidate_id, UUID)
+            or not isinstance(candidate.cv_id, UUID)
+            for candidate in candidates
+        )
+        or candidate_ids != sorted(candidate_ids, key=lambda value: value.int)
+        or len(set(candidate_ids)) != len(candidate_ids)
+        or len(set(cv_ids)) != len(cv_ids)
+        or any(
+            not isinstance(candidate.discovery_version, int)
+            or isinstance(candidate.discovery_version, bool)
+            or not 1 <= candidate.discovery_version <= 2_147_483_647
+            or not isinstance(candidate.profile_version, int)
+            or isinstance(candidate.profile_version, bool)
+            or not 1 <= candidate.profile_version <= 2_147_483_647
+            for candidate in candidates
+        )
+    ):
+        raise _service_unavailable()
 
 
 def _sha256_json(value: object) -> str:

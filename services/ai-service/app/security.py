@@ -23,6 +23,12 @@ job_search_api_key_header = APIKeyHeader(
     auto_error=False,
 )
 
+job_search_candidate_api_key_header = APIKeyHeader(
+    name="X-Internal-Api-Key",
+    scheme_name="JobSearchCandidateInternalApiKey",
+    auto_error=False,
+)
+
 
 def get_settings(request: Request) -> Settings:
     return request.app.state.settings
@@ -53,6 +59,34 @@ def require_job_search_recommendation_access(
     ] = None,
 ) -> None:
     expected_key = settings.internal_api_key_job_search.encode("utf-8")
+    valid_key = supplied_key is not None and secrets.compare_digest(
+        supplied_key.encode("utf-8"),
+        expected_key,
+    )
+    valid_service = supplied_service is not None and secrets.compare_digest(
+        supplied_service.encode("utf-8"),
+        b"job-search-service",
+    )
+    if not valid_key or not valid_service:
+        raise ServiceError(
+            status_code=401,
+            code="INVALID_INTERNAL_CALLER",
+            message="A valid scoped internal caller is required",
+        )
+
+
+def require_job_search_candidate_recommendation_access(
+    supplied_key: Annotated[
+        str | None,
+        Depends(job_search_candidate_api_key_header),
+    ],
+    settings: Annotated[Settings, Depends(get_settings)],
+    supplied_service: Annotated[
+        str | None,
+        Header(alias="X-Internal-Service"),
+    ] = None,
+) -> None:
+    expected_key = settings.internal_api_key_job_search_candidates.encode("utf-8")
     valid_key = supplied_key is not None and secrets.compare_digest(
         supplied_key.encode("utf-8"),
         expected_key,

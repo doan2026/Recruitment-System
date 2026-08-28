@@ -7,11 +7,13 @@ import {
   AuthenticatedRequest,
   AuthUser,
   InternalCaller,
+  InternalService,
 } from './auth-user.interface';
 import { SystemRole } from './system-role.enum';
 
 export const PUBLIC_ROUTE_KEY = 'profile:public-route';
 export const INTERNAL_ONLY_KEY = 'profile:internal-only';
+export const INTERNAL_CALLERS_KEY = 'profile:internal-callers';
 export const INTERNAL_CANDIDATE_JWT_KEY =
   'profile:internal-candidate-jwt';
 export const SYSTEM_ROLES_KEY = 'profile:system-roles';
@@ -21,6 +23,11 @@ export const Public = (): MethodDecorator & ClassDecorator =>
 
 export const InternalOnly = (): MethodDecorator & ClassDecorator =>
   SetMetadata(INTERNAL_ONLY_KEY, true);
+
+export const InternalCallers = (
+  ...services: InternalService[]
+): MethodDecorator & ClassDecorator =>
+  SetMetadata(INTERNAL_CALLERS_KEY, services);
 
 export const InternalCandidateJwt = (): MethodDecorator =>
   SetMetadata(INTERNAL_CANDIDATE_JWT_KEY, true);

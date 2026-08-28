@@ -16,7 +16,9 @@ import psycopg
 from psycopg import Cursor
 
 from app.recommendation import (
+    CANDIDATE_RECOMMENDATION_MAXIMUM_SCOPE,
     RECOMMENDATION_MAXIMUM_PAGES,
+    CandidateRecommendationFilters,
     CandidateRecommendationReason,
     JobRecommendationFilters,
     JobRecommendationReason,
@@ -168,11 +170,15 @@ class PsycopgRecommendationRepository:
     def recommend_candidates(
         self,
         job_id: UUID,
+        filters: CandidateRecommendationFilters,
         *,
+        job_version: int,
         limit: int,
         boundary: RecommendationBoundary | None,
         expected_source_fingerprint: str | None,
     ) -> RecommendationPage:
+        eligible_candidate_ids, eligible_cv_ids = _candidate_scope_arrays(filters)
+        _validate_job_version(job_version)
         try:
             with self._connect() as connection:
                 with connection.cursor() as cursor:
@@ -206,6 +212,7 @@ class PsycopgRecommendationRepository:
                     ) = source
                     if not isinstance(is_active, bool):
                         raise RecommendationStoreUnavailable
+                    _require_exact_source_version(source_version, job_version)
                     if not is_active:
                         return _source_empty_or_stale(
                             expected_source_fingerprint,
@@ -214,19 +221,26 @@ class PsycopgRecommendationRepository:
 
                     target_stats = cursor.execute(
                         """
+                        WITH eligible_scope(candidate_id, cv_id) AS (
+                            SELECT *
+                            FROM unnest(%s::uuid[], %s::uuid[])
+                        )
                         SELECT
-                            count(*) FILTER (WHERE is_active),
+                            count(*) FILTER (WHERE c.is_active),
                             count(*) FILTER (
-                                WHERE is_active AND model_name = %s
+                                WHERE c.is_active AND c.model_name = %s
                             ),
                             (
                                 SELECT generation
                                 FROM ai.recommendation_generations
                                 WHERE target_type = 'CVS'
                             )
-                        FROM ai.cv_embeddings
+                        FROM eligible_scope AS eligible
+                        JOIN ai.cv_embeddings AS c
+                          ON c.user_id = eligible.candidate_id
+                         AND c.cv_id = eligible.cv_id
                         """,
-                        (model_name,),
+                        (eligible_candidate_ids, eligible_cv_ids, model_name),
                     ).fetchone()
                     if target_stats is None:
                         raise RecommendationStoreUnavailable
@@ -266,6 +280,8 @@ class PsycopgRecommendationRepository:
                         cursor,
                         source_vector=source_vector,
                         model_name=model_name,
+                        eligible_candidate_ids=eligible_candidate_ids,
+                        eligible_cv_ids=eligible_cv_ids,
                         limit=limit,
                         boundary=boundary,
                     )
@@ -351,12 +367,16 @@ class PsycopgRecommendationRepository:
         *,
         source_vector: str,
         model_name: str,
+        eligible_candidate_ids: Sequence[UUID],
+        eligible_cv_ids: Sequence[UUID],
         limit: int,
         boundary: RecommendationBoundary | None,
     ) -> Sequence[tuple[UUID, float]]:
         parameters: dict[str, object] = {
             "source_vector": source_vector,
             "model_name": model_name,
+            "eligible_candidate_ids": list(eligible_candidate_ids),
+            "eligible_cv_ids": list(eligible_cv_ids),
             "result_limit": limit + 1,
         }
         cursor_predicate = ""
@@ -372,14 +392,24 @@ class PsycopgRecommendationRepository:
             parameters["cursor_id"] = boundary.item_id
 
         query = f"""
-            WITH scored AS (
+            WITH eligible_scope(candidate_id, cv_id) AS (
+                SELECT *
+                FROM unnest(
+                    %(eligible_candidate_ids)s::uuid[],
+                    %(eligible_cv_ids)s::uuid[]
+                )
+            ),
+            scored AS (
                 SELECT
                     c.user_id AS candidate_id,
                     c.cv_id,
                     (
                         c.vector <=> %(source_vector)s::vector
                     )::double precision AS distance
-                FROM ai.cv_embeddings AS c
+                FROM eligible_scope AS eligible
+                JOIN ai.cv_embeddings AS c
+                  ON c.user_id = eligible.candidate_id
+                 AND c.cv_id = eligible.cv_id
                 WHERE c.is_active
                   AND c.model_name = %(model_name)s
             ),
@@ -414,6 +444,49 @@ class PsycopgRecommendationRepository:
     def _force_exact_vector_plan(self, cursor: Cursor[Any]) -> None:
         cursor.execute("SET LOCAL enable_indexscan = off")
         cursor.execute("SET LOCAL enable_bitmapscan = off")
+
+
+def _candidate_scope_arrays(
+    filters: CandidateRecommendationFilters,
+) -> tuple[list[UUID], list[UUID]]:
+    try:
+        candidates = filters.eligible_candidates
+        candidate_ids = [candidate.candidate_id for candidate in candidates]
+        cv_ids = [candidate.cv_id for candidate in candidates]
+    except (AttributeError, TypeError) as error:
+        raise RecommendationStoreUnavailable from error
+    if (
+        not 1 <= len(candidates) <= CANDIDATE_RECOMMENDATION_MAXIMUM_SCOPE
+        or len(candidate_ids) != len(cv_ids)
+        or any(not isinstance(value, UUID) for value in (*candidate_ids, *cv_ids))
+        or candidate_ids != sorted(candidate_ids, key=lambda value: value.int)
+        or len(set(candidate_ids)) != len(candidate_ids)
+        or len(set(cv_ids)) != len(cv_ids)
+    ):
+        raise RecommendationStoreUnavailable
+    return candidate_ids, cv_ids
+
+
+def _validate_job_version(job_version: object) -> None:
+    if (
+        not isinstance(job_version, int)
+        or isinstance(job_version, bool)
+        or not 1 <= job_version <= 2_147_483_647
+    ):
+        raise RecommendationStoreUnavailable
+
+
+def _require_exact_source_version(
+    source_version: object,
+    job_version: int,
+) -> None:
+    _validate_job_version(job_version)
+    if (
+        not isinstance(source_version, int)
+        or isinstance(source_version, bool)
+        or source_version != job_version
+    ):
+        raise RecommendationStoreUnavailable
 
 
 def _source_empty_or_stale(

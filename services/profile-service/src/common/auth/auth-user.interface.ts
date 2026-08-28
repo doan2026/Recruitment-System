@@ -7,8 +7,12 @@ export interface AuthUser {
   claims: Record<string, unknown>;
 }
 
+export type InternalService =
+  | 'application-service'
+  | 'job-search-service';
+
 export interface InternalCaller {
-  service: 'application-service';
+  service: InternalService;
 }
 
 export interface AuthenticatedRequest extends Request {

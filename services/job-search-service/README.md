@@ -12,6 +12,7 @@ Nginx strips the `/jobs` gateway prefix before forwarding requests.
 | `GET /pending` | `GET /jobs/pending` | ADMIN |
 | `GET /search` | `GET /jobs/search` | Public |
 | `GET /recommended` | `GET /jobs/recommended` | CANDIDATE |
+| `GET /:jobId/recommended-candidates` | `GET /jobs/:jobId/recommended-candidates` | RECRUITER, manageable active Job |
 | `POST /reindex` | `POST /jobs/reindex` | ADMIN |
 | `GET /reindex/failures` | `GET /jobs/reindex/failures` | ADMIN |
 | `POST /reindex/failures/retry` | `POST /jobs/reindex/failures/retry` | ADMIN |
@@ -123,9 +124,54 @@ missing or unsafe key is never sent. First-page requests
 stay on `LATEST`, while `GET /health` reports
 `recommendationConfigured=false` and `DEGRADED`. This field reports local
 configuration only; it is not an upstream AI availability probe. Profile and
-AI URLs, allowed hosts, and timeouts are validated at startup. This release exposes only
-Candidate-facing job recommendations; it does not expose AI candidate
-recommendations to recruiters.
+AI URLs, allowed hosts, and timeouts are validated at startup.
+`candidateRecommendationConfigured` is true only when the Profile and distinct
+Candidate-ranking AI keys are safe and Company recommendation URL, allowlist
+and timeout configuration is valid. An invalid local value makes `/health`
+`DEGRADED`; health never calls Company, Profile or AI.
+
+## Recruiter Candidate recommendations
+
+`GET /:jobId/recommended-candidates` is Recruiter-only and accepts only a
+bounded `limit` (1–50, default 10) plus an opaque cursor of at most 1024 UTF-8
+bytes. Recruiter, company, Candidate and CV identities cannot be supplied in
+the query. The Recruiter identity comes from the verified JWT.
+
+Before calling a Candidate-data dependency, Job Service resolves the caller's
+strict self-membership projection from Company Service. The company must still
+be `VERIFIED`; the Job must belong to it, remain `PUBLISHED`, and have a UTC
+deadline of today or later. An `OWNER` can use any company Job while a `MEMBER`
+can use only a Job they created. After downstream resolution, Job Service
+re-fetches the caller's strict self-membership with the same bearer. Company,
+verification status and membership role must be unchanged, and the current
+role must still permit the Job. Only then is the exact Job aggregate version,
+lifecycle and deadline revalidated with a fresh UTC clock before a response is
+returned.
+
+Job Service requests the purpose-scoped Profile discovery snapshot with the
+distinct `PROFILE_INTERNAL_API_KEY`. The snapshot contains at most 500 sorted
+Candidate/CV/version tuples and no Profile content. An empty first-page
+snapshot returns `NO_DISCOVERABLE_CANDIDATES` without calling AI; the same
+condition on a continuation returns HTTP 409 `RECOMMENDATION_CURSOR_STALE`.
+Otherwise Job calls internal AI `POST /recommend/candidates` using the distinct
+`AI_CANDIDATE_INTERNAL_API_KEY`; it sends the canonical Job ID, positive
+`job_version` aggregate version, exact eligible scope, limit and cursor. The
+version binds ranking and pagination to the Job snapshot that was authorized.
+Neither internal call receives the Recruiter bearer token.
+
+Every AI result is resolved again through Profile with the exact Candidate,
+CV, discovery-version and Profile-version tuple from the snapshot. A withdrawn,
+deleted or version-mismatched Candidate is omitted by Profile and causes the
+public request to fail closed with HTTP 409. Dependency timeouts, malformed
+contracts and non-cursor failures return 503. There is no newest-Candidate or
+unconsented fallback.
+
+The public response contains only `jobId`, Candidate `candidateId`, `fullName`,
+nullable `headline`, deterministic self-declared skill names, AI score, cursor
+and a stable empty reason. It never contains CV IDs or versions, contact data,
+download URLs, vectors or source content. Responses use `private, no-store`,
+`Pragma: no-cache` and `Vary: Authorization`. The score is semantic similarity,
+not evidence of qualification and must not be used for automatic rejection.
 
 Every event-producing mutation increments the Job's positive
 `aggregate_version` and writes an immutable outbox row in the same PostgreSQL
@@ -307,7 +353,7 @@ npm test
 npm run build
 ```
 
-The verified local suite contains 226 unit tests. The isolated Docker gate
+The verified local suite contains 292 unit tests. The isolated Docker gate
 applies migrations to disposable PostgreSQL 16 and starts Kafka 3.8, authenticated
 Redis 7, and Elasticsearch 8.14.3 with index auto-creation disabled. It runs
 19 integration tests: three historical event baseline/resume/concurrency tests,
