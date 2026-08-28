@@ -205,6 +205,9 @@ services:
       APPLICATION_REQUEST_TIMEOUT_MS: ${PROFILE_APPLICATION_REQUEST_TIMEOUT_MS:-3000}
       CV_DELETION_RECONCILE_ENABLED: "true"
       CV_MEDIA_CLEANUP_ENABLED: "true"
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_CV_TOPIC: ${KAFKA_CV_TOPIC:-cv-events}
+      CV_EVENT_PUBLISHER_ENABLED: ${PROFILE_CV_EVENT_PUBLISHER_ENABLED:-true}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       SWAGGER_ENABLED: "true"
     secrets:
@@ -215,6 +218,8 @@ services:
       postgres:
         condition: service_healthy
       profile-migrate:
+        condition: service_completed_successfully
+      kafka-init:
         condition: service_completed_successfully
       auth-service:
         condition: service_started
@@ -369,6 +374,30 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+    volumes:
+      - ai-model-cache:/models
+
+  ai-cv-embedding-worker:
+    build:
+      context: ./services/ai-service
+      target: worker
+    env_file:
+      - ./services/ai-service/.env
+    environment:
+      MEDIA_SERVICE_URL: http://media-service:3000
+      MEDIA_INTERNAL_API_KEY: ${MEDIA_INTERNAL_API_KEY_AI:?MEDIA_INTERNAL_API_KEY_AI is required}
+      KAFKA_CV_TOPIC: ${KAFKA_CV_TOPIC:-cv-events}
+    command: [ "python", "-m", "app.cv_worker_main" ]
+    restart: unless-stopped
+    depends_on:
+      ai-service:
+        condition: service_healthy
+      media-service:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     volumes:
       - ai-model-cache:/models
 
