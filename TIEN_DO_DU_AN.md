@@ -1,8 +1,8 @@
 # BÁO CÁO TIẾN ĐỘ DỰ ÁN HỆ THỐNG TUYỂN DỤNG
 
-> Ngày cập nhật: 28/08/2026
+> Ngày cập nhật: 29/08/2026
 > Nhánh đối chiếu chính: `develop`
-> Pull Request lần cập nhật: PR #53 từ `feature/interview-service/interview-query-calendar-v1` vào `develop`
+> Pull Request lần cập nhật: PR #TBD từ `feature/company-service/audit-log` vào `develop`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -22,7 +22,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 | User/Profile Service | Người 1 | 🟡 Persistence, Candidate CRUD/completion, hai consent aggregate tách biệt cho Job preferences và Recruiter discovery, Media, Application CV contract v1, skill snapshot contract v2, lifecycle, backend Builder, deletion fence, transactional `cv-events` và controlled historical CV baseline đã hoàn thành; baseline chưa execute trên dữ liệu thật, frontend Builder/PDF renderer cùng consent/preferences UI còn pending |
 | File/Media Service | Người 1 | 🟡 Core signed upload/confirm, Profile consumer, AI private-download consumer contract, durable cleanup/reconciliation và guarded six-policy Cloudinary smoke runner đã hoàn thành; live staging execution, Offer letter, các consumer khác và production hardening còn pending |
 | Admin & Statistics Service | Người 1 | ⏳ Scaffold |
-| Company Service | Người 2 | 🟡 Nghiệp vụ chính, ownership logo/ảnh/video qua Media và migration backup/restore đã hoàn thành; real multi-service E2E, audit và load public search còn pending |
+| Company Service | Người 2 | 🟡 Nghiệp vụ chính, ownership logo/ảnh/video qua Media, migration backup/restore và domain audit duyệt/OWNER đã hoàn thành; real multi-service E2E và load public search còn pending |
 | Job & Search Service | Người 2 | 🟡 CRUD/search, transactional `job-events`, controlled historical Job baseline, Redis/BullMQ/Elasticsearch integration, Candidate job recommendation và consent-scoped Recruiter candidate recommendation đã hoàn thành; load/quality/deep-pagination benchmark còn thiếu |
 | Application Service | Người 2 | 🟡 Các luồng từ Submission đến AI Match, canonical Profile CV contract, durable usage/deletion gate, Application-time skill snapshot và canonical `application-events` v1 đã hoàn thành; còn P17 deployed E2E/load/production rollout |
 | AI Service | Người 2 | 🟡 Provider `/match`, consumer `job-events`, strict `cv-events` private-PDF embedding worker cùng internal `/recommend/jobs` và `/recommend/candidates` đã hoàn thành; source-side baseline chưa chạy trên dữ liệu thật, còn ANN/load/distributed-rate-limit benchmark và chatbot |
@@ -80,7 +80,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** tạo hồ sơ công ty; OWNER xin chữ ký/confirm upload và gắn media đã xác minh; cập nhật; gửi duyệt và Admin xác minh; hiển thị trang công khai; mời, chấp nhận, xóa và chuyển quyền thành viên.
 - **Chức năng chính:** profile CRUD, logo/ảnh/video Media-backed, trạng thái `PENDING/VERIFIED/REJECTED`, ownership, invitation token, public company page và endpoint tra cứu membership cho service khác.
 - **Phụ thuộc:** Auth, File/Media và Admin.
-- **Trạng thái:** nghiệp vụ chính và Company–Media ownership đã merge vào `develop` qua PR #54; migration backup/restore đã verify qua PR #55. Real multi-service E2E, audit và load public search vẫn pending.
+- **Trạng thái:** nghiệp vụ chính và Company–Media ownership đã merge vào `develop` qua PR #54; migration backup/restore đã verify qua PR #55; append-only domain audit cho duyệt công ty/chuyển OWNER hoàn thành qua PR #TBD. Real multi-service E2E và load public search vẫn pending.
 
 ## T06 — Job & Search Service
 
@@ -158,7 +158,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Mục tiêu:** chứng minh các luồng xuyên service chạy thật, ổn định và có thể triển khai.
 - **Công nghệ/công cụ:** unit/integration/E2E test, Docker Compose, CI/CD, Swagger/OpenAPI, logging/metrics/tracing.
 - **Đầu ra:** test contract REST/Kafka; migration sạch; test concurrency/idempotency; security test; smoke test; tài liệu môi trường; backup/restore; monitoring.
-- **Trạng thái:** đã có unit/integration test tập trung ở Company, Job/Search, Application, AI, Profile, Media, Interview và Notification. Company hiện đạt **139/139 unit test + build** cho profile/member/JWT/Media client/upload-intent guard/saga reconciler và PostgreSQL 16 migration/backup/separate-restore gate PASS; Profile đạt **62/62 unit + 89/89 PostgreSQL/Kafka integration test**, Media **26 + 26**, Job/Search **292 + 19**, AI **331 unit/non-integration + 54 integration (385 tổng)**, Application **260 unit + 63 PostgreSQL/Kafka integration**, Interview **143/143 unit/WebMvc/security/client/event/query + 16/16 PostgreSQL/Kafka integration**, Notification **51 unit + 7 PostgreSQL/Kafka integration** với migration deploy lặp sạch. Đây là bằng chứng service-level, không đồng nghĩa deployed E2E toàn hệ thống và P17 vẫn pending.
+- **Trạng thái:** đã có unit/integration test tập trung ở Company, Job/Search, Application, AI, Profile, Media, Interview và Notification. Company hiện đạt **148/148 unit test + build** cho profile/member/JWT/Media client/upload-intent guard/saga reconciler/domain audit và PostgreSQL 16 migration/audit/backup/separate-restore gate PASS; Profile đạt **62/62 unit + 89/89 PostgreSQL/Kafka integration test**, Media **26 + 26**, Job/Search **292 + 19**, AI **331 unit/non-integration + 54 integration (385 tổng)**, Application **260 unit + 63 PostgreSQL/Kafka integration**, Interview **143/143 unit/WebMvc/security/client/event/query + 16/16 PostgreSQL/Kafka integration**, Notification **51 unit + 7 PostgreSQL/Kafka integration** với migration deploy lặp sạch. Đây là bằng chứng service-level, không đồng nghĩa deployed E2E toàn hệ thống và P17 vẫn pending.
 
 ---
 
@@ -208,6 +208,14 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Tạo custom-format backup chỉ cho schema `company`, mode `0600`, giới hạn kích thước, SHA-256 và `pg_restore --list` trước mọi restore. Pre-upgrade và upgraded archive được restore bằng single transaction vào hai database mới/rỗng tách biệt; ledger, dữ liệu, schema, constraint và drift đều được đối chiếu. Archive bị cắt cụt bị từ chối ở bước list trước khi target được tạo.
 - Rollback hợp lệ là drain/freeze toàn bộ writer, chấp nhận RPO tại thời điểm pre-upgrade backup, restore sang database mới và chuyển đồng thời connection cùng old artifact đã pin. Old-schema SQL probe chỉ chứng minh database restore đọc/ghi được; không chứng minh binary cũ hoặc mixed old/new writer an toàn trên database đã upgrade, và không có in-place down migration.
 - E2E verifier PASS trên PostgreSQL 16 sạch; full regression Company vẫn đạt **139/139 unit test** và build PASS.
+
+### Company Domain Audit Ledger — PR #TBD
+
+- Prisma bổ sung `CompanyAuditLog` và ba action allowlist: Admin approve, Admin reject và OWNER transfer. Actor luôn lấy từ JWT `sub`; approve/reject cập nhật status và audit trong cùng transaction Serializable, còn transfer đổi hai role, tăng `aggregateVersion` và ghi một audit atomically. Retry review giống hệt không tạo audit trùng; audit insert lỗi làm rollback domain mutation.
+- Migration PostgreSQL thêm action-shape/positive-version CHECK, unique `(company_id, resulting_aggregate_version)`, FK `ON DELETE/UPDATE RESTRICT`, partial unique index bảo đảm tối đa một OWNER và trigger chặn `UPDATE`, `DELETE`, `TRUNCATE` audit. Không backfill actor giả; ledger bắt đầu từ rollout và không phải lịch sử đầy đủ của mọi profile/status mutation.
+- Phạm vi giữ đúng Người 2: không thêm query API/UI/Kafka/retention, không sửa Admin Service và không thay thế global Admin AuditLog. Audit không lưu email, token/hash invitation, JWT/Authorization, tax code, Media ID/URL, IP/User-Agent hay request body. Production vẫn phải tách migrator/runtime DB role vì table owner/superuser có thể vô hiệu trigger.
+- Company JWT consumer nay fail closed với issuer/audience bắt buộc, `alg=RS256`, `typ=JWT`, RFC 7638 thumbprint `kid`, UUID v4 `sub/jti`, integer `iat/exp` và exact uppercase role; controller truyền authenticated Admin ID thay vì nhận actor từ DTO/header.
+- Full regression đạt **148/148 unit test** và build PASS. Disposable PostgreSQL **16** gate PASS cho upgrade legacy đủ bốn migration, valid/invalid audit shape, rollback coupling, one-OWNER/FK/append-only negative, deploy lần hai no-op, drift bằng 0, catalog gồm trigger/function, backup/restore tách database và corrupt-archive rejection; audit probe cũng PASS lại sau upgraded restore.
 
 ## 2.2 Job & Search Service — đã merge vào `develop`
 
@@ -748,7 +756,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [ ] Chạy integration test với Auth/Admin/File Service thật.
 - [x] Xác minh ownership của logo, ảnh và video qua File/Media thay vì chỉ nhận reference; dùng upload/confirm OWNER-only với durable exact upload-intent guard, abandoned-upload quota cleanup, canonical verify, generation bind-before-commit và leased attach/detach reconciliation.
 - [x] Chạy Prisma migration trên database sạch và kiểm tra backup/restore cùng restore-based rollback; verifier PostgreSQL 16 fail-closed, migration deploy lặp, drift/ledger/data/constraint và corrupt-archive negative đều PASS.
-- [ ] Bổ sung audit log cho duyệt công ty và thay đổi OWNER nếu yêu cầu nghiệm thu.
+- [x] Bổ sung append-only Company domain audit cho duyệt công ty và thay đổi OWNER; actor từ canonical JWT, mutation/audit cùng transaction và PostgreSQL migration/audit/backup/restore gate PASS.
 - [ ] Kiểm tra phân trang/tìm kiếm trang công ty công khai ở tải lớn.
 
 ## P07 — Auth Service
@@ -957,7 +965,7 @@ Live Cloudinary smoke với sáu preset thật vẫn là hạng mục P09 độc
 - Core Auth đã hoàn thành qua OTP, password login, Google OIDC, JWT/refresh, forgot/reset password và Admin account control. Account-link Google có re-auth chỉ là hạng mục tùy chọn; production vẫn cần quy trình provisioning/bootstrap Admin được kiểm soát.
 - Admin account control bị ẩn khỏi public gateway và chưa có AuditLog vì proxy/audit thuộc P10 Admin Service. Access JWT stateless đã phát cho service khác vẫn có thể dùng tối đa 15 phút; chưa có denylist/introspection để thu hồi tức thời toàn hệ thống. API hiện là set-state idempotent theo last-commit-wins và chưa nhận expected version/`If-Match`; P10 phải serialize command hoặc bổ sung conditional mutation nếu nghiệp vụ cần chặn delayed unlock.
 - Password recovery dùng generic response và bounded async SMTP nhưng không cam kết timing tuyệt đối đồng nhất. Rate limit Nginx hiện theo từng gateway instance/client socket; triển khai sau LB/CDN hoặc nhiều replica phải cấu hình trusted Real IP, đồng bộ recovery CORS allowlist và dùng distributed ingress/WAF limiter. Production phải bật SMTP auth cùng STARTTLS bắt buộc.
-- JWT `typ=JWT` hiện tương thích decoder mặc định của Application, nhưng Application/Company/Job chưa cùng enforce đầy đủ issuer, audience, UUID `sub/jti`, role/header contract hoặc rollout previous key; P17/cross-service negative contract test vẫn pending và không được coi là hoàn tất trong task Auth này.
+- Company nay enforce issuer/audience, `typ=JWT`, RS256 thumbprint `kid`, UUID v4 `sub/jti` và exact role để bảo vệ audit actor. Application/Job vẫn chưa cùng enforce đầy đủ toàn bộ header/claim contract hoặc rollout previous key; P17/cross-service negative contract test vẫn pending và không được coi là hoàn tất trong task Company này.
 - Profile đã có Candidate CRUD/completion/auth, upload/list/detail/private-download CV, lifecycle PR #40, backend Builder PR #41, atomic deletion fence PR #42 và transactional `cv-events` PR #43. Verify còn bắt buộc strict Candidate JWT, còn recruiter chỉ đi qua Application sau Company authorization. Service-level contract/security/concurrency tests đã có, nhưng deployed cross-service REST/E2E trong P17 vẫn chưa hoàn thành; frontend Builder/PDF renderer cũng vẫn thuộc P16.
 - Profile skill snapshot v2 qua PR #46 chỉ cấp projection names-only cho đúng Candidate đang submit bằng dual auth; PR #47 đã thêm Application V8 consumer/filter. Kỹ năng là dữ liệu tự khai tại thời điểm nộp, không phải bằng chứng nội dung PDF và không được dùng để auto-reject. Rollout phải deploy Profile v2, chạy V8, deploy Application mới rồi drain replica còn gọi v1; replica cũ trong mixed rollout vẫn có thể tạo row legacy không snapshot. Không backfill lịch sử; active filter loại legacy/snapshot rỗng. V8 thêm constraint/check/index trong migration transaction nên phải đo lock window trên dữ liệu production trước rollout.
 - Root Nginx đã bỏ query/referrer khỏi access log cho toàn bộ `/applications/`, `/profile/` và `/jobs/`, đồng thời strip forged internal headers ở public Profile/Job routes. CDN, load balancer, APM và tracing bên ngoài vẫn có thể thu query hoặc request body Candidate tự khai; production phải duy trì redaction và retention hạn chế. Matching preference/skill là exact case-insensitive theo database collation, không phải accent-insensitive/substring/alias/semantic search.
