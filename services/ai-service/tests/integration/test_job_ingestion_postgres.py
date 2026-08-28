@@ -190,7 +190,7 @@ def test_event_state_migration_downgrades_and_upgrades_cleanly(
             """,
             (MIGRATION_CV_ID,),
         ).fetchone()
-    assert upgraded_version == ("20260828_04",)
+    assert upgraded_version == ("20260828_05",)
     assert upgraded_salary == (15, 2)
     assert upgraded_tables == (True, True, True, True)
     assert backfilled_owner == (MIGRATION_CANDIDATE_ID,)

@@ -21,6 +21,7 @@ CV_ID = UUID("10000000-0000-0000-0000-000000000001")
 JOB_ID = UUID("20000000-0000-0000-0000-000000000001")
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 INTERNAL_API_KEY = "integration-test-internal-key"
+SCOPED_JOB_KEY = "integration-job-search-key-00000001"
 
 
 def test_migration_creates_versioned_private_vector_store(
@@ -57,14 +58,44 @@ def test_migration_creates_versioned_private_vector_store(
         migration_version = connection.execute(
             "SELECT version_num FROM ai.alembic_version"
         ).fetchone()
+        recommendation_generations = connection.execute(
+            """
+            SELECT target_type, generation
+            FROM ai.recommendation_generations
+            ORDER BY target_type
+            """
+        ).fetchall()
+        recommendation_triggers = connection.execute(
+            """
+            SELECT
+                tgname,
+                tgenabled,
+                tgtype,
+                tgfoid =
+                  'ai.bump_recommendation_generation()'::regprocedure
+            FROM pg_trigger
+            WHERE NOT tgisinternal
+              AND tgname LIKE '%_recommendation_%'
+            ORDER BY tgname
+            """
+        ).fetchall()
 
     assert extension == ("vector",)
     assert {row[0] for row in tables} >= {
         "alembic_version",
         "cv_embeddings",
         "job_embeddings",
+        "recommendation_generations",
     }
-    assert migration_version == ("20260828_04",)
+    assert migration_version == ("20260828_05",)
+    assert [target for target, _ in recommendation_generations] == ["CVS", "JOBS"]
+    assert all(generation > 0 for _, generation in recommendation_generations)
+    assert recommendation_triggers == [
+        ("cv_embeddings_recommendation_generation", "O", 29, True),
+        ("cv_embeddings_recommendation_truncate", "O", 32, True),
+        ("job_embeddings_recommendation_generation", "O", 29, True),
+        ("job_embeddings_recommendation_truncate", "O", 32, True),
+    ]
     assert index_definition is not None
     assert "USING hnsw" in index_definition[0]
     assert "WHERE is_active" in index_definition[0]
@@ -192,6 +223,7 @@ def test_match_endpoint_uses_real_pgvector_result(database_url: str) -> None:
         settings=Settings(
             database_url=database_url,
             internal_api_key=INTERNAL_API_KEY,
+            internal_api_key_job_search=SCOPED_JOB_KEY,
         )
     )
 
@@ -218,6 +250,29 @@ def test_match_endpoint_uses_real_pgvector_result(database_url: str) -> None:
         },
         "meta": None,
     }
+
+
+@pytest.mark.parametrize("trigger_mode", ["DISABLE", "ENABLE REPLICA"])
+def test_readiness_rejects_trigger_that_will_not_run_for_origin_sessions(
+    database_url: str,
+    trigger_mode: str,
+) -> None:
+    trigger_name = "job_embeddings_recommendation_generation"
+    repository = _repository(database_url)
+    with psycopg.connect(database_url, autocommit=True) as connection:
+        connection.execute(
+            f"ALTER TABLE ai.job_embeddings {trigger_mode} TRIGGER {trigger_name}"
+        )
+    try:
+        with pytest.raises(MatchStoreUnavailable):
+            repository.check()
+    finally:
+        with psycopg.connect(database_url, autocommit=True) as connection:
+            connection.execute(
+                f"ALTER TABLE ai.job_embeddings ENABLE TRIGGER {trigger_name}"
+            )
+
+    repository.check()
 
 
 def _repository(database_url: str) -> PsycopgMatchRepository:

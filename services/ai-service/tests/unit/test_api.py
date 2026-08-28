@@ -14,6 +14,7 @@ from app.database import MatchResult, MatchStoreUnavailable
 from app.main import create_app
 
 API_KEY = "shared-internal-key"
+SCOPED_JOB_KEY = "job-search-scoped-internal-key-000001"
 CV_ID = UUID("10000000-0000-0000-0000-000000000001")
 JOB_ID = UUID("20000000-0000-0000-0000-000000000001")
 MATCH_PAYLOAD = {"cv_id": str(CV_ID), "job_id": str(JOB_ID)}
@@ -333,6 +334,7 @@ def make_client(
     settings = Settings(
         database_url="postgresql://unused-for-unit-tests",
         internal_api_key=internal_api_key,
+        internal_api_key_job_search=SCOPED_JOB_KEY,
     )
     return TestClient(
         create_app(

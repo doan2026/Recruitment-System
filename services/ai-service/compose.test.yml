@@ -45,6 +45,7 @@ services:
       AI_TEST_DATABASE_URL: postgresql://ai_test:ai_test_password@postgres-test:5432/ai_test
       AI_TEST_KAFKA_BROKERS: kafka-test:9092
       INTERNAL_API_KEY: integration-test-internal-key
+      INTERNAL_API_KEY_JOB_SEARCH: integration-job-search-key-00000001
     depends_on:
       postgres-test:
         condition: service_healthy

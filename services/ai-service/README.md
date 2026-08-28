@@ -1,11 +1,13 @@
 # AI Service
 
-FastAPI service for CV-to-job semantic matching. This vertical slice owns the
-pgvector schema and the internal `POST /match` provider used by Application
-Service. Dedicated non-root workers consume `job-events` and `cv-events`,
-generate pinned 384-dimensional CPU embeddings and persist only vectors,
-hashes and filtering metadata. Recommendation and chatbot implementation remain
-separate P11 tasks.
+FastAPI service for CV-to-job semantic matching and candidate-facing Job
+recommendations. This vertical slice owns the pgvector schema, the internal
+`POST /match` provider used by Application Service and the scoped
+`POST /recommend/jobs` provider used by Job Search Service. Dedicated non-root
+workers consume `job-events` and `cv-events`, generate pinned 384-dimensional
+CPU embeddings and persist only vectors, hashes and filtering metadata.
+Recruiter-facing candidate recommendations and chatbot implementation remain
+separate tasks.
 
 ## Internal match API
 
@@ -61,13 +63,14 @@ table. The ledger and DLQ store hashes and Kafka metadata, never raw payloads,
 CV text or job descriptions. Source event/version/timestamp provenance is kept
 with each embedding.
 
-Both vector columns are fixed at 384 dimensions. Job vectors have a partial
-HNSW cosine index for the future recommendation query. Only vectors, hashes,
-model identity and minimal filtering metadata are stored; original CV/job text
-is intentionally absent. A CV nearest-neighbor index is intentionally deferred
-until the recommend-candidates query and its filtering/load profile are
-implemented. Job salary filtering columns use `NUMERIC(15,2)`, matching the Job
-source of truth.
+Both vector columns are fixed at 384 dimensions. Job vectors retain a partial
+HNSW cosine index for a future benchmarked ANN strategy; recommendation v1
+forces an exact scan for complete, deterministic cursor pages. Only vectors,
+hashes, model identity and minimal filtering metadata are stored; original
+CV/job text is intentionally absent. A CV nearest-neighbor index is deferred
+until the recommend-candidates consent/authorization contract and its
+filtering/load profile are implemented. Job salary filtering columns use
+`NUMERIC(15,2)`, matching the Job source of truth.
 
 Run migrations from this directory:
 
@@ -222,12 +225,47 @@ may safely accumulate before it joins. Existing CV embedding rows migrate as
 active, but no historical Profile event is synthesized; any baseline replay
 must be explicitly reviewed before enabling the producer.
 
+## Candidate-facing Job recommendations
+
+`POST /recommend/jobs` is an internal v1 endpoint used only by
+Job Search Service. It accepts a CV ID plus bounded `location`, `salary_min`
+and `job_type` filters, and returns only Job IDs, normalized scores, an opaque
+cursor and a stable empty-result reason. It never returns vectors, source text,
+CV metadata or Job content. Candidate recommendations are deliberately not an
+HTTP surface yet; they require a separately reviewed candidate visibility,
+consent and recruiter/company/job capability contract.
+
+The endpoint requires both `X-Internal-Service: job-search-service` and the
+direction-scoped `X-Internal-Api-Key` configured as
+`INTERNAL_API_KEY_JOB_SEARCH`. This key must be 32–512 printable ASCII bytes,
+must differ from the legacy `/match` key, and should be rotated independently
+with the Job Search caller. Missing and invalid credentials share the same 401
+response.
+
+Recommendations include only active target embeddings produced by the exact
+same model as the active source CV. Ordering is deterministic by cosine
+distance then UUID. Cursors are canonical base64url payloads signed with
+HMAC-SHA256, are bound to endpoint, filters, source state and a transactional
+target-set generation, and are capped at ten result pages. Any forged, reused
+or stale cursor returns `RECOMMENDATION_CURSOR_STALE` without exposing which
+part changed.
+
+For pagination correctness, v1 forces an exact target scan only for the final
+ranked vector query. Source lookup and generation checks still use normal
+indexes. The generation triggers update in the same transaction as embedding
+mutations; `/ready` verifies their rows, function, event shape and enabled
+mode. The exact scan is intentionally correctness-first; query-load and
+rate-limit benchmarks plus a filter-aware ANN strategy remain follow-up work
+before raising limits.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and set at least:
 
 - `DATABASE_URL`
 - `INTERNAL_API_KEY` — exactly the same secret as Application Service
+- `INTERNAL_API_KEY_JOB_SEARCH` — distinct scoped Job Search-to-AI secret,
+  32–512 printable ASCII bytes
 - `DATABASE_CONNECT_TIMEOUT_SECONDS` (default 2)
 - `DATABASE_STATEMENT_TIMEOUT_MS` (default 2000)
 - `KAFKA_BROKERS`, the Job/CV topics, consumer groups and client IDs
@@ -247,16 +285,18 @@ Copy `.env.example` to `.env` and set at least:
 - `CV_PDF_MAXIMUM_PAGES` — hard maximum 100
 - `CV_PDF_MAXIMUM_TEXT_CHARACTERS` — hard maximum 500,000
 
-The API fails at startup if `DATABASE_URL` or `INTERNAL_API_KEY` is empty. The
-worker independently validates its database, Kafka, retry and pinned-model
+The API fails at startup if `DATABASE_URL`, `INTERNAL_API_KEY` or the distinct
+`INTERNAL_API_KEY_JOB_SEARCH` is invalid. The worker independently validates
+its database, Kafka, retry and pinned-model
 configuration before loading the model or consuming events. Define
 `INTERNAL_API_KEY` once in the repository root `.env`; the Application, Job and
 AI service environment files reference that same value so callers and the
 provider cannot silently drift to different credentials.
 
 `GET /health` is a process liveness probe. `GET /ready` also verifies the
-pgvector extension and both embedding tables, and returns 503 while storage is
-unavailable. Docker Compose uses `/ready` for the AI Service health check.
+pgvector extension, both embedding tables, recommendation generation rows and
+their enabled mutation triggers, and returns 503 while storage is unavailable.
+Docker Compose uses `/ready` for the AI Service health check.
 
 The API `runtime` image installs only `requirements.txt`. The dedicated
 `worker` image installs the CPU-only dependencies in `requirements-ml.txt`;
@@ -279,17 +319,20 @@ docker compose -f compose.test.yml down -v
 
 The full suite verifies migration-at-head behavior, privacy, vector dimensions,
 inactive/missing/model-mismatch results, cosine boundaries, event ordering,
-idempotency, retry/DLQ behavior, strict CV/Media/parser contracts and the HTTP
-contract. Real Kafka tests cover publish → consume → pgvector, duplicate
+idempotency, retry/DLQ behavior, strict CV/Media/parser contracts, scoped auth,
+signed/stale cursors, exact filtered pagination and transactional generation
+triggers. Real Kafka tests cover publish → consume → pgvector, duplicate
 delivery, source rejection followed by delete, hash-only malformed DLQ and
-committed offsets. The current suite collects 223 unit tests and 34
-PostgreSQL/Kafka integration tests (257 total). The production worker image
+committed offsets. The current suite collects 297 unit tests and 50
+PostgreSQL/Kafka integration tests (347 total). The production worker image
 also successfully generated a normalized 384-dimensional vector with the
 pinned model revision.
 
 ## Current boundary
 
-`/match` intentionally reads precomputed vectors and never loads the embedding
-model in a request. Job and CV embeddings are populated asynchronously by their
-dedicated workers. Full producer-to-Media-to-AI staging E2E, recommendation and
-chatbot APIs remain outside this service task.
+`/match` and `/recommend/jobs` read precomputed vectors and never load the
+embedding model in a request. Job and CV embeddings are populated
+asynchronously by their dedicated workers. Full producer-to-Media-to-AI staging
+E2E, recruiter-facing `/recommend/candidates` pending consent/capability rules,
+recommendation load/rate-limit benchmarking and chatbot APIs remain outside
+this service task.
