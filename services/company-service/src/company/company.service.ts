@@ -34,14 +34,30 @@ import {
 } from './dto/company-media-upload.dto';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { ListCompaniesQueryDto } from './dto/list-companies-query.dto';
+import {
+  PublicCompanySearchQueryDto,
+  PublicCompanySearchSummaryDto,
+} from './dto/public-company-search.dto';
 import { PublicCompanyProfileDto } from './dto/public-company-profile.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 import {
   CompanyVerificationDecision,
   VerifyCompanyDto,
 } from './dto/verify-company.dto';
+import { CompanyPublicSearchCursorService } from './company-public-search-cursor.service';
 
 type CompanyWithMedia = Company & { media: CompanyMedia[] };
+
+interface PublicCompanySearchRow {
+  id: string;
+  name: string;
+  normalizedName: string;
+  slug: string;
+  industry: string;
+  size: string;
+  address: string;
+  logoUrl: string | null;
+}
 
 interface PlannedLogo {
   fileId: string;
@@ -105,6 +121,7 @@ export class CompanyService {
     private readonly prisma: PrismaService,
     private readonly media: CompanyMediaClient,
     private readonly mediaOperations: CompanyMediaOperationService,
+    private readonly publicSearchCursor: CompanyPublicSearchCursorService,
   ) {}
 
   async create(
@@ -409,6 +426,69 @@ export class CompanyService {
     }
 
     return this.toPublicProfile(company);
+  }
+
+  async searchPublic(
+    query: PublicCompanySearchQueryDto,
+  ): Promise<ApiSuccessResponse<PublicCompanySearchSummaryDto[]>> {
+    const normalizedQuery = this.normalizePublicSearchQuery(query.q);
+    const cursor = this.publicSearchCursor.decode(
+      query.cursor,
+      normalizedQuery,
+      query.limit,
+    );
+    const cursorPredicate = cursor
+      ? Prisma.sql`AND (c."normalized_name", c."id") >
+          (${cursor.normalizedName}, ${cursor.id}::uuid)`
+      : Prisma.empty;
+    const searchPredicate = normalizedQuery
+      ? Prisma.sql`AND to_tsvector(
+          'simple'::regconfig,
+          company.fold_public_company_search(c."name")
+        ) @@ to_tsquery('simple'::regconfig, ${this.toPrefixTsQuery(normalizedQuery)})`
+      : Prisma.empty;
+
+    const rows = await this.prisma.$queryRaw<PublicCompanySearchRow[]>(
+      Prisma.sql`
+        SELECT
+          c."id",
+          c."name",
+          c."normalized_name" AS "normalizedName",
+          c."slug",
+          c."industry",
+          c."size",
+          c."address",
+          CASE
+            WHEN c."logo_media_reference_id" IS NULL THEN NULL
+            ELSE c."logo_url"
+          END AS "logoUrl"
+        FROM company.companies c
+        WHERE c."verified_status" = 'VERIFIED'::company."CompanyVerificationStatus"
+          ${searchPredicate}
+          ${cursorPredicate}
+        ORDER BY c."normalized_name" ASC, c."id" ASC
+        LIMIT ${query.limit + 1}
+      `,
+    );
+    const hasMore = rows.length > query.limit;
+    const pageRows = rows.slice(0, query.limit);
+    const last = pageRows.at(-1);
+    const nextCursor =
+      hasMore && last
+        ? this.publicSearchCursor.encode(normalizedQuery, query.limit, {
+            normalizedName: last.normalizedName,
+            id: last.id,
+          })
+        : null;
+
+    return apiSuccess(
+      pageRows.map((company) => this.toPublicSearchItem(company)),
+      {
+        limit: query.limit,
+        hasMore,
+        nextCursor,
+      },
+    );
   }
 
   async createMediaUploadIntent(
@@ -1209,6 +1289,39 @@ export class CompanyService {
     return normalized;
   }
 
+  private normalizePublicSearchQuery(value: string | undefined): string | null {
+    if (value === undefined) return null;
+    const folded = value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/gi, 'd')
+      .toLocaleLowerCase('vi')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim()
+      .replace(/\s+/g, ' ');
+    const tokens = folded.split(' ').filter(Boolean);
+    if (
+      tokens.length === 0 ||
+      tokens.length > 8 ||
+      tokens.some((token) => token.length > 48)
+    ) {
+      throw new ApiException(
+        'INVALID_COMPANY_SEARCH_QUERY',
+        'q must contain between 1 and 8 searchable words',
+        HttpStatus.BAD_REQUEST,
+        { field: 'q' },
+      );
+    }
+    return tokens.join(' ');
+  }
+
+  private toPrefixTsQuery(normalizedQuery: string): string {
+    return normalizedQuery
+      .split(' ')
+      .map((token) => `${token}:*`)
+      .join(' & ');
+  }
+
   private createSlug(name: string, companyId: string): string {
     const base =
       name
@@ -1246,6 +1359,20 @@ export class CompanyService {
         })),
       createdAt: company.createdAt.toISOString(),
       updatedAt: company.updatedAt.toISOString(),
+    };
+  }
+
+  private toPublicSearchItem(
+    company: PublicCompanySearchRow,
+  ): PublicCompanySearchSummaryDto {
+    return {
+      id: company.id,
+      name: company.name,
+      slug: company.slug,
+      industry: company.industry,
+      size: company.size,
+      address: company.address,
+      logoUrl: company.logoUrl,
     };
   }
 

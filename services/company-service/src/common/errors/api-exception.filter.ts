@@ -64,7 +64,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
         JSON.stringify({
           requestId,
           method: request.method,
-          path: request.originalUrl,
+          path: request.path,
           exception:
             exception instanceof Error
               ? { name: exception.name, message: exception.message }

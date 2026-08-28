@@ -1,4 +1,6 @@
-FROM node:20-alpine AS build
+FROM node:20-alpine AS base
+RUN apk add --no-cache openssl
+FROM base AS build
 WORKDIR /app
 ENV DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder
 COPY package.json .
@@ -7,7 +9,7 @@ COPY nest-cli.json tsconfig.json ./
 COPY prisma prisma
 COPY src src
 RUN npm run build
-FROM node:20-alpine
+FROM base
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json .

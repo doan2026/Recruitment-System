@@ -50,6 +50,10 @@ import {
 } from './dto/company-media-upload.dto';
 import { ListCompaniesQueryDto } from './dto/list-companies-query.dto';
 import {
+  PublicCompanySearchQueryDto,
+  PublicCompanySearchSummaryDto,
+} from './dto/public-company-search.dto';
+import {
   PublicCompanyMediaDto,
   PublicCompanyProfileDto,
 } from './dto/public-company-profile.dto';
@@ -105,6 +109,32 @@ const PUBLIC_COMPANY_PROFILE_ENVELOPE = {
   },
 };
 
+const PUBLIC_COMPANY_SEARCH_ENVELOPE = {
+  type: 'object',
+  required: ['data', 'meta'],
+  properties: {
+    data: {
+      type: 'array',
+      items: { $ref: getSchemaPath(PublicCompanySearchSummaryDto) },
+    },
+    meta: {
+      type: 'object',
+      required: ['limit', 'hasMore', 'nextCursor'],
+      properties: {
+        limit: { type: 'integer', minimum: 1, maximum: 50 },
+        hasMore: { type: 'boolean' },
+        nextCursor: {
+          type: 'string',
+          nullable: true,
+          minLength: 1,
+          maxLength: 1024,
+          pattern: '^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]{43}$',
+        },
+      },
+    },
+  },
+};
+
 const COMPANY_MEDIA_UPLOAD_CAPABILITY_ENVELOPE = {
   type: 'object',
   required: ['data', 'meta'],
@@ -126,6 +156,7 @@ const COMPANY_MEDIA_UPLOAD_RESULT_ENVELOPE = {
 @ApiTags('companies')
 @ApiExtraModels(
   CompanyProfileDto,
+  PublicCompanySearchSummaryDto,
   PublicCompanyProfileDto,
   PublicCompanyMediaDto,
   LogoReferenceResponseDto,
@@ -209,6 +240,33 @@ export class CompanyController {
   @ApiOkResponse({ schema: COMPANY_PROFILE_ENVELOPE })
   getMine(@CurrentUser() user: AuthUser): Promise<CompanyProfileDto> {
     return this.companyService.getMine(user.id);
+  }
+
+  @Public()
+  @Get('search')
+  @Header('Cache-Control', 'no-store')
+  @Header('Pragma', 'no-cache')
+  @ApiOperation({
+    summary: 'Search verified companies with signed keyset pagination',
+  })
+  @ApiOkResponse({
+    schema: PUBLIC_COMPANY_SEARCH_ENVELOPE,
+    headers: {
+      'Cache-Control': {
+        schema: { type: 'string', example: 'no-store' },
+      },
+      Pragma: {
+        schema: { type: 'string', example: 'no-cache' },
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description: 'The search query or cursor is invalid',
+  })
+  searchPublic(
+    @Query() query: PublicCompanySearchQueryDto,
+  ): Promise<ApiSuccessResponse<PublicCompanySearchSummaryDto[]>> {
+    return this.companyService.searchPublic(query);
   }
 
   @Public()

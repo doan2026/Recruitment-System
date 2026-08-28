@@ -26,7 +26,7 @@ export class RequestIdMiddleware implements NestMiddleware {
         JSON.stringify({
           requestId,
           method: request.method,
-          path: request.originalUrl,
+          path: request.path,
           statusCode: response.statusCode,
           durationMs: Date.now() - startedAt,
         }),

@@ -12,6 +12,23 @@ const SPOOFED_ACTOR_ID = '99eec7f1-fb6e-49d0-89ff-7d65d2438ff9';
 const COMPANY_ID = '90eec7f1-fb6e-49d0-89ff-7d65d2438ff7';
 
 describe('CompanyController', () => {
+  it('forwards the validated public search query without an identity', async () => {
+    const result = {
+      data: [],
+      meta: { limit: 20, hasMore: false, nextCursor: null },
+    };
+    const companyService = {
+      searchPublic: jest.fn().mockResolvedValue(result),
+    };
+    const controller = new CompanyController(
+      companyService as unknown as CompanyService,
+    );
+    const query = { q: 'Công nghệ', limit: 20 };
+
+    await expect(controller.searchPublic(query)).resolves.toBe(result);
+    expect(companyService.searchPublic).toHaveBeenCalledWith(query);
+  });
+
   it('forwards the authenticated Admin id for verification and ignores a DTO actor', async () => {
     const companyService = {
       verify: jest.fn().mockResolvedValue(undefined),

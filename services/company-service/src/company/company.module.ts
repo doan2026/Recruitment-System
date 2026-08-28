@@ -3,6 +3,7 @@ import { CompanyMediaOperationService } from '../media/company-media-operation.s
 import { MediaClientModule } from '../media/media-client.module';
 import { CompanyMemberController } from './company-member.controller';
 import { CompanyMemberService } from './company-member.service';
+import { CompanyPublicSearchCursorService } from './company-public-search-cursor.service';
 import { CompanyController } from './company.controller';
 import { CompanyService } from './company.service';
 
@@ -12,6 +13,7 @@ import { CompanyService } from './company.service';
   providers: [
     CompanyService,
     CompanyMemberService,
+    CompanyPublicSearchCursorService,
     CompanyMediaOperationService,
   ],
 })

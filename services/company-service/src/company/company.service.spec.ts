@@ -5,6 +5,7 @@ import {
   CompanyMediaType,
   CompanyMemberRole,
   CompanyVerificationStatus,
+  Prisma,
 } from '@prisma/client';
 import { ApiException } from '../common/errors/api-exception';
 import {
@@ -16,6 +17,7 @@ import {
 } from '../media/company-media.client';
 import { CompanyMediaOperationService } from '../media/company-media-operation.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { CompanyPublicSearchCursorService } from './company-public-search-cursor.service';
 import { CompanyService } from './company.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
@@ -163,6 +165,7 @@ describe('CompanyService', () => {
   let service: CompanyService;
   let prisma: {
     $transaction: jest.Mock;
+    $queryRaw: jest.Mock;
     companyMember: { findUnique: jest.Mock };
     company: {
       findFirst: jest.Mock;
@@ -210,6 +213,10 @@ describe('CompanyService', () => {
     kick: jest.Mock;
     foregroundLeaseExpiresAt: jest.Mock;
     uploadIntentCleanupAt: jest.Mock;
+  };
+  let publicSearchCursor: {
+    encode: jest.Mock;
+    decode: jest.Mock;
   };
 
   beforeEach(() => {
@@ -262,6 +269,7 @@ describe('CompanyService', () => {
           transaction,
         );
       }),
+      $queryRaw: jest.fn(),
       companyMember: { findUnique: jest.fn() },
       company: {
         findFirst: jest.fn(),
@@ -330,11 +338,16 @@ describe('CompanyService', () => {
         new Date(expiresAt.getTime() + 15 * 60_000),
       ),
     };
+    publicSearchCursor = {
+      encode: jest.fn().mockReturnValue('signed-next-cursor'),
+      decode: jest.fn().mockReturnValue(null),
+    };
 
     service = new CompanyService(
       prisma as unknown as PrismaService,
       media as unknown as CompanyMediaClient,
       mediaOperations as unknown as CompanyMediaOperationService,
+      publicSearchCursor as unknown as CompanyPublicSearchCursorService,
     );
   });
 
@@ -1346,6 +1359,133 @@ describe('CompanyService', () => {
         },
       }),
     );
+  });
+
+  it('searches only verified companies with a minimal keyset page', async () => {
+    prisma.$queryRaw.mockResolvedValue([
+      companyRecord({
+        id: '11111111-1111-4111-8111-111111111111',
+        name: 'Alpha',
+        normalizedName: 'alpha',
+        slug: 'alpha',
+        verifiedStatus: CompanyVerificationStatus.VERIFIED,
+        logoUrl: 'https://media.example/alpha.png',
+        logoMediaReferenceId: LOGO_REFERENCE_ID,
+      }),
+      companyRecord({
+        id: '22222222-2222-4222-8222-222222222222',
+        name: 'Beta',
+        normalizedName: 'beta',
+        slug: 'beta',
+        verifiedStatus: CompanyVerificationStatus.VERIFIED,
+        logoUrl: null,
+      }),
+      companyRecord({
+        id: '33333333-3333-4333-8333-333333333333',
+        name: 'Gamma',
+        normalizedName: 'gamma',
+        slug: 'gamma',
+        verifiedStatus: CompanyVerificationStatus.VERIFIED,
+      }),
+    ]);
+
+    const result = await service.searchPublic({ limit: 2 });
+
+    expect(publicSearchCursor.decode).toHaveBeenCalledWith(
+      undefined,
+      null,
+      2,
+    );
+    expect(publicSearchCursor.encode).toHaveBeenCalledWith(null, 2, {
+      normalizedName: 'beta',
+      id: '22222222-2222-4222-8222-222222222222',
+    });
+    expect(result).toEqual({
+      data: [
+        {
+          id: '11111111-1111-4111-8111-111111111111',
+          name: 'Alpha',
+          slug: 'alpha',
+          industry: 'Technology',
+          size: '51-200',
+          address: 'Ho Chi Minh City',
+          logoUrl: 'https://media.example/alpha.png',
+        },
+        {
+          id: '22222222-2222-4222-8222-222222222222',
+          name: 'Beta',
+          slug: 'beta',
+          industry: 'Technology',
+          size: '51-200',
+          address: 'Ho Chi Minh City',
+          logoUrl: null,
+        },
+      ],
+      meta: {
+        limit: 2,
+        hasMore: true,
+        nextCursor: 'signed-next-cursor',
+      },
+    });
+    expect(result.data[0]).not.toHaveProperty('taxCode');
+    expect(result.data[0]).not.toHaveProperty('description');
+    expect(result.data[0]).not.toHaveProperty('verifiedStatus');
+    expect(result.data[0]).not.toHaveProperty('logoMediaReferenceId');
+    const statement = prisma.$queryRaw.mock.calls[0][0] as Prisma.Sql;
+    expect(statement.strings.join(' ')).toContain(
+      `c."verified_status" = 'VERIFIED'`,
+    );
+    expect(statement.strings.join(' ')).not.toContain('OFFSET');
+    expect(prisma.company.count).not.toHaveBeenCalled();
+  });
+
+  it('folds Vietnamese search text and binds a continuation cursor', async () => {
+    publicSearchCursor.decode.mockReturnValue({
+      normalizedName: 'cong ty anh',
+      id: '11111111-1111-4111-8111-111111111111',
+    });
+    prisma.$queryRaw.mockResolvedValue([]);
+
+    const result = await service.searchPublic({
+      q: '  Công   ty Đẹp  ',
+      cursor: 'signed-cursor',
+      limit: 20,
+    });
+
+    expect(publicSearchCursor.decode).toHaveBeenCalledWith(
+      'signed-cursor',
+      'cong ty dep',
+      20,
+    );
+    expect(result.meta).toEqual({
+      limit: 20,
+      hasMore: false,
+      nextCursor: null,
+    });
+    expect(publicSearchCursor.encode).not.toHaveBeenCalled();
+    const statement = prisma.$queryRaw.mock.calls[0][0] as Prisma.Sql;
+    expect(statement.values).toEqual(
+      expect.arrayContaining([
+        'cong:* & ty:* & dep:*',
+        'cong ty anh',
+        '11111111-1111-4111-8111-111111111111',
+        21,
+      ]),
+    );
+  });
+
+  it('rejects an abusive public search before querying PostgreSQL', async () => {
+    await expect(
+      service.searchPublic({
+        q: 'mot hai ba bon nam sau bay tam chin',
+        limit: 20,
+      }),
+    ).rejects.toMatchObject({
+      code: 'INVALID_COMPANY_SEARCH_QUERY',
+      status: HttpStatus.BAD_REQUEST,
+    });
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(publicSearchCursor.decode).not.toHaveBeenCalled();
   });
 
   it('lists the selected review queue with pagination metadata', async () => {
