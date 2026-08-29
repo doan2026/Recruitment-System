@@ -361,9 +361,38 @@ mode. For this Candidate-facing `/recommend/jobs` direction, the full-target
 exact scan is intentionally correctness-first. The controlled gate below now
 covers HTTP correctness, concurrent-writer cursor behavior and local query load
 at 100,000 targets. Distributed rate limiting is now available for both
-surfaces; filter-aware ANN, deployed/multi-replica capacity and real-model
-relevance remain follow-up work before raising limits. This work is separate from the bounded
+surfaces; deployed/multi-replica capacity and real-model relevance remain
+follow-up work before raising limits. Filter-aware ANN was investigated and
+ruled out for this surface — see below. This work is separate from the bounded
 `/recommend/candidates` allowlist gate below.
+
+## Why filter-aware ANN stays off for Job recommendation
+
+pgvector 0.8 ships an iterative index scan that resumes an HNSW search until a
+filtered result set is satisfied, with `strict_order` preserving exact distance
+order. That is the shape of the long-standing "filter-aware ANN" follow-up, so
+it was investigated directly against the real schema. It cannot be adopted for
+this surface, and `tests/integration/test_job_ann_filter_aware_postgres.py`
+keeps that conclusion executable rather than folklore.
+
+The blocker is not the index and not the filters:
+
+- the partial active-row HNSW index serves a pure `ORDER BY vector <=> const`
+  ordering, and keeps serving it with the Job filters applied, so a
+  filter-aware scan would be reachable if the ordering allowed it;
+- the production query scores inside a CTE and orders the outer result, which
+  detaches the ordering from the scan and puts any vector index out of reach —
+  so a GUC alone changes nothing;
+- flattening the query is not enough either. The index serves the distance key
+  alone; adding the deterministic `job_id` tie-break makes it unusable, because
+  an ordering operator cannot be combined with an ordinary sort key.
+
+That tie-break is exactly what the stateless HMAC keyset cursor depends on:
+distance alone is not a total order, so two Jobs at the same cosine distance
+would let a continuation revisit or skip rows. Adopting ANN here therefore
+means giving up complete, reproducible cursor pages, which is a pagination
+contract change and not a tuning flag. The full-target exact scan stays until
+that contract is redesigned.
 
 ## Recruiter-facing Candidate recommendation provider
 
