@@ -57,7 +57,7 @@ class ApplicationOfferMigrationV9IT {
             Instant.parse("2026-08-28T10:00:00Z")
         );
 
-        migrateTo(null);
+        migrateTo(MigrationVersion.fromVersion("9"));
 
         assertCancelled(jdbc, rejectedOffer);
         assertCancelled(jdbc, withdrawnOffer);

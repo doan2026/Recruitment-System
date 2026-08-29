@@ -60,6 +60,12 @@ application-events:
   publish-delay-ms: ${OUTBOX_PUBLISH_DELAY_MS:1000}
   publish-initial-delay-ms: ${OUTBOX_PUBLISH_INITIAL_DELAY_MS:0}
 
+application-offers:
+  expiry-scan-delay-ms: ${OFFER_EXPIRY_SCAN_DELAY_MS:60000}
+  expiry-scan-initial-delay-ms: ${OFFER_EXPIRY_SCAN_INITIAL_DELAY_MS:15000}
+  expiry-batch-size: ${OFFER_EXPIRY_BATCH_SIZE:200}
+  expiry-max-batches-per-scan: ${OFFER_EXPIRY_MAX_BATCHES_PER_SCAN:25}
+
 management:
   endpoints:
     web:

@@ -369,8 +369,7 @@ were still `SENT`; it does not synthesize history or outbox events. The V9
 rollout is intentionally not compatible with an old Application binary that
 does not understand `CANCELLED`: drain every old replica before applying V9,
 run one migration job, then start only the new binary. Do not roll back to an
-old binary after V9. Automatic Offer expiry remains a separate operational
-task.
+old binary after V9.
 V9 drops and recreates Offer checks in one transaction, so it takes an
 `ACCESS EXCLUSIVE` lock while it backfills and validates the table. Measure the
 lock/backfill duration on production-sized data and reserve a maintenance
@@ -387,6 +386,57 @@ WHERE application.status IN ('REJECTED', 'WITHDRAWN')
 ```
 
 Only then may the new replicas receive traffic.
+
+### Offer expiry
+
+An Offer that stays `SENT` past `expires_at` can never be responded to, so a
+scheduled worker resolves the row to the terminal `EXPIRED` status instead of
+leaving one that only looks respondable. Each scan reads one clock instant and
+drains lapsed Offers in bounded batches until a batch comes back short or the
+per-scan batch budget is spent. Batches are claimed with `FOR UPDATE SKIP
+LOCKED` over the `offers_pending_expiry_idx` partial index, so replicas take
+disjoint claims, never expire a row twice, and never block a Candidate response
+or a pipeline cancellation that already holds the row. A failed batch rolls
+back and the next scan retries from the same durable state.
+
+`responded_at` is set to the row's own `expires_at` rather than the scan clock,
+so the outcome is deterministic and identical whether a row was repaired by the
+Flyway V10 backfill or expired later by the worker.
+
+Expiry resolves the Offer only. The Application keeps its `OFFER` status so the
+terminal pipeline decision stays with the Recruiter or the Candidate, and the
+worker writes no history row and no outbox event: the canonical
+`application-events` v1 contract carries neither an expiry action nor an
+`EXPIRED` `offer_status`, so emitting one would be rejected by the Notification
+consumer. Rejecting or withdrawing an Application whose Offer has already
+expired keeps working and still produces an ordinary `STATUS_CHANGED` event
+without the Offer trio; a terminal Offer simply leaves the transition nothing to
+cancel. A Candidate responding to a lapsed Offer receives the same
+`OFFER_EXPIRED` conflict whether or not the worker has resolved the row yet.
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `OFFER_EXPIRY_SCAN_DELAY_MS` | `60000` | Delay between scans |
+| `OFFER_EXPIRY_SCAN_INITIAL_DELAY_MS` | `15000` | Delay before the first scan |
+| `OFFER_EXPIRY_BATCH_SIZE` | `200` | Rows claimed per batch (clamped to 1..1000) |
+| `OFFER_EXPIRY_MAX_BATCHES_PER_SCAN` | `25` | Batch budget per scan (clamped to 1..100) |
+
+Flyway V10 widens the Offer status and response-coherence checks for `EXPIRED`
+and backfills every `SENT` row already past `expires_at`; it does not
+synthesize history or outbox events and does not touch the Application. Like
+V9, it drops and recreates both checks in one transaction and therefore takes
+an `ACCESS EXCLUSIVE` lock while backfilling and validating, and it is not
+compatible with an old binary that does not understand `EXPIRED`: drain every
+old replica, run one migration job, then start only the new binary. Do not roll
+back to an old binary after V10. Before enabling traffic, the migrator must
+confirm this query returns `0`:
+
+```sql
+SELECT COUNT(*) AS respondable_lapsed_offers
+FROM application.offers
+WHERE status = 'SENT'
+  AND expires_at <= now();
+```
 
 
 Sending an offer writes the Offer, moves the Application to `OFFER`, appends
