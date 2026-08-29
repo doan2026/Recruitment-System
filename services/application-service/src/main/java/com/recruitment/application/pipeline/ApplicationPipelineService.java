@@ -8,8 +8,11 @@ import com.recruitment.application.client.RecruiterCompanyMembership;
 import com.recruitment.application.domain.ApplicationEntity;
 import com.recruitment.application.domain.ApplicationEventOutboxEntity;
 import com.recruitment.application.domain.ApplicationStatus;
+import com.recruitment.application.domain.OfferEntity;
+import com.recruitment.application.domain.OfferStatus;
 import com.recruitment.application.event.ApplicationEventV1;
 import com.recruitment.application.repository.ApplicationEventOutboxRepository;
+import com.recruitment.application.repository.OfferRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.EnumSet;
@@ -36,6 +39,7 @@ public class ApplicationPipelineService {
     private final ApplicationPipelineRepository applications;
     private final ApplicationHistoryWriter history;
     private final ApplicationEventOutboxRepository outbox;
+    private final OfferRepository offers;
     private final CompanyClient companies;
     private final ObjectMapper objectMapper;
     private final Clock clock;
@@ -46,6 +50,7 @@ public class ApplicationPipelineService {
         ApplicationPipelineRepository applications,
         ApplicationHistoryWriter history,
         ApplicationEventOutboxRepository outbox,
+        OfferRepository offers,
         CompanyClient companies,
         ObjectMapper objectMapper,
         @Value("${application-events.topic}") String topic
@@ -54,6 +59,7 @@ public class ApplicationPipelineService {
             applications,
             history,
             outbox,
+            offers,
             companies,
             objectMapper,
             Clock.systemUTC(),
@@ -65,6 +71,7 @@ public class ApplicationPipelineService {
         ApplicationPipelineRepository applications,
         ApplicationHistoryWriter history,
         ApplicationEventOutboxRepository outbox,
+        OfferRepository offers,
         CompanyClient companies,
         ObjectMapper objectMapper,
         Clock clock,
@@ -73,6 +80,7 @@ public class ApplicationPipelineService {
         this.applications = applications;
         this.history = history;
         this.outbox = outbox;
+        this.offers = offers;
         this.companies = companies;
         this.objectMapper = objectMapper;
         this.clock = clock;
@@ -214,6 +222,7 @@ public class ApplicationPipelineService {
             expectedVersion + 1,
             now
         );
+        cancelSentOfferForTerminalTransition(application, target, now);
         int changed = applications.transition(
             application.getId(),
             target,
@@ -245,6 +254,39 @@ public class ApplicationPipelineService {
             now,
             expectedVersion + 1
         );
+    }
+
+    private void cancelSentOfferForTerminalTransition(
+        ApplicationEntity application,
+        ApplicationStatus target,
+        Instant now
+    ) {
+        if (
+            application.getStatus() != ApplicationStatus.OFFER ||
+            (
+                target != ApplicationStatus.REJECTED &&
+                target != ApplicationStatus.WITHDRAWN
+            )
+        ) {
+            return;
+        }
+
+        OfferEntity offer = offers.findByApplicationId(application.getId())
+            .orElseThrow(this::inconsistentOfferState);
+        if (offer.getStatus() != OfferStatus.SENT) {
+            throw concurrentChange();
+        }
+
+        // Candidate response takes the same Offer -> Application lock order.
+        // Keeping that order here avoids a cross-path row-lock deadlock.
+        int changed = offers.cancelSent(
+            application.getId(),
+            now,
+            offer.getVersion()
+        );
+        if (changed != 1) {
+            throw concurrentChange();
+        }
     }
 
     private void validateRecruiterTransition(
@@ -367,6 +409,14 @@ public class ApplicationPipelineService {
             "APPLICATION_CHANGED_CONCURRENTLY",
             "Application changed concurrently; reload and try again",
             HttpStatus.CONFLICT
+        );
+    }
+
+    private BusinessException inconsistentOfferState() {
+        return new BusinessException(
+            "APPLICATION_OFFER_INCONSISTENT",
+            "Application offer state is inconsistent",
+            HttpStatus.SERVICE_UNAVAILABLE
         );
     }
 

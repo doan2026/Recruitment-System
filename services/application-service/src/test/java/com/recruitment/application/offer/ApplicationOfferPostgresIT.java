@@ -15,8 +15,12 @@ import com.recruitment.application.domain.ApplicationSource;
 import com.recruitment.application.domain.ApplicationStatus;
 import com.recruitment.application.domain.OfferEntity;
 import com.recruitment.application.domain.OfferStatus;
+import com.recruitment.application.pipeline.ApplicationPipelineService;
 import com.recruitment.application.pipeline.ApplicationHistoryWriter;
 import com.recruitment.application.pipeline.ApplicationPipelineRepository;
+import com.recruitment.application.pipeline.ChangeApplicationStatusRequest;
+import com.recruitment.application.pipeline.StatusTransitionResponse;
+import com.recruitment.application.pipeline.WithdrawApplicationRequest;
 import com.recruitment.application.repository.ApplicationEventOutboxRepository;
 import com.recruitment.application.repository.ApplicationHistoryRepository;
 import com.recruitment.application.repository.OfferRepository;
@@ -71,6 +75,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @Import({
     ApplicationHistoryWriter.class,
+    ApplicationPipelineService.class,
     ApplicationOfferPostgresIT.TestOfferConfiguration.class
 })
 class ApplicationOfferPostgresIT {
@@ -122,6 +127,9 @@ class ApplicationOfferPostgresIT {
 
     @Autowired
     private ApplicationOfferService service;
+
+    @Autowired
+    private ApplicationPipelineService pipeline;
 
     @Autowired
     private ApplicationPipelineRepository applications;
@@ -187,7 +195,7 @@ class ApplicationOfferPostgresIT {
     }
 
     @Test
-    void flywayV4CreatesTheOfferSchemaConstraintsAndPendingExpiryIndex() {
+    void flywayCreatesOfferSchemaThroughV9AndPendingExpiryIndex() {
         List<String> appliedVersions = jdbc.queryForList(
             """
             SELECT version
@@ -246,7 +254,7 @@ class ApplicationOfferPostgresIT {
         );
 
         assertThat(appliedVersions)
-            .containsExactly("1", "2", "3", "4", "5", "6", "7", "8");
+            .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
         assertThat(tables).contains("offers");
         assertThat(columnTypes)
             .containsEntry("salary", "numeric")
@@ -271,6 +279,48 @@ class ApplicationOfferPostgresIT {
             .contains("'SENT'");
     }
 
+    @Test
+    void cancelledOfferRequiresTimestampAndEmptyResponseNote() {
+        UUID applicationId = saveApplication(
+            ApplicationStatus.INTERVIEW,
+            0L
+        );
+        OfferResponse sent = sendOffer(applicationId);
+
+        assertThatThrownBy(() -> jdbc.update(
+            """
+            UPDATE application.offers
+            SET status = 'CANCELLED'
+            WHERE id = ?
+            """,
+            sent.id()
+        )).isInstanceOf(DataIntegrityViolationException.class);
+
+        assertThatThrownBy(() -> jdbc.update(
+            """
+            UPDATE application.offers
+            SET status = 'CANCELLED',
+                responded_at = CURRENT_TIMESTAMP,
+                response_note = 'must stay empty'
+            WHERE id = ?
+            """,
+            sent.id()
+        )).isInstanceOf(DataIntegrityViolationException.class);
+
+        Map<String, Object> state = jdbc.queryForMap(
+            """
+            SELECT status, responded_at, response_note, version
+            FROM application.offers
+            WHERE id = ?
+            """,
+            sent.id()
+        );
+        assertThat(state)
+            .containsEntry("status", "SENT")
+            .containsEntry("responded_at", null)
+            .containsEntry("response_note", null)
+            .containsEntry("version", 0L);
+    }
     @Test
     void sendCommitsInterviewOfferHistoryAndOfferSentOutboxTogether()
         throws Exception {
@@ -475,6 +525,109 @@ class ApplicationOfferPostgresIT {
     }
 
     @Test
+    void recruiterRejectionCancelsOfferAndCandidateCannotRespondAfterward()
+        throws Exception {
+        UUID applicationId = saveApplication(
+            ApplicationStatus.INTERVIEW,
+            0L
+        );
+        OfferResponse sent = sendOffer(applicationId);
+
+        StatusTransitionResponse rejected = pipeline.changeStatus(
+            applicationId,
+            RECRUITER_ID,
+            AUTHORIZATION,
+            new ChangeApplicationStatusRequest(
+                ApplicationStatus.REJECTED,
+                "Position was closed",
+                1L
+            )
+        );
+
+        OfferEntity cancelled = offers.findById(sent.id()).orElseThrow();
+        ApplicationEntity application = applications.findById(applicationId)
+            .orElseThrow();
+        JsonNode event = responseEvent(applicationId);
+        assertThat(rejected.fromStatus()).isEqualTo(ApplicationStatus.OFFER);
+        assertThat(rejected.toStatus()).isEqualTo(ApplicationStatus.REJECTED);
+        assertThat(rejected.version()).isEqualTo(2L);
+        assertThat(cancelled.getStatus()).isEqualTo(OfferStatus.CANCELLED);
+        assertThat(cancelled.getVersion()).isEqualTo(1L);
+        assertThat(cancelled.getRespondedAt()).isNotNull();
+        assertThat(cancelled.getResponseNote()).isNull();
+        assertThat(application.getStatus())
+            .isEqualTo(ApplicationStatus.REJECTED);
+        assertThat(application.getVersion()).isEqualTo(2L);
+        assertThat(event.path("action").asText())
+            .isEqualTo("STATUS_CHANGED");
+        assertThat(event.path("to_status").asText()).isEqualTo("REJECTED");
+        assertThat(event.has("offer_id")).isFalse();
+        assertThat(event.has("offer_status")).isFalse();
+        assertThat(event.has("offer_version")).isFalse();
+
+        assertThatThrownBy(() -> service.respond(
+            sent.id(),
+            CANDIDATE_ID,
+            new RespondOfferRequest(
+                OfferDecision.ACCEPTED,
+                null,
+                1L,
+                2L
+            )
+        ))
+            .isInstanceOf(BusinessException.class)
+            .satisfies(exception -> {
+                BusinessException business = (BusinessException) exception;
+                assertThat(business.code())
+                    .isEqualTo("OFFER_ALREADY_RESPONDED");
+                assertThat(business.status()).isEqualTo(HttpStatus.CONFLICT);
+                assertThat(business.details())
+                    .containsEntry("currentStatus", "CANCELLED");
+            });
+        assertThat(history.count()).isEqualTo(2L);
+        assertThat(outbox.count()).isEqualTo(2L);
+    }
+
+    @Test
+    void candidateWithdrawalCancelsOfferInTheSameTransaction() {
+        UUID applicationId = saveApplication(
+            ApplicationStatus.INTERVIEW,
+            0L
+        );
+        OfferResponse sent = sendOffer(applicationId);
+
+        StatusTransitionResponse withdrawn = pipeline.withdraw(
+            applicationId,
+            CANDIDATE_ID,
+            new WithdrawApplicationRequest("Accepted elsewhere", 1L)
+        );
+
+        OfferEntity cancelled = offers.findById(sent.id()).orElseThrow();
+        ApplicationEntity application = applications.findById(applicationId)
+            .orElseThrow();
+        Map<String, Object> withdrawnHistory = transitionHistory(
+            applicationId,
+            ApplicationStatus.WITHDRAWN
+        );
+        assertThat(withdrawn.toStatus())
+            .isEqualTo(ApplicationStatus.WITHDRAWN);
+        assertThat(cancelled.getStatus()).isEqualTo(OfferStatus.CANCELLED);
+        assertThat(cancelled.getVersion()).isEqualTo(1L);
+        assertThat(cancelled.getRespondedAt()).isNotNull();
+        assertThat(cancelled.getResponseNote()).isNull();
+        assertThat(application.getStatus())
+            .isEqualTo(ApplicationStatus.WITHDRAWN);
+        assertThat(application.getVersion()).isEqualTo(2L);
+        assertThat(withdrawnHistory)
+            .containsEntry("from_status", "OFFER")
+            .containsEntry("to_status", "WITHDRAWN")
+            .containsEntry("changed_by", CANDIDATE_ID)
+            .containsEntry("note", "Accepted elsewhere");
+        assertThat(history.count()).isEqualTo(2L);
+        assertThat(outbox.count()).isEqualTo(2L);
+    }
+
+    @Test
     void expiredOfferIsRejectedWithoutChangingAnyPersistentState() {
         UUID applicationId = saveApplication(ApplicationStatus.OFFER, 1L);
         OfferEntity expired = offers.saveAndFlush(OfferEntity.sent(
@@ -636,6 +789,45 @@ class ApplicationOfferPostgresIT {
     }
 
     @Test
+    void applicationUpdateFailureRollsBackPipelineOfferCancellation() {
+        UUID applicationId = saveApplication(
+            ApplicationStatus.INTERVIEW,
+            0L
+        );
+        OfferResponse sent = sendOffer(applicationId);
+        jdbc.execute(
+            "ALTER TABLE application.applications " +
+                "ADD CONSTRAINT " + APPLICATION_STATUS_CONSTRAINT +
+                " CHECK (status <> 'WITHDRAWN')"
+        );
+
+        try {
+            assertThatThrownBy(() -> pipeline.withdraw(
+                applicationId,
+                CANDIDATE_ID,
+                new WithdrawApplicationRequest("Changed plans", 1L)
+            )).isInstanceOf(DataIntegrityViolationException.class);
+        } finally {
+            jdbc.execute(
+                "ALTER TABLE application.applications " +
+                    "DROP CONSTRAINT IF EXISTS " +
+                    APPLICATION_STATUS_CONSTRAINT
+            );
+        }
+
+        assertOfferAndApplicationUnchanged(
+            sent.id(),
+            applicationId,
+            OfferStatus.SENT,
+            ApplicationStatus.OFFER,
+            0L,
+            1L
+        );
+        assertThat(history.count()).isEqualTo(1L);
+        assertThat(outbox.count()).isEqualTo(1L);
+    }
+
+    @Test
     void concurrentAcceptAndDeclineHaveOneWinnerAndConsistentState()
         throws Exception {
         UUID applicationId = saveApplication(
@@ -704,6 +896,24 @@ class ApplicationOfferPostgresIT {
         }
         assertThat(history.count()).isEqualTo(2L);
         assertThat(outbox.count()).isEqualTo(2L);
+    }
+
+    @Test
+    void concurrentAcceptAndRecruiterRejectHaveOneConsistentWinner()
+        throws Exception {
+        assertResponseVersusPipelineRace(
+            OfferDecision.ACCEPTED,
+            ApplicationStatus.REJECTED
+        );
+    }
+
+    @Test
+    void concurrentDeclineAndCandidateWithdrawHaveOneConsistentWinner()
+        throws Exception {
+        assertResponseVersusPipelineRace(
+            OfferDecision.DECLINED,
+            ApplicationStatus.WITHDRAWN
+        );
     }
 
     private OfferResponse sendOffer(UUID applicationId) {
@@ -806,6 +1016,123 @@ class ApplicationOfferPostgresIT {
         assertThat(offer.getResponseNote()).isNull();
         assertThat(application.getStatus()).isEqualTo(applicationStatus);
         assertThat(application.getVersion()).isEqualTo(applicationVersion);
+    }
+
+    private void assertResponseVersusPipelineRace(
+        OfferDecision decision,
+        ApplicationStatus pipelineTarget
+    ) throws Exception {
+        UUID applicationId = saveApplication(
+            ApplicationStatus.INTERVIEW,
+            0L
+        );
+        OfferResponse sent = sendOffer(applicationId);
+        CountDownLatch callersReady = new CountDownLatch(2);
+        CountDownLatch startCalls = new CountDownLatch(1);
+        executor = Executors.newFixedThreadPool(2);
+
+        String declineReason = decision == OfferDecision.DECLINED
+            ? "Accepted another offer"
+            : null;
+        Future<Object> response = executor.submit(() -> respondWhenReleased(
+            callersReady,
+            startCalls,
+            sent.id(),
+            decision,
+            declineReason
+        ));
+        Future<Object> pipelineTransition = executor.submit(
+            () -> pipelineWhenReleased(
+                callersReady,
+                startCalls,
+                applicationId,
+                pipelineTarget
+            )
+        );
+
+        assertThat(callersReady.await(5, TimeUnit.SECONDS)).isTrue();
+        startCalls.countDown();
+        List<Object> outcomes = List.of(
+            response.get(10, TimeUnit.SECONDS),
+            pipelineTransition.get(10, TimeUnit.SECONDS)
+        );
+        long successes = outcomes.stream()
+            .filter(outcome ->
+                outcome instanceof OfferResponse ||
+                outcome instanceof StatusTransitionResponse
+            )
+            .count();
+        List<BusinessException> conflicts = outcomes.stream()
+            .filter(BusinessException.class::isInstance)
+            .map(BusinessException.class::cast)
+            .toList();
+
+        assertThat(successes).isEqualTo(1L);
+        assertThat(conflicts).singleElement().satisfies(conflict -> {
+            assertThat(conflict.code()).isIn(
+                "OFFER_ALREADY_RESPONDED",
+                "OFFER_CHANGED_CONCURRENTLY",
+                "APPLICATION_CHANGED_CONCURRENTLY",
+                "INVALID_APPLICATION_TRANSITION",
+                "APPLICATION_NOT_WITHDRAWABLE"
+            );
+            assertThat(conflict.status()).isEqualTo(HttpStatus.CONFLICT);
+        });
+
+        OfferEntity offer = offers.findById(sent.id()).orElseThrow();
+        ApplicationEntity application = applications.findById(applicationId)
+            .orElseThrow();
+        assertThat(offer.getVersion()).isEqualTo(1L);
+        assertThat(application.getVersion()).isEqualTo(2L);
+        String statePair =
+            application.getStatus().name() + "/" + offer.getStatus().name();
+        if (decision == OfferDecision.ACCEPTED) {
+            assertThat(statePair).isIn(
+                "HIRED/ACCEPTED",
+                "REJECTED/CANCELLED"
+            );
+        } else {
+            assertThat(statePair).isIn(
+                "REJECTED/DECLINED",
+                "WITHDRAWN/CANCELLED"
+            );
+        }
+        assertThat(history.count()).isEqualTo(2L);
+        assertThat(outbox.count()).isEqualTo(2L);
+    }
+
+    private Object pipelineWhenReleased(
+        CountDownLatch callersReady,
+        CountDownLatch startCalls,
+        UUID applicationId,
+        ApplicationStatus target
+    ) {
+        callersReady.countDown();
+        await(startCalls);
+        try {
+            if (target == ApplicationStatus.WITHDRAWN) {
+                return pipeline.withdraw(
+                    applicationId,
+                    CANDIDATE_ID,
+                    new WithdrawApplicationRequest(
+                        "Accepted elsewhere",
+                        1L
+                    )
+                );
+            }
+            return pipeline.changeStatus(
+                applicationId,
+                RECRUITER_ID,
+                AUTHORIZATION,
+                new ChangeApplicationStatusRequest(
+                    target,
+                    "Position was closed",
+                    1L
+                )
+            );
+        } catch (BusinessException exception) {
+            return exception;
+        }
     }
 
     private Object respondWhenReleased(
