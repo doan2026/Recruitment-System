@@ -529,6 +529,36 @@ keeping the v1 event contract unchanged. The verified Application Service
 suite passes 286 unit/WebMvc/security tests and 71 PostgreSQL/Kafka integration
 tests.
 
+## AI Service match contract gate
+
+`AiMatchContractIT` runs the **real** AI Service against a real pgvector
+database and drives it through the same `AiClient` and the same
+`ClientConfig` request factory the deployed service uses. The provider image is
+built from the sibling `ai-service` module, runs its own Alembic migrations,
+and answers over real HTTP, so a drift on either side — request field names,
+response envelope, score scaling or a not-ready reason — fails here instead of
+surfacing as a wrong match score in production.
+
+Vectors are seeded directly as unit basis vectors, so every expected cosine is
+exact: identical vectors score `100.00`, orthogonal vectors `50.00` and
+opposite vectors `0.00`. The gate also pins the not-ready reasons
+(`CV_EMBEDDING_NOT_FOUND`, `JOB_EMBEDDING_NOT_FOUND`,
+`EMBEDDING_MODEL_MISMATCH`), proves a deactivated Job is indistinguishable from
+a missing embedding, and checks that a wrong internal key and an unreachable
+provider both fail closed without leaking store state.
+
+This gate found a real defect on its first run. The JDK HTTP client defaults to
+HTTP/2, which over cleartext sends an `h2c` upgrade; AI Service runs on uvicorn,
+whose `h11` parser refuses that request with `400 Invalid HTTP request
+received`. Every `/match` call would have failed on the wire while every mocked
+unit test still passed, because `MockRestServiceServer` intercepts above the
+transport. `ClientConfig` now pins HTTP/1.1 for all downstream calls. Node-based
+downstreams were unaffected because they ignore the unknown upgrade header.
+
+Because the provider image is built from the sibling module, this gate requires
+a full repository checkout and a working Docker daemon.
+
+
 ### Controlled Application concurrency/load gate
 
 Run the standalone gate separately from the ordinary unit and integration
