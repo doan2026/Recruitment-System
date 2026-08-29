@@ -861,6 +861,17 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Gate cần full repository checkout vì image provider build từ module anh em, và không tuyên bố deployed multi-replica load, gateway E2E hay real-model relevance đã hoàn tất.
 
 
+## 2.47 Application–Job Internal Contract Gate — hoàn thành qua PR #72
+
+> Task chỉ thuộc Người 2, được bàn giao từ `feature/application-service/job-contract-integration` vào `develop` qua PR #72 ngày 30/08/2026. Application và Job & Search đều là service của Người 2 nên gate này không đụng service của Người 1/3.
+
+- `JobServiceContractIT` chạy **Job Service thật** (image build từ module `job-search-service`, tự chạy Prisma migration trên PostgreSQL thật) cho ba internal read mà Application phụ thuộc: `/{jobId}/exists`, `/stats/active` và `/details/bulk`. Gọi qua đúng `JobClient` và request factory của `ClientConfig` mà service triển khai dùng.
+- Gate khóa đúng hành vi Application dựa vào: job `PUBLISHED` trong hạn nhận hồ sơ, còn `DRAFT`/`CLOSED`/quá hạn thì không; job không tồn tại trả absent kèm reason thay vì lỗi; active stats chỉ đếm job published của đúng công ty được hỏi; bulk detail vẫn trả job đã đóng và hết hạn để Candidate còn thấy thứ đã bookmark, báo ID lạ là unavailable, và không bao giờ lộ `DRAFT` chưa từng công khai. Bulk rỗng không chạm provider; internal key sai và provider không tới được đều fail closed.
+- Provider cần Redis và Elasticsearch để boot dù ba read này chỉ đọc PostgreSQL, nên cả hai chạy kèm; Kafka publisher tắt vì gate này về hợp đồng REST, không phải outbox. JWT public key sinh dùng một lần ngay trong test vì ba endpoint là internal key-based nhưng service từ chối boot nếu thiếu cấu hình JWT an toàn.
+- Gate cuối PASS **299/299 unit test + 107/107 integration test** (từ 93, thêm 14 contract test) với PostgreSQL 16, Redis 7, Elasticsearch 8.14.3, Kafka 3.8, pgvector và Job Service thật; `git diff --check` PASS.
+- Gate cần full repository checkout vì image provider build từ module anh em, và không tuyên bố deployed multi-replica load hay gateway E2E đã hoàn tất.
+
+
 ---
 
 # 3. Danh sách task CHƯA làm (Pending)
@@ -1143,6 +1154,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [ ] Hoàn thiện contract test Kafka cho tất cả producer/consumer thật và duplicate event.
   - [x] AI Job consumer đã được kiểm tra với payload đúng shape Job producer, broker Kafka thật, duplicate event, DLQ và commit offset.
   - [x] Application → AI `/match` đã có contract gate với AI Service thật qua PR #71; gate bắt được lỗi h2c upgrade làm hỏng mọi lời gọi tới uvicorn và đã sửa bằng cách ghim HTTP/1.1.
+  - [x] Application → Job `/exists`, `/stats/active` và `/details/bulk` đã có contract gate với Job Service thật qua PR #72.
   - [x] Job producer đã được kiểm tra từ PostgreSQL transaction/outbox tới Kafka thật: rollback khi outbox lỗi, concurrent CAS, version `1/2/3`, salary biên, Kafka key/payload và trạng thái published.
   - [x] Profile CV producer đã được kiểm tra PostgreSQL transaction/outbox → Kafka 3.8 thật: exact key/chín trường, version order, `published_at` và terminal flush không phát thêm.
   - [x] AI CV consumer Kafka 3.8 → PostgreSQL/pgvector kiểm `UPSERTED → DEACTIVATED`, source unavailable → `DELETED`, malformed/oversized JSON, redacted DLQ và commit offset. Duplicate/order/ownership/tombstone được kiểm ở PostgreSQL integration; Media/parser dùng fake deterministic nên deployed E2E vẫn pending.
