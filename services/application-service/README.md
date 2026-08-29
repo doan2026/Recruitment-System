@@ -439,6 +439,59 @@ isolation, legacy/empty-snapshot behavior, and deterministic tied-value
 pagination. The verified Application Service suite passes 282
 unit/WebMvc/security tests and 63 PostgreSQL/Kafka integration tests.
 
+### Controlled Application concurrency/load gate
+
+Run the standalone gate separately from the ordinary unit and integration
+suites. It starts a digest-pinned disposable PostgreSQL 16 container, applies
+Flyway V1-V8, and never accepts an external database target:
+
+```bash
+mvn test-compile failsafe:integration-test failsafe:verify \
+  -Papplication-concurrency-load
+```
+
+The default run uses 32 worker threads and executes 1,000 independent pairs
+for each of five write races, or exactly 10,000 service calls:
+
+- duplicate Candidate submission for the same Job;
+- two Recruiters changing the same Application version;
+- Candidate withdrawal racing the Recruiter transition to `INTERVIEW`;
+- two Recruiters sending the only Offer for one Application; and
+- Candidate `ACCEPTED` racing `DECLINED` for one Offer.
+
+Every pair must produce exactly one committed result and one documented `409`
+conflict. The gate then checks aggregate/Offer versions, terminal state pairs,
+one history row and one pending canonical outbox row per winner, active
+Candidate/Job uniqueness, CV gate/usage ownership, skill-snapshot cardinality,
+and the absence of orphan history/outbox rows. It fails on an unexpected
+outcome, 5xx-class business error, PostgreSQL deadlock, barrier/workload
+timeout, p95 over 5 seconds, p99 over 10 seconds, maximum call latency over 15
+seconds, or throughput below 5 calls/second. These conservative thresholds are
+regression fences, not production SLOs.
+
+The controlled local run on 29 August 2026 produced:
+
+| Workload | Calls | Winner / expected 409 | p95 | p99 | Calls/s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Duplicate submission | 2,000 | 1,000 / 1,000 | 162.895 ms | 684.781 ms | 283.68 |
+| Pipeline same version | 2,000 | 1,000 / 1,000 | 68.260 ms | 127.857 ms | 767.37 |
+| Withdraw vs transition | 2,000 | 1,000 / 1,000 | 44.350 ms | 55.868 ms | 1,119.73 |
+| Duplicate send Offer | 2,000 | 1,000 / 1,000 | 79.978 ms | 104.086 ms | 652.68 |
+| Accept vs decline | 2,000 | 1,000 / 1,000 | 62.760 ms | 75.189 ms | 777.71 |
+| **Total** | **10,000** | **5,000 / 5,000** | **114.567 ms** | **162.895 ms** | **585.53** |
+
+The latency distribution intentionally combines winners and expected conflict
+losers and starts after each two-call barrier; throughput covers the complete
+workload submission/execution window. Configuration can be bounded with
+`application.load.pairs-per-workload`, `application.load.concurrency`,
+`application.load.barrier-timeout-ms`, `application.load.workload-timeout-ms`,
+`application.load.p95-threshold-ms`, `application.load.p99-threshold-ms`,
+`application.load.max-threshold-ms`, and `application.load.min-rps` system
+properties. This gate proves one Application process path against one local
+PostgreSQL instance. It does not prove HTTP/JWT or deployed Auth/Company/Kafka
+E2E, multi-replica behavior, network/TLS capacity, frontend load, or a
+production SLO.
+
 In Root Compose, use three distinct keys: `PROFILE_INTERNAL_API_KEY_APPLICATION`
 maps to Application's `PROFILE_INTERNAL_API_KEY` and Profile's
 `INTERNAL_API_KEY_APPLICATION`; `APPLICATION_INTERNAL_API_KEY_PROFILE` maps to
