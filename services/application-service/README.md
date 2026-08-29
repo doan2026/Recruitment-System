@@ -529,6 +529,31 @@ keeping the v1 event contract unchanged. The verified Application Service
 suite passes 286 unit/WebMvc/security tests and 71 PostgreSQL/Kafka integration
 tests.
 
+## Job Service internal contract gate
+
+`JobServiceContractIT` drives the **real** Job Service — image built from its
+own module, running its own Prisma migrations against a real PostgreSQL — for
+the three internal reads Application depends on: `/{jobId}/exists`,
+`/stats/active` and `/details/bulk`. Calls go through the same `JobClient` and
+the same `ClientConfig` request factory the deployed service uses, so a renamed
+field, a changed envelope or a different availability reason fails here instead
+of silently breaking submission, bookmark detail or the recruiter dashboard.
+
+The gate pins the behaviour Application actually relies on: a published job
+inside its deadline accepts applications while `DRAFT`, `CLOSED` and
+past-deadline jobs do not; an unknown job is reported absent with a reason
+rather than failing; active stats count only published jobs of the asked
+company; bulk detail still returns closed and expired jobs so a Candidate can
+see what they bookmarked, reports unknown ids as unavailable, and never leaks a
+`DRAFT` that was not exposed. An empty bulk request never reaches the provider,
+and both a wrong internal key and an unreachable provider fail closed.
+
+The provider needs Redis and Elasticsearch to start even though these three
+reads are PostgreSQL-only, so both run alongside it; the Kafka publisher is
+disabled because this gate covers the REST contract, not the outbox. Like the
+AI gate, it requires a full repository checkout and a working Docker daemon.
+
+
 ## AI Service match contract gate
 
 `AiMatchContractIT` runs the **real** AI Service against a real pgvector
