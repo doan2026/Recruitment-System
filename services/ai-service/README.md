@@ -360,9 +360,9 @@ mutations; `/ready` verifies their rows, function, event shape and enabled
 mode. For this Candidate-facing `/recommend/jobs` direction, the full-target
 exact scan is intentionally correctness-first. The controlled gate below now
 covers HTTP correctness, concurrent-writer cursor behavior and local query load
-at 100,000 targets. Filter-aware ANN, distributed rate limiting,
-deployed/multi-replica capacity and real-model relevance remain follow-up work
-before raising limits. This work is separate from the bounded
+at 100,000 targets. Distributed rate limiting is now available for both
+surfaces; filter-aware ANN, deployed/multi-replica capacity and real-model
+relevance remain follow-up work before raising limits. This work is separate from the bounded
 `/recommend/candidates` allowlist gate below.
 
 ## Recruiter-facing Candidate recommendation provider
@@ -401,6 +401,44 @@ Recruiter, verified Company and active owned Job, then obtain the visibility
 snapshot from Profile. After ranking it must synchronously revalidate the
 returned entries with Profile before exposing its minimal card. This second
 gate handles withdrawal races; there is no latest-Candidate fallback.
+
+## Distributed recommendation rate limits
+
+Both recommendation surfaces are internal and already authenticate the calling
+service, so the limiter is not an anti-abuse gate against unauthenticated
+traffic. It bounds how much shared pgvector work one subject can cause: a
+single CV looping `/recommend/jobs` or a single Job looping
+`/recommend/candidates` — through a retry storm, a stuck client, or an abusive
+Candidate driving Job Search — cannot monopolise capacity for everyone else.
+
+Counting lives in Redis rather than in process memory precisely because the
+service runs several replicas. A per-process limiter would multiply the real
+budget by the replica count and drift whenever replicas scale, so it could not
+express a system-wide budget at all.
+
+Each surface keeps its own subject budget and its own global budget, so a burst
+on one surface cannot starve the other. The subject is the `cv_id` for
+`/recommend/jobs` and the `job_id` for `/recommend/candidates`.
+
+A single Lua script performs the window trim, both limit checks and the write,
+using Redis server `TIME` as the only clock. Replicas with skewed system clocks
+therefore share one window, and two replicas cannot both observe the last free
+slot and take it. Keys carry HMAC-SHA256 digests derived from a dedicated
+secret, never a raw `cv_id` or `job_id`, so Redis holds nothing that links a
+subject to its recommendation traffic; counters expire one second past the
+window, so idle subjects leave no residue. Both keys of one surface share a
+hash tag, keeping the script single-slot on a Redis Cluster.
+
+The limiter is opt-in. With `RECOMMENDATION_RATE_LIMIT_ENABLED` unset, the
+endpoints behave exactly as before and take no Redis dependency. When it is
+enabled the limiter fails **closed**: an unreachable Redis or an unexpected
+script result returns a sanitized `503 RECOMMENDATION_LIMIT_UNAVAILABLE`
+rather than silently letting every replica run unbounded exactly when the
+dependency is already unhealthy. An exhausted budget returns `429
+RECOMMENDATION_RATE_LIMITED` with `Retry-After`, charged before any
+vector-store work happens. Scoped authorization and payload validation both run
+before the charge, so an unauthenticated or malformed caller can never drain
+another subject's budget.
 
 ## Configuration
 
@@ -459,6 +497,16 @@ Copy `.env.example` to `.env` and set at least:
 - `CHAT_JOB_SERVICE_ALLOW_INSECURE_HTTP` — development Compose only; production
   service-to-service traffic must remain HTTPS
 - `CHAT_JOB_REQUEST_TIMEOUT_SECONDS` — default 3, bounded to 1–5 seconds
+- `RECOMMENDATION_RATE_LIMIT_ENABLED` — defaults to `false`; when enabled it
+  requires `REDIS_URL` and makes the recommendation surfaces fail closed on a
+  Redis outage
+- `RECOMMENDATION_REDIS_KEY_SECRET` — 32–512 printable ASCII bytes; must differ
+  from `CHAT_REDIS_KEY_SECRET` so the two key spaces stay independent
+- `RECOMMENDATION_RATE_WINDOW_SECONDS` (default 60, bounded 10–3,600)
+- `RECOMMENDATION_SUBJECT_RATE_LIMIT` — per `cv_id`/`job_id` budget per window;
+  default 30, bounded 1–1,000
+- `RECOMMENDATION_GLOBAL_RATE_LIMIT` — per-surface budget per window; default
+  600, must not be below the subject limit
 - `JWT_ISSUER`, `JWT_AUDIENCE` and `JWT_JWKS_URI` — Auth access-token
   verification settings
 - `JWT_JWKS_ALLOWED_HOSTS` — exact allowlist for JWKS retrieval

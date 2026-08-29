@@ -442,7 +442,14 @@ def test_openapi_exposes_jobs_only_and_scoped_security() -> None:
     assert "/recommend/candidates" in schema["paths"]
     operation = schema["paths"]["/recommend/jobs"]["post"]
     assert operation["security"] == [{"JobSearchInternalApiKey": []}]
-    assert set(operation["responses"]) == {"200", "401", "409", "422", "503"}
+    assert set(operation["responses"]) == {
+        "200",
+        "401",
+        "409",
+        "422",
+        "429",
+        "503",
+    }
     parameters = operation["parameters"]
     service_header = next(
         item for item in parameters if item["name"] == "X-Internal-Service"

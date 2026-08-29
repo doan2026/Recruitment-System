@@ -55,6 +55,12 @@ from app.recommendation import (
     get_candidate_recommendation_service,
     get_recommendation_service,
 )
+from app.recommendation_limiter import (
+    RecommendationLimiter,
+    RecommendationLimiterUnavailable,
+    RecommendationSurface,
+    RedisRecommendationLimiter,
+)
 from app.recommendation_repository import PsycopgRecommendationRepository
 from app.security import (
     require_internal_api_key,
@@ -161,6 +167,7 @@ def create_app(
     readiness_probe: ReadinessProbe | None = None,
     chat_service: ChatService | None = None,
     chat_authenticator: JwksJwtAuthenticator | None = None,
+    recommendation_limiter: RecommendationLimiter | None = None,
 ) -> FastAPI:
     runtime_settings = settings or Settings.from_environment()
     default_repository = PsycopgMatchRepository(
@@ -193,8 +200,23 @@ def create_app(
         owned_recommendation_client: HttpCandidateJobRecommendationClient | None = None
         owned_service: ChatService | None = None
         owned_chat_executor: ThreadPoolExecutor | None = None
+        owned_limiter: RedisRecommendationLimiter | None = None
         try:
             runtime_settings.validate()
+            if (
+                runtime_settings.recommendation_rate_limit_enabled
+                and lifespan_app.state.recommendation_limiter is None
+            ):
+                owned_limiter = RedisRecommendationLimiter.from_url(
+                    runtime_settings.redis_url,
+                    key_secret=(runtime_settings.recommendation_redis_key_secret),
+                    window_seconds=(
+                        runtime_settings.recommendation_rate_window_seconds
+                    ),
+                    subject_limit=(runtime_settings.recommendation_subject_rate_limit),
+                    global_limit=(runtime_settings.recommendation_global_rate_limit),
+                )
+                lifespan_app.state.recommendation_limiter = owned_limiter
             if runtime_settings.chat_enabled:
                 if lifespan_app.state.chat_executor is None:
                     owned_chat_executor = ThreadPoolExecutor(
@@ -261,6 +283,8 @@ def create_app(
                     lifespan_app.state.chat_service = owned_service
             yield
         finally:
+            if lifespan_app.state.recommendation_limiter is owned_limiter:
+                lifespan_app.state.recommendation_limiter = None
             if lifespan_app.state.chat_service is owned_service:
                 lifespan_app.state.chat_service = None
             if lifespan_app.state.chat_authenticator is owned_authenticator:
@@ -275,6 +299,7 @@ def create_app(
                 owned_recommendation_client,
                 owned_store,
                 owned_authenticator,
+                owned_limiter,
             ):
                 if resource is not None:
                     try:
@@ -295,6 +320,7 @@ def create_app(
     application.state.chat_authenticator = chat_authenticator
     application.state.chat_executor = None
     application.state.chat_admission = None
+    application.state.recommendation_limiter = recommendation_limiter
     register_exception_handlers(application)
 
     @application.middleware("http")
@@ -430,6 +456,36 @@ def create_app(
             meta=None,
         )
 
+    def enforce_recommendation_limit(
+        request: Request,
+        surface: RecommendationSurface,
+        subject_id: UUID,
+    ) -> None:
+        """Charge the shared budget before any vector-store work is done."""
+        limiter = cast(
+            RecommendationLimiter | None,
+            request.app.state.recommendation_limiter,
+        )
+        if limiter is None:
+            return
+        try:
+            decision = limiter.consume(surface, subject_id)
+        except RecommendationLimiterUnavailable as error:
+            raise ServiceError(
+                status_code=503,
+                code="RECOMMENDATION_LIMIT_UNAVAILABLE",
+                message="Recommendations are temporarily unavailable",
+            ) from error
+        if decision.allowed:
+            return
+        raise ServiceError(
+            status_code=429,
+            code="RECOMMENDATION_RATE_LIMITED",
+            message="Too many recommendation requests; retry shortly",
+            details={"retryAfterSeconds": decision.retry_after_seconds},
+            headers={"Retry-After": str(decision.retry_after_seconds)},
+        )
+
     @application.post(
         "/recommend/jobs",
         response_model=RecommendJobsResponse,
@@ -437,11 +493,13 @@ def create_app(
             401: {"model": ErrorResponse},
             409: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
+            429: {"model": ErrorResponse},
             503: {"model": ErrorResponse},
         },
     )
     def recommend_jobs(
         payload: RecommendJobsRequest,
+        request: Request,
         _: Annotated[
             None,
             Depends(require_job_search_recommendation_access),
@@ -451,6 +509,11 @@ def create_app(
             Depends(get_recommendation_service),
         ],
     ) -> RecommendJobsResponse:
+        enforce_recommendation_limit(
+            request,
+            RecommendationSurface.JOBS,
+            payload.cv_id,
+        )
         result = service.recommend_jobs(
             payload.cv_id,
             JobRecommendationFilters(
@@ -481,11 +544,13 @@ def create_app(
             401: {"model": ErrorResponse},
             409: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
+            429: {"model": ErrorResponse},
             503: {"model": ErrorResponse},
         },
     )
     def recommend_candidates(
         payload: RecommendCandidatesRequest,
+        request: Request,
         _: Annotated[
             None,
             Depends(require_job_search_candidate_recommendation_access),
@@ -495,6 +560,11 @@ def create_app(
             Depends(get_candidate_recommendation_service),
         ],
     ) -> RecommendCandidatesResponse:
+        enforce_recommendation_limit(
+            request,
+            RecommendationSurface.CANDIDATES,
+            payload.job_id,
+        )
         filters = CandidateRecommendationFilters(
             tuple(
                 CandidateEligibility(

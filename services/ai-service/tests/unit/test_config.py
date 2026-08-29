@@ -447,3 +447,106 @@ def valid_chat_settings(**changes: object) -> Settings:
     }
     values.update(changes)
     return Settings(**values)  # type: ignore[arg-type]
+
+
+def test_recommendation_rate_limit_is_conditionally_required_and_valid() -> None:
+    disabled = Settings(
+        database_url=DATABASE_URL,
+        internal_api_key="shared-secret",
+        internal_api_key_job_search=SCOPED_KEY,
+        internal_api_key_job_search_candidates=CANDIDATE_SCOPED_KEY,
+    )
+    disabled.validate()
+
+    enabled = Settings(
+        database_url=DATABASE_URL,
+        internal_api_key="shared-secret",
+        internal_api_key_job_search=SCOPED_KEY,
+        internal_api_key_job_search_candidates=CANDIDATE_SCOPED_KEY,
+        recommendation_rate_limit_enabled=True,
+        redis_url="redis://:secret@redis:6379/15",
+        recommendation_redis_key_secret="recommend-redis-key-secret-0000001",
+    )
+    enabled.validate()
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"redis_url": "redis://redis:6379"}, "REDIS_URL"),
+        (
+            {"recommendation_redis_key_secret": "short"},
+            "RECOMMENDATION_REDIS_KEY_SECRET",
+        ),
+        (
+            {
+                "recommendation_redis_key_secret": (
+                    "chat-redis-key-secret-000000000001"
+                ),
+                "chat_redis_key_secret": "chat-redis-key-secret-000000000001",
+            },
+            "RECOMMENDATION_REDIS_KEY_SECRET must differ",
+        ),
+        (
+            {"recommendation_global_rate_limit": 5},
+            "RECOMMENDATION_GLOBAL_RATE_LIMIT",
+        ),
+    ],
+)
+def test_recommendation_rate_limit_configuration_fails_closed(
+    changes: dict[str, object],
+    message: str,
+) -> None:
+    values: dict[str, object] = {
+        "database_url": DATABASE_URL,
+        "internal_api_key": "shared-secret",
+        "internal_api_key_job_search": SCOPED_KEY,
+        "internal_api_key_job_search_candidates": CANDIDATE_SCOPED_KEY,
+        "recommendation_rate_limit_enabled": True,
+        "redis_url": "redis://:secret@redis:6379/15",
+        "recommendation_redis_key_secret": "recommend-redis-key-secret-0000001",
+    }
+    values.update(changes)
+
+    with pytest.raises(RuntimeError, match=message):
+        Settings(**values).validate()  # type: ignore[arg-type]
+
+
+def test_settings_read_recommendation_rate_limit_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
+    monkeypatch.setenv("INTERNAL_API_KEY", "shared-secret")
+    monkeypatch.setenv("RECOMMENDATION_RATE_LIMIT_ENABLED", "true")
+    monkeypatch.setenv(
+        "RECOMMENDATION_REDIS_KEY_SECRET",
+        "  recommend-redis-key-secret-0000001  ",
+    )
+    monkeypatch.setenv("RECOMMENDATION_RATE_WINDOW_SECONDS", "120")
+    monkeypatch.setenv("RECOMMENDATION_SUBJECT_RATE_LIMIT", "12")
+    monkeypatch.setenv("RECOMMENDATION_GLOBAL_RATE_LIMIT", "900")
+
+    settings = Settings.from_environment()
+
+    assert settings.recommendation_rate_limit_enabled is True
+    assert (
+        settings.recommendation_redis_key_secret == "recommend-redis-key-secret-0000001"
+    )
+    assert settings.recommendation_rate_window_seconds == 120
+    assert settings.recommendation_subject_rate_limit == 12
+    assert settings.recommendation_global_rate_limit == 900
+
+
+def test_recommendation_rate_limit_defaults_to_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
+    monkeypatch.setenv("INTERNAL_API_KEY", "shared-secret")
+    monkeypatch.delenv("RECOMMENDATION_RATE_LIMIT_ENABLED", raising=False)
+
+    settings = Settings.from_environment()
+
+    assert settings.recommendation_rate_limit_enabled is False
+    assert settings.recommendation_rate_window_seconds == 60
+    assert settings.recommendation_subject_rate_limit == 30
+    assert settings.recommendation_global_rate_limit == 600

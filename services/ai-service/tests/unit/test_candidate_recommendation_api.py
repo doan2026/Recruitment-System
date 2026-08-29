@@ -344,7 +344,14 @@ def test_openapi_exposes_candidate_route_with_distinct_scoped_scheme() -> None:
 
     operation = schema["paths"]["/recommend/candidates"]["post"]
     assert operation["security"] == [{"JobSearchCandidateInternalApiKey": []}]
-    assert set(operation["responses"]) == {"200", "401", "409", "422", "503"}
+    assert set(operation["responses"]) == {
+        "200",
+        "401",
+        "409",
+        "422",
+        "429",
+        "503",
+    }
 
 
 def make_client(repository: StubRecommendationRepository) -> TestClient:
