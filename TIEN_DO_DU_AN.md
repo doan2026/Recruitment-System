@@ -872,6 +872,21 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Gate cần full repository checkout vì image provider build từ module anh em, và không tuyên bố deployed multi-replica load hay gateway E2E đã hoàn tất.
 
 
+## 2.48 Filter-aware ANN Investigation — hoàn thành qua PR #73
+
+> Task chỉ thuộc AI Service của Người 2, được bàn giao từ `feature/ai-service/filter-aware-ann` vào `develop` qua PR #73 ngày 30/08/2026. Kết quả là một **kết luận kỹ thuật có bằng chứng**, không phải tính năng mới.
+
+- pgvector trong image là **0.8.6**, có iterative index scan (`hnsw.iterative_scan`) với `strict_order` giữ nguyên thứ tự khoảng cách chính xác. Đây đúng là hình dạng của hạng mục "filter-aware ANN" tồn đọng, nên đã điều tra trực tiếp trên schema thật.
+- **Kết luận: không áp dụng được** cho `/recommend/jobs` với hợp đồng phân trang hiện tại. Rào cản không nằm ở index cũng không nằm ở filter:
+  - index HNSW partial trên active row **phục vụ được** `ORDER BY vector <=> const` thuần, và vẫn phục vụ được khi thêm các filter Job — nghĩa là scan filter-aware sẽ với tới được nếu thứ tự cho phép;
+  - query production tính điểm trong CTE rồi sắp xếp ở ngoài, làm thứ tự **tách rời khỏi scan** nên không index vector nào phục vụ được — vì vậy chỉ bật GUC thì không thay đổi gì;
+  - làm phẳng query cũng **không đủ**: index chỉ phục vụ khóa khoảng cách đơn thuần, thêm tie-break `job_id` là index hết dùng được, vì ordering operator không kết hợp được với sort key thường.
+- Tie-break đó chính là thứ HMAC keyset cursor stateless phụ thuộc vào: khoảng cách đơn thuần **không phải total order**, hai Job cùng cosine distance sẽ khiến continuation lặp hoặc bỏ sót row. Nên áp dụng ANN ở đây đồng nghĩa từ bỏ trang cursor đầy đủ và tái lập được — đó là thay đổi hợp đồng phân trang, không phải một cờ tuning.
+- Bằng chứng được giữ dưới dạng test chạy được (`tests/integration/test_job_ann_filter_aware_postgres.py`, sáu test) thay vì ghi chú suông, để kết luận không mục theo thời gian và để người sau không tốn công thử lại.
+- Một cờ ANN opt-in đã được prototype rồi **gỡ bỏ có chủ đích**: khi index không bao giờ với tới được, cờ đó là code chết và là cấu hình gây hiểu nhầm.
+- Gate cuối PASS **660/660 test** cùng `ruff check`/`ruff format --check`; full-target exact scan giữ nguyên.
+
+
 ---
 
 # 3. Danh sách task CHƯA làm (Pending)
@@ -1067,7 +1082,8 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
   - [x] Distributed multi-replica limiter cho cả hai surface recommendation đã hoàn thành qua PR #69: Redis sliding window một Lua script, budget riêng theo subject và theo surface, khóa HMAC không chứa `cv_id/job_id`, opt-in và fail-closed `503`; limiter cho gateway của Người 3 nằm ngoài phạm vi.
   - [x] Recruiter-facing Candidate index/filter/exact-plan synthetic controlled gate đã PASS với 0 lỗi/mismatch/leak, p95 130,089 ms và p99 149,503 ms; không bật ANN production.
   - [x] Candidate-facing Job full-target synthetic HTTP/concurrent-writer gate đã PASS với 0 error/mismatch/timeout/security leak, p95 1.021,163 ms và p99 1.133,728 ms dưới statement timeout 2 giây.
-  - [ ] Còn real-model corpus/relevance tiếng Việt, deployed E2E/multi-replica load, concurrent-writer rollout observation trên môi trường thật, production monitoring/SLO và filter-aware ANN; distributed limiter cho chatbot v1 và cho hai surface recommendation đều đã có service/integration test với Redis thật, riêng limiter tầng gateway vẫn thuộc Người 3.
+  - [ ] Còn real-model corpus/relevance tiếng Việt, deployed E2E/multi-replica load, concurrent-writer rollout observation trên môi trường thật và production monitoring/SLO; distributed limiter cho chatbot v1 và cho hai surface recommendation đều đã có service/integration test với Redis thật, riêng limiter tầng gateway vẫn thuộc Người 3.
+  - [x] Filter-aware ANN đã được điều tra dứt điểm qua PR #73 và **kết luận là không áp dụng được** cho surface này với hợp đồng phân trang hiện tại; lý do được giữ dưới dạng test chạy được thay vì ghi chú suông.
 
 ## P12 — Interview & Video Call Service
 
@@ -1205,7 +1221,7 @@ Live Cloudinary smoke với sáu preset thật vẫn là hạng mục P09 độc
 - Candidate Profile đã có cap transactionally cho từng collection; production vẫn cần distributed rate limit theo user/IP và load test các response ở sát giới hạn trước khi chạy nhiều gateway replica.
 - Root Compose hiện dùng một PostgreSQL chung và tách bằng schema, khác yêu cầu kiến trúc cố định `profile-db` container/database riêng. Một số consumer local còn opt-in JWKS HTTP, riêng Notification đã mặc định dùng static PEM được mount tin cậy; production phải dùng HTTPS/mTLS hoặc static PEM cùng rotation được kiểm soát. Nhóm phải chính thức chấp nhận schema-per-service hoặc tách database/credential trước production.
 - Nhà cung cấp LLM đã chốt Anthropic Claude theo tài liệu kiến trúc và pin SDK `anthropic==0.120.2`; live Claude 10-FAQ quality/staging smoke vẫn cần API key thật và không ảnh hưởng provider `/match` thuần pgvector.
-- Candidate-facing Job recommendation v1 đã hoàn thành service contract và controlled 100.000-Job full-target HTTP/concurrent-writer gate; exact scan vẫn là correctness-first. Recruiter-facing Candidate recommendation đã PASS controlled 100.000-CV exact allowlist/index/filter gate; global ANN sau dynamic filter bị chứng minh không đầy đủ nên không bật. Distributed rate limit cho cả hai hướng đã có ở mức service qua PR #69. Cả hai hướng vẫn cần real-model relevance tiếng Việt, deployed/multi-replica load, false-stale rollout observation, production monitoring/SLO và filter-aware ANN trước production.
+- Candidate-facing Job recommendation v1 đã hoàn thành service contract và controlled 100.000-Job full-target HTTP/concurrent-writer gate; exact scan vẫn là correctness-first. Recruiter-facing Candidate recommendation đã PASS controlled 100.000-CV exact allowlist/index/filter gate; global ANN sau dynamic filter bị chứng minh không đầy đủ nên không bật. Distributed rate limit cho cả hai hướng đã có ở mức service qua PR #69. Filter-aware ANN đã được điều tra và loại trừ qua PR #73: index chỉ phục vụ khóa khoảng cách đơn thuần nên tie-break của cursor làm nó không dùng được. Cả hai hướng vẫn cần real-model relevance tiếng Việt, deployed/multi-replica load, false-stale rollout observation và production monitoring/SLO trước production.
 - Cursor recommendation gắn HMAC scoped key, canonical filter, hash vector nguồn và transactional target generation. Đổi key hoặc embedding mutation làm cursor cũ stale; rollout bắt buộc migrate qua `20260829_06`, dùng đúng một migration job cho concurrent HNSW build, xác nhận bốn trigger rồi mới nhận traffic. HNSW CV hiện advisory nên không phải readiness dependency; trigger disabled/replica-only vẫn làm readiness fail để không tiếp tục phân trang không an toàn.
 - First page cố ý fail-soft qua explicit `PREFERENCES` rồi deterministic `LATEST`, luôn giữ root `fallbackReason`; continuation dùng `409/503` và không đọc preferences để tránh trộn nguồn, skip hoặc duplicate. V1 chỉ exact-match role/location/job type/VND salary vì Job chưa có taxonomy ngành; relevance tiếng Việt và behavior trên dữ liệu thật vẫn phải benchmark.
 - Recruiter-facing candidate recommendation đã có public Job HTTP/Swagger qua PR #49; AI/Profile provider vẫn hidden. Consent/CV/version và Company/Job capability đều fail closed, nhưng resolver chỉ là authorization snapshot nên withdrawal xảy ra sau snapshot vẫn có thể để request đang in-flight hoàn tất. Production vẫn cần TLS/mTLS, network policy, secret rotation, distributed ingress protection và deployed E2E.
