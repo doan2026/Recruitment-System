@@ -34,6 +34,11 @@ class Settings:
     chat_session_lock_seconds: int = 30
     chat_max_concurrent_requests: int = 8
     chat_recommendation_tool_enabled: bool = False
+    recommendation_rate_limit_enabled: bool = False
+    recommendation_redis_key_secret: str = ""
+    recommendation_rate_window_seconds: int = 60
+    recommendation_subject_rate_limit: int = 30
+    recommendation_global_rate_limit: int = 600
     chat_job_recommendation_url: str = ""
     chat_job_service_allowed_hosts: tuple[str, ...] = ()
     chat_job_service_allow_insecure_http: bool = False
@@ -136,6 +141,32 @@ class Settings:
                 "CHAT_RECOMMENDATION_TOOL_ENABLED",
                 default=False,
             ),
+            recommendation_rate_limit_enabled=_boolean(
+                "RECOMMENDATION_RATE_LIMIT_ENABLED",
+                default=False,
+            ),
+            recommendation_redis_key_secret=os.getenv(
+                "RECOMMENDATION_REDIS_KEY_SECRET",
+                "",
+            ).strip(),
+            recommendation_rate_window_seconds=_bounded_int(
+                "RECOMMENDATION_RATE_WINDOW_SECONDS",
+                default=60,
+                minimum=10,
+                maximum=3_600,
+            ),
+            recommendation_subject_rate_limit=_bounded_int(
+                "RECOMMENDATION_SUBJECT_RATE_LIMIT",
+                default=30,
+                minimum=1,
+                maximum=1_000,
+            ),
+            recommendation_global_rate_limit=_bounded_int(
+                "RECOMMENDATION_GLOBAL_RATE_LIMIT",
+                default=600,
+                minimum=1,
+                maximum=100_000,
+            ),
             chat_job_recommendation_url=os.getenv(
                 "CHAT_JOB_RECOMMENDATION_URL",
                 "",
@@ -201,6 +232,36 @@ class Settings:
             )
         if self.chat_enabled:
             self._validate_chat()
+        if self.recommendation_rate_limit_enabled:
+            self._validate_recommendation_rate_limit()
+
+    def _validate_recommendation_rate_limit(self) -> None:
+        parsed_redis = urlsplit(self.redis_url)
+        if (
+            parsed_redis.scheme not in {"redis", "rediss"}
+            or not parsed_redis.hostname
+            or parsed_redis.password is None
+            or parsed_redis.fragment
+        ):
+            raise RuntimeError("REDIS_URL is invalid for recommendation limits")
+        self._validate_secret(
+            "RECOMMENDATION_REDIS_KEY_SECRET",
+            self.recommendation_redis_key_secret,
+        )
+        # A shared secret would make the chat and recommendation key spaces
+        # derivable from one another; keep the namespaces independent.
+        if self.recommendation_redis_key_secret == self.chat_redis_key_secret:
+            raise RuntimeError(
+                "RECOMMENDATION_REDIS_KEY_SECRET must differ from "
+                "CHAT_REDIS_KEY_SECRET"
+            )
+        if self.recommendation_global_rate_limit < (
+            self.recommendation_subject_rate_limit
+        ):
+            raise RuntimeError(
+                "RECOMMENDATION_GLOBAL_RATE_LIMIT must not be below "
+                "RECOMMENDATION_SUBJECT_RATE_LIMIT"
+            )
 
     def _validate_chat(self) -> None:
         parsed_redis = urlsplit(self.redis_url)
