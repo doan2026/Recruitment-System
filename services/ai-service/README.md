@@ -469,6 +469,49 @@ vector-store work happens. Scoped authorization and payload validation both run
 before the charge, so an unauthenticated or malformed caller can never drain
 another subject's budget.
 
+## Vietnamese relevance gate
+
+Every embedding test elsewhere uses synthetic vectors, which proves the
+plumbing and the arithmetic but says nothing about whether the pinned model
+separates Vietnamese recruitment text. This gate loads the exact pinned model
+revision the worker ships and ranks a curated Vietnamese corpus with it — four
+domains (backend, frontend, kế toán, nhân sự), two Jobs and one CV each.
+
+```bash
+docker build --target worker -t ai-service:relevance-gate .
+docker run --rm --network none \
+  -v recruitment-system_ai-model-cache:/models \
+  -e PYTHONPATH=/app -w /app \
+  ai-service:relevance-gate python scripts/vietnamese_relevance_gate.py
+```
+
+It runs with no network and `local_files_only`, so it measures the pinned
+revision rather than whatever a download would fetch today.
+
+Measured on that revision:
+
+| Metric | Value | Treated as |
+| --- | --- | --- |
+| precision@1 | `1.0` | hard requirement |
+| accentless agreement | `1.0` | hard requirement |
+| clean separation rate | `0.25` | recorded baseline |
+
+The first two are properties the model does hold on Vietnamese: every CV ranks
+a Job from its own domain first, and stripping diacritics does not change the
+top domain. Those must keep holding.
+
+Clean separation — both same-domain Jobs ahead of every other domain — is where
+the pinned model falls short: it reliably ranks only the single closest
+same-domain Job first, and the second one often sits below a cross-domain Job.
+That is a model property, not a bug in the ranking code, so the gate records
+`0.25` and fails on a regression below it rather than demanding a number this
+model never reached. Raising it means adopting a Vietnamese-capable embedding
+model, which is a separate decision.
+
+This is a controlled probe on a small hand-written corpus, not a production
+relevance benchmark. It is the first real-model Vietnamese evidence the service
+has; it does not by itself justify raising recommendation limits.
+
 ## Live provider FAQ smoke
 
 Everything about the chatbot is covered offline with a deterministic provider.

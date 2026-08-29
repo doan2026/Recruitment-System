@@ -900,6 +900,20 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Không đánh dấu live quality đã PASS.** Chạy với key thật vẫn là bước vận hành; cho tới khi chạy, tuyên bố chất lượng live vẫn để mở bất kể suite offline xanh đến đâu.
 
 
+## 2.50 Vietnamese Real-model Relevance Gate — hoàn thành qua PR #75
+
+> Task chỉ thuộc AI Service của Người 2, được bàn giao từ `feature/ai-service/vietnamese-relevance-corpus` vào `develop` qua PR #75 ngày 30/08/2026. Đây là **số liệu thật đầu tiên** về relevance tiếng Việt, không phải benchmark production.
+
+- Mọi test embedding trước đây dùng vector synthetic — chứng minh plumbing và số học, nhưng không nói gì về việc model đã pin có phân biệt được văn bản tuyển dụng tiếng Việt hay không. Gate này nạp đúng revision đã pin mà worker dùng và xếp hạng một corpus tiếng Việt tự soạn: bốn lĩnh vực (backend, frontend, kế toán, nhân sự), mỗi lĩnh vực hai Job và một CV.
+- Chạy `--network none` và `local_files_only`, nên đo đúng revision đã pin chứ không phải thứ tải về hôm nay.
+- **Kết quả đo trên revision đã pin:** precision@1 = **1.0**, accentless agreement = **1.0**, clean separation rate = **0.25**.
+- Hai chỉ số đầu là tính chất model **có** giữ trên tiếng Việt: mọi CV xếp Job cùng lĩnh vực lên đầu, và bỏ dấu không làm đổi lĩnh vực top. Gate coi đây là yêu cầu cứng.
+- Clean separation — cả hai Job cùng lĩnh vực đứng trên mọi lĩnh vực khác — là chỗ model đã pin **không đạt**: nó chỉ xếp đúng Job cùng lĩnh vực gần nhất lên đầu, Job thứ hai thường tụt dưới một Job khác lĩnh vực. Đây là tính chất của model, không phải lỗi code xếp hạng, nên gate **ghi nhận `0.25` làm baseline và fail khi tụt xuống dưới**, thay vì đòi một con số model này chưa từng đạt. Muốn nâng lên thì phải đổi sang embedding model hỗ trợ tiếng Việt — đó là quyết định riêng.
+- **15 offline test** phủ phần không cần model: hình dạng corpus, xử lý dấu tiếng Việt kể cả chữ `đ`, cosine distance, tie-break tạo total order, và các rule ngưỡng.
+- Gate cuối PASS **621/621 unit test** cùng `ruff check`/`ruff format --check`; gate model thật PASS với `--network none`.
+- Đây là probe có kiểm soát trên corpus nhỏ tự soạn, **không phải** benchmark relevance production, và **tự nó không đủ** để nâng giới hạn recommendation.
+
+
 ---
 
 # 3. Danh sách task CHƯA làm (Pending)
@@ -1096,7 +1110,8 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
   - [x] Distributed multi-replica limiter cho cả hai surface recommendation đã hoàn thành qua PR #69: Redis sliding window một Lua script, budget riêng theo subject và theo surface, khóa HMAC không chứa `cv_id/job_id`, opt-in và fail-closed `503`; limiter cho gateway của Người 3 nằm ngoài phạm vi.
   - [x] Recruiter-facing Candidate index/filter/exact-plan synthetic controlled gate đã PASS với 0 lỗi/mismatch/leak, p95 130,089 ms và p99 149,503 ms; không bật ANN production.
   - [x] Candidate-facing Job full-target synthetic HTTP/concurrent-writer gate đã PASS với 0 error/mismatch/timeout/security leak, p95 1.021,163 ms và p99 1.133,728 ms dưới statement timeout 2 giây.
-  - [ ] Còn real-model corpus/relevance tiếng Việt, deployed E2E/multi-replica load, concurrent-writer rollout observation trên môi trường thật và production monitoring/SLO; distributed limiter cho chatbot v1 và cho hai surface recommendation đều đã có service/integration test với Redis thật, riêng limiter tầng gateway vẫn thuộc Người 3.
+  - [x] Real-model relevance tiếng Việt đã có số liệu đầu tiên qua PR #75: precision@1 và accentless agreement đều **1.0**, clean separation **0.25** — model đã pin không tách sạch trên tiếng Việt, muốn nâng phải đổi model.
+  - [ ] Còn corpus production quy mô thật, deployed E2E/multi-replica load, concurrent-writer rollout observation trên môi trường thật và production monitoring/SLO; distributed limiter cho chatbot v1 và cho hai surface recommendation đều đã có service/integration test với Redis thật, riêng limiter tầng gateway vẫn thuộc Người 3.
   - [x] Filter-aware ANN đã được điều tra dứt điểm qua PR #73 và **kết luận là không áp dụng được** cho surface này với hợp đồng phân trang hiện tại; lý do được giữ dưới dạng test chạy được thay vì ghi chú suông.
 
 ## P12 — Interview & Video Call Service
