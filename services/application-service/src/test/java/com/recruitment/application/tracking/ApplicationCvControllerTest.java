@@ -34,7 +34,7 @@ class ApplicationCvControllerTest {
     private static final UUID RECRUITER_ID = UUID.randomUUID();
     private static final UUID CANDIDATE_ID = UUID.randomUUID();
     private static final UUID CV_ID = UUID.randomUUID();
-    private static final String TOKEN = "application-cv-token";
+    private static final String TOKEN = "header.payload.signature";
     private static final String AUTHORIZATION = "Bearer " + TOKEN;
     private static final Instant NOW = Instant.parse(
         "2026-08-27T08:00:00Z"

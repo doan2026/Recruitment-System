@@ -45,7 +45,7 @@ class ApplicationMatchControllerTest {
     private static final UUID RECRUITER_ID = UUID.fromString(
         "20000000-0000-0000-0000-000000000001"
     );
-    private static final String TOKEN = "matching-token";
+    private static final String TOKEN = "header.payload.signature";
     private static final String AUTHORIZATION = "Bearer " + TOKEN;
     private static final Instant NOW = Instant.parse(
         "2026-08-25T10:15:30Z"

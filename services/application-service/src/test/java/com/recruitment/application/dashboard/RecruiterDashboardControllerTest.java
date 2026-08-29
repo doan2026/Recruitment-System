@@ -48,7 +48,7 @@ class RecruiterDashboardControllerTest {
     private static final UUID JOB_ID = UUID.fromString(
         "30000000-0000-0000-0000-000000000001"
     );
-    private static final String TOKEN = "dashboard-token";
+    private static final String TOKEN = "header.payload.signature";
     private static final String AUTHORIZATION = "Bearer " + TOKEN;
     private static final Instant GENERATED_AT = Instant.parse(
         "2026-08-25T10:15:30Z"

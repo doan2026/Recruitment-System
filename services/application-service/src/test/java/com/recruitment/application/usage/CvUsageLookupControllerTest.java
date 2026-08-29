@@ -191,7 +191,7 @@ class CvUsageLookupControllerTest {
             Arguments.of("application-service", INTERNAL_KEY, null),
             Arguments.of("profile-service", "wrong-key", null),
             Arguments.of("profile-service", "x".repeat(200), null),
-            Arguments.of(null, null, "Bearer candidate-token")
+            Arguments.of(null, null, "Bearer header.payload.signature")
         );
     }
 }
