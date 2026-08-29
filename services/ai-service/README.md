@@ -358,9 +358,11 @@ ranked vector query. Source lookup and generation checks still use normal
 indexes. The generation triggers update in the same transaction as embedding
 mutations; `/ready` verifies their rows, function, event shape and enabled
 mode. For this Candidate-facing `/recommend/jobs` direction, the full-target
-exact scan is intentionally correctness-first; query-load and rate-limit
-benchmarks plus a filter-aware ANN strategy remain follow-up work before
-raising limits. This pending work is separate from the bounded
+exact scan is intentionally correctness-first. The controlled gate below now
+covers HTTP correctness, concurrent-writer cursor behavior and local query load
+at 100,000 targets. Filter-aware ANN, distributed rate limiting,
+deployed/multi-replica capacity and real-model relevance remain follow-up work
+before raising limits. This work is separate from the bounded
 `/recommend/candidates` allowlist gate below.
 
 ## Recruiter-facing Candidate recommendation provider
@@ -555,6 +557,36 @@ synthetic 2D-in-384 vectors; they are not an HTTP, deployed, real-model
 Vietnamese relevance or production SLO claim. The populated migration run did
 not measure a simultaneous writer.
 
+### Candidate-facing Job full-target HTTP/load gate
+
+Run the guarded standalone gate separately:
+
+```bash
+./scripts/verify-job-recommendation-benchmark.sh
+```
+
+The runner starts the actual FastAPI `POST /recommend/jobs` route against
+100,000 Job embeddings: 80,000 active same-model, 10,000 inactive same-model
+and 10,000 active wrong-model rows, plus one active source CV. It verifies an
+independent float32-cosine oracle for unfiltered, location, salary and job-type
+queries; 1/2/10-page cursor walks; UUID tie ordering; inactive/model isolation;
+scoped authentication, strict validation and redaction;
+committed/rolled-back/zero-row generation behavior; concurrent readers and
+writers; and EXPLAIN evidence for the intentional full-target sequential scan
+without Job HNSW.
+
+The default run completed 100 warm-up plus 1,000 measured HTTP calls at
+concurrency 8 with zero errors, oracle mismatches, timeouts or security leaks:
+`10.762` requests/second, p95 `1,021.163 ms`, p99 `1,133.728 ms` and maximum
+`1,299.623 ms` under the production 2-second database statement timeout.
+Concurrent continuations returned only an exact HTTP 200 page or canonical
+stale-cursor HTTP 409.
+
+This is a controlled local Docker gate using synthetic 2D-in-384 vectors and
+one API/PostgreSQL pair. It is not a real-model Vietnamese relevance,
+deployed/multi-replica capacity, gateway, production SLO, filter-aware ANN or
+distributed rate-limit claim.
+
 ## Current boundary
 
 `/match`, `/recommend/jobs` and `/recommend/candidates` read precomputed vectors
@@ -570,7 +602,8 @@ fail-soft paths are covered deterministically. A guarded live-Claude 10-FAQ
 quality smoke and deployed AI → Job → AI staging E2E remain pending until the
 required staging credentials and environment are available; fake-provider and
 mock-downstream results are not live quality or E2E claims.
-Full producer-to-Media-to-AI staging E2E, HTTP/deployed recommendation load,
-real-model Vietnamese relevance, concurrent-writer rollout observation and
-distributed recommendation rate limiting also remain outside the completed
-service slices.
+Full producer-to-Media-to-AI staging E2E, deployed/multi-replica recommendation
+load, real-model Vietnamese relevance, concurrent-writer rollout observation
+on real environments, production monitoring/SLO, filter-aware ANN and
+distributed recommendation rate limiting remain outside the completed service
+slices.
