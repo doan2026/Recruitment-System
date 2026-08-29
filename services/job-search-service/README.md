@@ -30,6 +30,38 @@ Creating a job always stores `DRAFT`. Company membership and VERIFIED status
 are resolved through `GET /companies/by-user/:userId` with the caller JWT.
 OWNER manages every company job; MEMBER only manages jobs they created.
 
+## Access-token verification
+
+Every non-public, non-internal route accepts exactly one `Authorization` header
+in the form `Bearer <compact-jwt>`. The token is capped at 8 KiB and must use
+the canonical Auth access-token contract: `alg=RS256`, `typ=JWT`, an RFC 7638
+RSA thumbprint `kid`, configured issuer and exact string audience, canonical
+UUID v4 `sub/jti`, one uppercase `CANDIDATE|RECRUITER|ADMIN` role, and integer
+`iat/exp` with `exp > iat`. Tokens issued more than 60 seconds in the future,
+expired tokens, duplicate Authorization headers, loose whitespace and trailing
+data fail with the same generic `401` response.
+
+`JWT_ISSUER` and `JWT_AUDIENCE` are mandatory. Verification uses one of two
+exclusive modes:
+
+- Static mode reads `JWT_PUBLIC_KEY` or `JWT_PUBLIC_KEY_PATH` once at startup,
+  requires a 2048–8192-bit RSA public key and requires the JWT `kid` to match
+  its computed thumbprint.
+- Rotation mode uses `JWT_JWKS_URI` and requires its normalized hostname in
+  `JWT_JWKS_ALLOWED_HOSTS`. The URL must be the fixed
+  `/auth/.well-known/jwks.json` path over HTTPS; development HTTP requires the
+  explicit `JWT_ALLOW_INSECURE_JWKS=true` opt-in. Userinfo, query strings,
+  fragments and redirects are rejected.
+
+JWKS requests have a bounded timeout, accept only JSON/JWK Set content, and
+stream at most 32 KiB containing 1–16 exact RS256 signing keys. Every key must
+be 2048–8192-bit RSA and its `kid` must match its thumbprint. Current and
+previous Auth keys can coexist. Cache misses share one refresh, while unknown
+key IDs are cooldown-limited so attacker-controlled `kid` values cannot cause
+one Auth request per token. An expired cache is never used after refresh
+failure. Key/configuration outages return a sanitized `503`; responses never
+contain the token, PEM, JWKS URL or upstream body.
+
 Salary is either negotiable (both bounds null) or a complete range where
 `salaryMin <= salaryMax`. Deadline must be later than today. Editing critical
 content on a PUBLISHED job moves it back to `PENDING_APPROVAL`. PostgreSQL and
@@ -397,7 +429,7 @@ npm test
 npm run build
 ```
 
-The verified local suite contains 429 unit tests. The isolated Docker gate
+The verified local suite contains 533 unit tests. The isolated Docker gate
 applies migrations to disposable PostgreSQL 16 and starts Kafka 3.8, authenticated
 Redis 7, and Elasticsearch 8.14.3 with index auto-creation disabled. It runs
 20 integration tests covering historical baseline/resume/concurrency,

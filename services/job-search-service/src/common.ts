@@ -7,26 +7,23 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  InternalServerErrorException,
   NestInterceptor,
   SetMetadata,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
-import { JwtService } from '@nestjs/jwt';
 import { timingSafeEqual } from 'crypto';
-import { readFileSync } from 'fs';
 import { Observable, map } from 'rxjs';
+import { type AuthUser, SystemRole } from './auth.types';
+import {
+  AuthConfigurationError,
+  AuthKeyUnavailableError,
+  InvalidAccessTokenError,
+  JwtVerifierService,
+} from './jwt-verifier.service';
 
-export enum SystemRole {
-  ADMIN = 'ADMIN',
-  CANDIDATE = 'CANDIDATE',
-  RECRUITER = 'RECRUITER',
-}
-
-export interface AuthUser {
-  id: string;
-  systemRole: SystemRole;
-}
+export { type AuthUser, SystemRole } from './auth.types';
 
 export class ApiException extends HttpException {
   constructor(
@@ -42,6 +39,18 @@ export class ApiException extends HttpException {
 const PUBLIC_KEY = 'isPublic';
 const INTERNAL_KEY = 'isInternal';
 const ROLES_KEY = 'roles';
+const MAX_ACCESS_TOKEN_BYTES = 8 * 1024;
+const MAX_AUTHORIZATION_HEADER_BYTES =
+  MAX_ACCESS_TOKEN_BYTES + Buffer.byteLength('Bearer ', 'ascii');
+const COMPACT_BEARER_PATTERN =
+  /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/i;
+
+interface AuthenticatedRequest {
+  headers: Record<string, string | string[] | undefined>;
+  rawHeaders?: string[];
+  user?: AuthUser;
+}
+
 export const Public = () => SetMetadata(PUBLIC_KEY, true);
 export const Internal = () => SetMetadata(INTERNAL_KEY, true);
 export const Roles = (...roles: SystemRole[]) =>
@@ -55,7 +64,7 @@ export const CurrentUser = createParamDecorator(
 export class AuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
-    private readonly jwt: JwtService,
+    private readonly verifier: JwtVerifierService,
     private readonly config: ConfigService,
   ) {}
 
@@ -90,46 +99,82 @@ export class AuthGuard implements CanActivate {
     ) {
       return true;
     }
-    const request = context.switchToHttp().getRequest();
-    const token = request.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
-    if (!token) {
-      throw new ApiException(
-        'UNAUTHORIZED',
-        'Bearer access token is required',
-        HttpStatus.UNAUTHORIZED,
-      );
-    }
-
-    const inline = this.config.get<string>('JWT_PUBLIC_KEY');
-    const path = this.config.get<string>('JWT_PUBLIC_KEY_PATH');
-    const publicKey = inline?.replace(/\\n/g, '\n') ??
-      (path ? readFileSync(path, 'utf8') : undefined);
-    if (!publicKey) {
-      throw new Error('JWT_PUBLIC_KEY or JWT_PUBLIC_KEY_PATH is required');
-    }
+    const request = context
+      .switchToHttp()
+      .getRequest<AuthenticatedRequest>();
+    const token = this.readBearerToken(request.rawHeaders);
 
     try {
-      const payload = await this.jwt.verifyAsync<Record<string, unknown>>(
-        token,
-        { publicKey, algorithms: ['RS256'] },
-      );
-      const id = payload.sub;
-      const systemRole = payload.role;
-      if (
-        typeof id !== 'string' ||
-        !Object.values(SystemRole).includes(systemRole as SystemRole)
-      ) {
-        throw new Error('Invalid claims');
-      }
-      request.user = { id, systemRole };
+      request.user = await this.verifier.verify(token);
       return true;
-    } catch {
-      throw new ApiException(
-        'UNAUTHORIZED',
-        'Access token is invalid or expired',
-        HttpStatus.UNAUTHORIZED,
-      );
+    } catch (error) {
+      if (error instanceof AuthKeyUnavailableError) {
+        throw new ApiException(
+          'AUTH_KEY_UNAVAILABLE',
+          'Access token verification key is temporarily unavailable',
+          HttpStatus.SERVICE_UNAVAILABLE,
+        );
+      }
+      if (error instanceof AuthConfigurationError) {
+        throw new ApiException(
+          'AUTH_CONFIGURATION_ERROR',
+          'Access token verification is not configured',
+          HttpStatus.SERVICE_UNAVAILABLE,
+        );
+      }
+      if (error instanceof InvalidAccessTokenError) {
+        throw this.invalidAccessToken();
+      }
+      throw new InternalServerErrorException();
     }
+  }
+
+  private readBearerToken(rawHeaders: string[] | undefined): string {
+    if (!Array.isArray(rawHeaders)) {
+      throw this.missingAccessToken();
+    }
+
+    const authorizationValues: string[] = [];
+    for (let index = 0; index < rawHeaders.length; index += 2) {
+      if (rawHeaders[index]?.toLowerCase() === 'authorization') {
+        authorizationValues.push(rawHeaders[index + 1] ?? '');
+      }
+    }
+
+    if (authorizationValues.length !== 1) {
+      throw this.missingAccessToken();
+    }
+    const authorization = authorizationValues[0];
+    if (
+      Buffer.byteLength(authorization, 'utf8') >
+      MAX_AUTHORIZATION_HEADER_BYTES
+    ) {
+      throw this.missingAccessToken();
+    }
+    const match = COMPACT_BEARER_PATTERN.exec(authorization);
+    if (
+      !match ||
+      Buffer.byteLength(match[1], 'ascii') > MAX_ACCESS_TOKEN_BYTES
+    ) {
+      throw this.missingAccessToken();
+    }
+    return match[1];
+  }
+
+  private missingAccessToken(): ApiException {
+    return new ApiException(
+      'UNAUTHORIZED',
+      'Bearer access token is required',
+      HttpStatus.UNAUTHORIZED,
+    );
+  }
+
+  private invalidAccessToken(): ApiException {
+    return new ApiException(
+      'UNAUTHORIZED',
+      'Access token is invalid or expired',
+      HttpStatus.UNAUTHORIZED,
+    );
   }
 
   private secureEquals(provided: string, expected: string): boolean {

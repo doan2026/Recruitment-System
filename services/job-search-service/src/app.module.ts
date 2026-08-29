@@ -22,6 +22,7 @@ import { RecruiterCandidateRecommendationService } from './recruiter-candidate-r
 import { JobSearchCursorService } from './job-search-cursor.service';
 import { JobSearchService } from './job-search.service';
 import { JobService } from './job.service';
+import { JwtVerifierService } from './jwt-verifier.service';
 import { PrismaService } from './prisma.service';
 
 @Module({
@@ -39,6 +40,7 @@ import { PrismaService } from './prisma.service';
     JobEventPublisherService,
     JobSearchCursorService,
     JobSearchService,
+    JwtVerifierService,
     JobRecommendationService,
     AiRecommendationClientService,
     ProfileRecommendationClientService,
