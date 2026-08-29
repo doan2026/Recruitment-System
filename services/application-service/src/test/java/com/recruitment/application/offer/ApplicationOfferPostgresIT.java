@@ -195,7 +195,7 @@ class ApplicationOfferPostgresIT {
     }
 
     @Test
-    void flywayCreatesOfferSchemaThroughV9AndPendingExpiryIndex() {
+    void flywayCreatesOfferSchemaThroughV10AndPendingExpiryIndex() {
         List<String> appliedVersions = jdbc.queryForList(
             """
             SELECT version
@@ -254,7 +254,9 @@ class ApplicationOfferPostgresIT {
         );
 
         assertThat(appliedVersions)
-            .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
+            .containsExactly(
+                "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"
+            );
         assertThat(tables).contains("offers");
         assertThat(columnTypes)
             .containsEntry("salary", "numeric")

@@ -682,6 +682,35 @@ class ApplicationOfferServiceTest {
     }
 
     @Test
+    void workerExpiredOfferKeepsReturningTheExpiredConflict() {
+        stubRespondableApplication();
+        when(offer.getStatus()).thenReturn(OfferStatus.EXPIRED);
+
+        BusinessException exception = assertBusinessException(
+            () -> service.respond(
+                offerId,
+                candidateId,
+                new RespondOfferRequest(
+                    OfferDecision.ACCEPTED,
+                    null,
+                    0L,
+                    0L
+                )
+            ),
+            "OFFER_EXPIRED",
+            HttpStatus.CONFLICT
+        );
+
+        assertThat(exception.details()).containsKey("expiresAt");
+        verify(offers, never()).respond(
+            any(), any(), any(), any(), anyLong(), any()
+        );
+        verify(applications, never())
+            .transition(any(), any(), any(), anyLong());
+        verify(outbox, never()).save(any());
+    }
+
+    @Test
     void staleOfferVersionIsRejectedBeforeAtomicUpdates() {
         stubRespondableApplication();
 

@@ -273,6 +273,12 @@ public class ApplicationPipelineService {
 
         OfferEntity offer = offers.findByApplicationId(application.getId())
             .orElseThrow(this::inconsistentOfferState);
+        // An expired Offer is already terminal and can never be responded to,
+        // so the terminal Application transition has nothing left to cancel.
+        // Treating it as a conflict would strand the Application in OFFER.
+        if (offer.getStatus() == OfferStatus.EXPIRED) {
+            return;
+        }
         if (offer.getStatus() != OfferStatus.SENT) {
             throw concurrentChange();
         }

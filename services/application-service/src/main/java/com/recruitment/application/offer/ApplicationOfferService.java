@@ -221,6 +221,12 @@ public class ApplicationOfferService {
         );
 
         Instant now = clock.instant();
+        // A lapsed Offer keeps returning OFFER_EXPIRED whether or not the
+        // expiry worker has already resolved the row, so the Candidate-facing
+        // conflict does not change under the worker.
+        if (offer.getStatus() == OfferStatus.EXPIRED) {
+            throw offerExpired(offer.getExpiresAt());
+        }
         if (offer.getStatus() != OfferStatus.SENT) {
             throw offerAlreadyResponded(offer.getStatus());
         }
@@ -551,6 +557,9 @@ public class ApplicationOfferService {
                 HttpStatus.NOT_FOUND
             )
         );
+        if (current.getStatus() == OfferStatus.EXPIRED) {
+            return offerExpired(current.getExpiresAt());
+        }
         if (current.getStatus() != OfferStatus.SENT) {
             return offerAlreadyResponded(current.getStatus());
         }
