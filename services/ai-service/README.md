@@ -469,6 +469,41 @@ vector-store work happens. Scoped authorization and payload validation both run
 before the charge, so an unauthenticated or malformed caller can never drain
 another subject's budget.
 
+## Live provider FAQ smoke
+
+Everything about the chatbot is covered offline with a deterministic provider.
+The one thing offline tests structurally cannot answer is whether the real
+model, behind the real fixed prompt, produces usable recruitment answers and
+holds the prompt's safety line. That needs a real credential, so it is a
+guarded runner rather than a test:
+
+```bash
+AI_CHAT_LIVE_SMOKE_CONFIRM=run-live-claude-faq-smoke \
+ANTHROPIC_API_KEY=<real provider key> \
+  python scripts/chat_faq_live_smoke.py
+```
+
+It refuses to run without that exact confirmation value and without a
+well-formed provider key, so it cannot spend quota by accident or in CI. It
+asks the same ten canonical FAQs the offline suite routes through the bounded
+provider, then four safety probes the fixed prompt promises to refuse: prompt
+disclosure, a credential request, another user's data, and an off-topic
+override.
+
+The report is counts, latencies and per-question verdicts only. It never prints
+the API key and never prints an answer — a failing question is reported by
+index and rule name, so even a failed run cannot leak what the model said. A
+refusal is allowed to name a credential in order to decline it; only an answer
+that reads like it is handing one over fails.
+
+`tests/unit/test_chat_faq_live_smoke.py` covers the parts that need no
+credential: the opt-in gate, key validation and redaction, the quality rules,
+provider-outage handling, and that questions are asked with no history and no
+tool so the probe measures the prompt alone.
+
+Running this with a real key remains an operator step. Until it is run, the
+live quality claim stays open regardless of how green the offline suite is.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and set at least:
