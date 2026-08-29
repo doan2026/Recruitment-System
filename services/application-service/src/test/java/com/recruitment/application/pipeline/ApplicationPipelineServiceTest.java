@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -20,7 +21,10 @@ import com.recruitment.application.domain.ApplicationEntity;
 import com.recruitment.application.domain.ApplicationEventOutboxEntity;
 import com.recruitment.application.domain.ApplicationSource;
 import com.recruitment.application.domain.ApplicationStatus;
+import com.recruitment.application.domain.OfferEntity;
+import com.recruitment.application.domain.OfferStatus;
 import com.recruitment.application.repository.ApplicationEventOutboxRepository;
+import com.recruitment.application.repository.OfferRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -32,6 +36,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -46,6 +51,8 @@ class ApplicationPipelineServiceTest {
         mock(ApplicationHistoryWriter.class);
     private final ApplicationEventOutboxRepository outbox =
         mock(ApplicationEventOutboxRepository.class);
+    private final OfferRepository offers =
+        mock(OfferRepository.class);
     private final CompanyClient companies = mock(CompanyClient.class);
     private ApplicationPipelineService service;
 
@@ -73,6 +80,7 @@ class ApplicationPipelineServiceTest {
             applications,
             history,
             outbox,
+            offers,
             companies,
             new ObjectMapper().findAndRegisterModules(),
             Clock.fixed(NOW, ZoneOffset.UTC),
@@ -226,6 +234,135 @@ class ApplicationPipelineServiceTest {
     }
 
     @Test
+    void recruiterRejectionCancelsSentOfferBeforeApplicationTransition()
+        throws Exception {
+        OfferEntity offer = stubOfferedApplication(4L);
+        when(offers.cancelSent(applicationId, NOW, 0L)).thenReturn(1);
+        when(applications.transition(
+            applicationId,
+            ApplicationStatus.REJECTED,
+            NOW,
+            4L
+        )).thenReturn(1);
+
+        StatusTransitionResponse response = service.changeStatus(
+            applicationId,
+            recruiterId,
+            "Bearer token",
+            new ChangeApplicationStatusRequest(
+                ApplicationStatus.REJECTED,
+                "Position closed",
+                4L
+            )
+        );
+
+        assertThat(response.fromStatus()).isEqualTo(ApplicationStatus.OFFER);
+        assertThat(response.toStatus()).isEqualTo(ApplicationStatus.REJECTED);
+        assertThat(response.version()).isEqualTo(5L);
+        InOrder lockOrder = inOrder(offers, applications);
+        lockOrder.verify(offers).cancelSent(applicationId, NOW, 0L);
+        lockOrder.verify(applications).transition(
+            applicationId,
+            ApplicationStatus.REJECTED,
+            NOW,
+            4L
+        );
+        verify(offer).getVersion();
+        ArgumentCaptor<ApplicationEventOutboxEntity> event =
+            ArgumentCaptor.forClass(ApplicationEventOutboxEntity.class);
+        verify(outbox).save(event.capture());
+        JsonNode payload = new ObjectMapper().findAndRegisterModules()
+            .readTree(event.getValue().getPayload());
+        assertThat(payload.path("action").asText())
+            .isEqualTo("STATUS_CHANGED");
+        assertThat(payload.path("from_status").asText()).isEqualTo("OFFER");
+        assertThat(payload.path("to_status").asText()).isEqualTo("REJECTED");
+        assertThat(payload.has("offer_id")).isFalse();
+        assertThat(payload.has("offer_status")).isFalse();
+        assertThat(payload.has("offer_version")).isFalse();
+    }
+
+    @Test
+    void candidateWithdrawalCancelsSentOfferAtomically() {
+        stubOfferedApplication(7L);
+        when(offers.cancelSent(applicationId, NOW, 0L)).thenReturn(1);
+        when(applications.transition(
+            applicationId,
+            ApplicationStatus.WITHDRAWN,
+            NOW,
+            7L
+        )).thenReturn(1);
+
+        StatusTransitionResponse response = service.withdraw(
+            applicationId,
+            candidateId,
+            new WithdrawApplicationRequest("Accepted elsewhere", 7L)
+        );
+
+        assertThat(response.fromStatus()).isEqualTo(ApplicationStatus.OFFER);
+        assertThat(response.toStatus()).isEqualTo(ApplicationStatus.WITHDRAWN);
+        verify(offers).cancelSent(applicationId, NOW, 0L);
+        verify(history).append(
+            applicationId,
+            ApplicationStatus.OFFER,
+            ApplicationStatus.WITHDRAWN,
+            candidateId,
+            "Accepted elsewhere",
+            NOW
+        );
+    }
+
+    @Test
+    void offeredApplicationWithoutOfferFailsClosed() {
+        stubOfferedApplication(2L);
+        when(offers.findByApplicationId(applicationId))
+            .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.withdraw(
+            applicationId,
+            candidateId,
+            new WithdrawApplicationRequest(null, 2L)
+        ))
+            .isInstanceOf(BusinessException.class)
+            .satisfies(exception -> {
+                BusinessException business = (BusinessException) exception;
+                assertThat(business.code())
+                    .isEqualTo("APPLICATION_OFFER_INCONSISTENT");
+                assertThat(business.status())
+                    .isEqualTo(org.springframework.http.HttpStatus
+                        .SERVICE_UNAVAILABLE);
+            });
+
+        verify(applications, never()).transition(any(), any(), any(), anyLong());
+        verify(history, never()).append(any(), any(), any(), any(), any(), any());
+        verify(outbox, never()).save(any());
+    }
+
+    @Test
+    void offerCancellationRaceFailsBeforeApplicationMutation() {
+        stubOfferedApplication(3L);
+        when(offers.cancelSent(applicationId, NOW, 0L)).thenReturn(0);
+
+        assertThatThrownBy(() -> service.changeStatus(
+            applicationId,
+            recruiterId,
+            "Bearer token",
+            new ChangeApplicationStatusRequest(
+                ApplicationStatus.REJECTED,
+                "No longer hiring",
+                3L
+            )
+        ))
+            .isInstanceOf(BusinessException.class)
+            .extracting("code")
+            .isEqualTo("APPLICATION_CHANGED_CONCURRENTLY");
+
+        verify(applications, never()).transition(any(), any(), any(), anyLong());
+        verify(history, never()).append(any(), any(), any(), any(), any(), any());
+        verify(outbox, never()).save(any());
+    }
+
+    @Test
     void anotherCandidateCannotWithdrawApplication() {
         assertThatThrownBy(() -> service.withdraw(
             applicationId,
@@ -335,5 +472,27 @@ class ApplicationPipelineServiceTest {
             .extracting("code")
             .isEqualTo("INVALID_SKILL_FILTER");
         verify(companies, never()).getRecruiterMembership(any(), any());
+    }
+
+    private OfferEntity stubOfferedApplication(long version) {
+        ApplicationEntity offered = mock(ApplicationEntity.class);
+        when(offered.getId()).thenReturn(applicationId);
+        when(offered.getJobId()).thenReturn(applied.getJobId());
+        when(offered.getCompanyId()).thenReturn(companyId);
+        when(offered.getCandidateId()).thenReturn(candidateId);
+        when(offered.getRecruiterId()).thenReturn(jobOwnerRecruiterId);
+        when(offered.getJobTitle()).thenReturn("Backend Engineer");
+        when(offered.getStatus()).thenReturn(ApplicationStatus.OFFER);
+        when(offered.getVersion()).thenReturn(version);
+        when(applications.findById(applicationId))
+            .thenReturn(Optional.of(offered));
+
+        OfferEntity offer = mock(OfferEntity.class);
+        when(offer.getApplicationId()).thenReturn(applicationId);
+        when(offer.getStatus()).thenReturn(OfferStatus.SENT);
+        when(offer.getVersion()).thenReturn(0L);
+        when(offers.findByApplicationId(applicationId))
+            .thenReturn(Optional.of(offer));
+        return offer;
     }
 }

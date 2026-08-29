@@ -355,6 +355,40 @@ to `ACCEPTED` and the application to `HIRED`; declining changes them to
 conflict errors without partially updating the offer, application, history, or
 outbox.
 
+When an Application in `OFFER` is rejected by a Recruiter or withdrawn by its
+Candidate, the pipeline now atomically changes the linked `SENT` Offer to
+`CANCELLED` before changing the Application. Cancellation increments the
+Offer version, stores its terminal timestamp in `responded_at`, clears
+`response_note`, and makes later Candidate responses return a sanitized
+conflict. Both cancellation and Candidate response acquire the Offer row before
+the Application row, so an accept/decline race against reject/withdraw has
+exactly one winner and cannot commit a mixed terminal pair.
+
+Flyway V9 backfills legacy `REJECTED`/`WITHDRAWN` Applications whose Offers
+were still `SENT`; it does not synthesize history or outbox events. The V9
+rollout is intentionally not compatible with an old Application binary that
+does not understand `CANCELLED`: drain every old replica before applying V9,
+run one migration job, then start only the new binary. Do not roll back to an
+old binary after V9. Automatic Offer expiry remains a separate operational
+task.
+V9 drops and recreates Offer checks in one transaction, so it takes an
+`ACCESS EXCLUSIVE` lock while it backfills and validates the table. Measure the
+lock/backfill duration on production-sized data and reserve a maintenance
+window. Before enabling traffic, the migrator must confirm this query returns
+`0`:
+
+```sql
+SELECT COUNT(*) AS inconsistent_offers
+FROM application.offers AS offer
+JOIN application.applications AS application
+  ON application.id = offer.application_id
+WHERE application.status IN ('REJECTED', 'WITHDRAWN')
+  AND offer.status = 'SENT';
+```
+
+Only then may the new replicas receive traffic.
+
+
 Sending an offer writes the Offer, moves the Application to `OFFER`, appends
 history, and stores `OFFER_SENT` in the transactional outbox. Response events
 use `STATUS_CHANGED`. Offer events add `actor_id`, `offer_id`, `offer_status`,
@@ -363,6 +397,9 @@ include salary, notes, decline reasons, `fileId`, or `fileUrl`. Every v1 event
 includes the acting user in nullable `actor_id` and the resulting Application
 state in `aggregate_version`; this version can skip values when a non-event
 mutation, such as a match-score update, increments the same aggregate.
+Reject/withdraw cancellation remains an ordinary Application
+`STATUS_CHANGED` event without the Offer trio, preserving the canonical v1
+contract and its privacy boundary.
 
 Submission performs these checks in order:
 
@@ -436,14 +473,17 @@ V7-to-V8 migration without historical backfill, strict v2
 Profile parsing, transactional snapshot persistence/rollback, metadata and
 child-row protection, exact `ANY` filtering, combined filters, company
 isolation, legacy/empty-snapshot behavior, and deterministic tied-value
-pagination. The verified Application Service suite passes 282
-unit/WebMvc/security tests and 63 PostgreSQL/Kafka integration tests.
+pagination. V9 coverage verifies legacy backfill, runtime cancellation,
+transaction rollback, and accept/decline races against reject/withdraw while
+keeping the v1 event contract unchanged. The verified Application Service
+suite passes 286 unit/WebMvc/security tests and 71 PostgreSQL/Kafka integration
+tests.
 
 ### Controlled Application concurrency/load gate
 
 Run the standalone gate separately from the ordinary unit and integration
 suites. It starts a digest-pinned disposable PostgreSQL 16 container, applies
-Flyway V1-V8, and never accepts an external database target:
+Flyway V1-V9, and never accepts an external database target:
 
 ```bash
 mvn test-compile failsafe:integration-test failsafe:verify \

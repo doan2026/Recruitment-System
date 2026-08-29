@@ -36,4 +36,23 @@ public interface OfferRepository extends JpaRepository<OfferEntity, UUID> {
         @Param("expectedVersion") long expectedVersion,
         @Param("now") Instant now
     );
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+        update OfferEntity offer
+        set offer.status =
+                com.recruitment.application.domain.OfferStatus.CANCELLED,
+            offer.respondedAt = :cancelledAt,
+            offer.responseNote = null,
+            offer.version = offer.version + 1
+        where offer.applicationId = :applicationId
+          and offer.status =
+              com.recruitment.application.domain.OfferStatus.SENT
+          and offer.version = :expectedVersion
+        """)
+    int cancelSent(
+        @Param("applicationId") UUID applicationId,
+        @Param("cancelledAt") Instant cancelledAt,
+        @Param("expectedVersion") long expectedVersion
+    );
 }

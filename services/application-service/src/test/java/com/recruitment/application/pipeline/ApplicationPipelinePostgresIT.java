@@ -201,7 +201,7 @@ class ApplicationPipelinePostgresIT {
         );
 
         assertThat(appliedVersions)
-            .containsExactly("1", "2", "3", "4", "5", "6", "7", "8");
+            .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
         assertThat(tables).contains(
             "applications",
             "application_profile_skill_snapshots",
