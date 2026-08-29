@@ -2,7 +2,7 @@
 
 > Ngày cập nhật: 29/08/2026
 > Nhánh đối chiếu chính: `develop`
-> Pull Request lần cập nhật: PR #62 từ `feature/ai-service/chat-recommendation-tool` vào `develop`
+> Pull Request lần cập nhật: PR #63 từ `feature/job-search-service/strict-jwt-contract` vào `develop`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -746,9 +746,9 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Full Compose gate đạt Ruff/format PASS và **529 unit/non-integration + 62 PostgreSQL/Kafka/Redis integration (591/591 tổng)**. Mười FAQ vẫn dùng deterministic provider fake; không được suy diễn là đã chạy Claude thật.
 - Còn pending: live Claude intent/10-FAQ quality và staging smoke; deployed AI → Job → AI HTTP/load/cold-JWKS/multi-replica monitoring; production TLS, secret rotation và SLO. Frontend chatbot widget thuộc Người 3, nằm ngoài phạm vi task này.
 
-## 2.38 Job & Search Strict Access Token Contract & JWKS Rotation — đang bàn giao (PR pending)
+## 2.38 Job & Search Strict Access Token Contract & JWKS Rotation — hoàn thành qua PR #63
 
-> Task chỉ thuộc Job & Search Service của Người 2, triển khai trên `feature/job-search-service/strict-jwt-contract`. Task không sửa Auth, Application, Profile, shared gateway/Compose hay service của Người 1/3 và không tuyên bố deployed Auth–Job E2E đã hoàn tất.
+> Task chỉ thuộc Job & Search Service của Người 2, được bàn giao từ `feature/job-search-service/strict-jwt-contract` vào `develop` qua PR #63 ngày 29/08/2026. Task không sửa Auth, Application, Profile, shared gateway/Compose hay service của Người 1/3 và không tuyên bố deployed Auth–Job E2E đã hoàn tất.
 
 - Mọi route không public/internal chỉ nhận đúng một raw `Authorization: Bearer <compact-jwt>`; duplicate header, khoảng trắng lỏng, control/trailing data, token không canonical và token trên 8 KiB đều fail trước verifier.
 - Access token khóa `alg=RS256`, `typ=JWT`, RFC 7638 thumbprint `kid`, exact issuer/audience, UUID v4 lowercase `sub/jti`, exact role `CANDIDATE|RECRUITER|ADMIN`, integer `iat/exp`, giới hạn clock skew và thời hạn hợp lệ. Static PEM chỉ được đọc/cached một lần và cấu hình bắt buộc chọn đúng một nguồn inline, file hoặc JWKS.
