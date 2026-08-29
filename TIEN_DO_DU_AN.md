@@ -24,7 +24,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 | Admin & Statistics Service | Người 1 | ⏳ Scaffold |
 | Company Service | Người 2 | 🟡 Nghiệp vụ chính, ownership logo/ảnh/video qua Media, migration backup/restore, domain audit duyệt/OWNER, public search/load và real Auth–Company invitation identity gate đã hoàn thành; real Admin/File multi-service E2E còn pending |
 | Job & Search Service | Người 2 | 🟡 CRUD/search, transactional `job-events`, controlled historical Job baseline, Redis/BullMQ/Elasticsearch integration, Candidate job recommendation, consent-scoped Recruiter candidate recommendation, controlled search/deep-pagination/Vietnamese mapping load gate, Candidate-facing 100.000-Job full-target HTTP/load gate và strict canonical JWT/JWKS consumer gate đã hoàn thành; production relevance corpus/monitoring còn pending |
-| Application Service | Người 2 | 🟡 Các luồng từ Submission đến AI Match, canonical Profile CV contract, durable usage/deletion gate, Application-time skill snapshot, canonical `application-events` v1, strict canonical JWT/JWKS consumer gate và controlled concurrency/load gate 10.000 call và Offer terminal-state consistency Flyway V9 đã hoàn thành; còn P17 deployed E2E, HTTP/multi-replica load và production rollout |
+| Application Service | Người 2 | 🟡 Các luồng từ Submission đến AI Match, canonical Profile CV contract, durable usage/deletion gate, Application-time skill snapshot, canonical `application-events` v1, strict canonical JWT/JWKS consumer gate, controlled concurrency/load gate 10.000 call, Offer terminal-state consistency Flyway V9 và Offer auto-expiry worker Flyway V10 đã hoàn thành; còn P17 deployed E2E, HTTP/multi-replica load và production rollout |
 | AI Service | Người 2 | 🟡 Provider `/match`, consumer `job-events`, strict `cv-events` private-PDF embedding worker, internal `/recommend/jobs`/`/recommend/candidates`, CV HNSW/controlled exact-allowlist gate, Candidate-facing 100.000-Job full-target HTTP/load gate, backend chatbot Candidate và personalized Job recommendation tool v1 đã hoàn thành ở mức code và service test; còn live Claude 10-FAQ quality/staging smoke, deployed/multi-replica E2E/load/monitoring và source-side baseline trên dữ liệu thật |
 | Interview & Video Call Service | Người 3 | 🟡 Scheduling foundation, transactional `SCHEDULED interview-events`, role-aware detail/history/my, Recruiter Company calendar và advisory availability v1 đã hoàn thành; arbitrary interviewer/panel, lifecycle/Jitsi/feedback và các event action còn lại pending |
 | Chat Service | Người 3 | ⏳ Prototype realtime |
@@ -806,6 +806,21 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - V9 không rolling-compatible với binary cũ và giữ `ACCESS EXCLUSIVE` trong backfill/validate. Rollout bắt buộc freeze/drain toàn bộ replica cũ, đo lock window trên dữ liệu production-sized, chạy đúng một migrator trong maintenance window, post-check không còn terminal Application + `SENT` Offer, rồi mới bật replica mới; không rollback về binary cũ.
 - Không đánh dấu hoàn tất auto-expiry worker, canonical Offer-letter Media ownership, deployed P17 E2E/HTTP multi-replica load, frontend hoặc production rollout thật.
 
+## 2.43 Application Offer Auto-Expiry Worker — hoàn thành qua PR #68
+
+> Task chỉ thuộc Application Service backend của Người 2, được bàn giao từ `feature/application-service/offer-expiry-worker` vào `develop` qua PR #68 ngày 29/08/2026. Task không sửa frontend, service của Người 1/3, shared gateway/Compose hoặc Notification consumer.
+
+- Bổ sung terminal `OfferStatus.EXPIRED` và Flyway V10 mở rộng `offers_status_check`/`offers_response_coherence_check`, đồng thời backfill mọi row `SENT` đã quá `expires_at`. Backfill lấy `responded_at = expires_at` thay vì clock migration nên kết quả deterministic và trùng đúng với row do worker xử lý sau này; migration không sinh history/outbox giả và không đụng Application.
+- `ApplicationOfferExpiryWorker` đọc clock một lần mỗi scan rồi drain theo bounded batch cho tới khi batch trả về ngắn hoặc hết batch budget; `ApplicationOfferExpiryService` commit từng batch riêng nên backlog lớn không giữ row lock lâu. Batch fail rollback nguyên vẹn và scan kế tiếp retry từ cùng durable state.
+- Claim dùng `FOR UPDATE SKIP LOCKED` trên partial index `offers_pending_expiry_idx`, nên nhiều replica nhận claim rời nhau, không expire trùng một row và không block Candidate response hay pipeline cancellation đang giữ row. Native query được qualify bằng `{h-schema}` vì native SQL không kế thừa `hibernate.default_schema`.
+- Worker chỉ resolve Offer: Application giữ nguyên `OFFER` để quyết định terminal vẫn thuộc Recruiter hoặc Candidate, và worker không ghi history lẫn outbox. Canonical `application-events` v1 không có action expiry lẫn `offer_status=EXPIRED`, nên phát event ở đây sẽ bị Notification consumer của Người 3 từ chối; hợp đồng v1 giữ nguyên.
+- Reject/withdraw một Application có Offer đã `EXPIRED` vẫn commit và vẫn phát `STATUS_CHANGED` không có Offer trio, vì Offer terminal thì transition không còn gì để cancel; Offer đã `ACCEPTED/DECLINED` tiếp tục fail closed bằng `409`. Candidate phản hồi Offer quá hạn nhận cùng conflict `OFFER_EXPIRED` bất kể worker đã resolve row hay chưa.
+- Gate cuối PASS **299/299 unit/WebMvc/security test + 81/81 PostgreSQL 16/Kafka 3.8 integration test**, gồm dedicated V9→V10 backfill/negative constraint IT và chín IT expiry cho boundary `expires_at`, non-`SENT` isolation, Application/history/outbox không đổi, idempotent rescan, batch budget và bốn scanner đồng thời expire mỗi row đúng một lần. Maven `verify`, production Docker image và `git diff --check` PASS.
+- IT trên PostgreSQL thật đã bắt lỗi thực: bản đầu của native query thiếu schema qualification và fail `relation "offers" does not exist` ở runtime; lỗi được sửa trước khi merge.
+- V10 giữ `ACCESS EXCLUSIVE` khi drop/recreate check và backfill, không rolling-compatible với binary cũ chưa hiểu `EXPIRED`. Rollout bắt buộc drain toàn bộ replica cũ, chạy đúng một migrator trong maintenance window, post-check không còn `SENT` Offer quá hạn, rồi mới bật replica mới; không rollback về binary cũ.
+- Không đánh dấu hoàn tất canonical Offer-letter Media ownership, deployed P17 E2E/HTTP multi-replica load, frontend hoặc production rollout thật.
+
+
 ---
 
 # 3. Danh sách task CHƯA làm (Pending)
@@ -832,7 +847,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ## P03 — Application Offer
 
-> Core Offer đã hoàn thành và terminal-state consistency được bổ sung qua PR #67; canonical Offer-letter Media và auto-expiry worker vẫn là hạng mục riêng.
+> Core Offer đã hoàn thành, terminal-state consistency được bổ sung qua PR #67 và auto-expiry worker qua PR #68; canonical Offer-letter Media vẫn là hạng mục riêng thuộc P09.
 
 - [x] Tạo bảng `Offer` và trạng thái `SENT/ACCEPTED/DECLINED/CANCELLED`.
 - [x] Implement `POST /applications/:id/offer`, chỉ cho phép từ `INTERVIEW`.
@@ -844,7 +859,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [x] Chặn phản hồi lặp, offer hết hạn và concurrent response.
 - [x] Khi Application ở `OFFER` bị Recruiter reject hoặc Candidate withdraw, CAS Offer `SENT → CANCELLED` trước Application trong cùng transaction; race response/pipeline chỉ có một winner.
 - [x] Flyway V9 backfill legacy terminal Application + `SENT` Offer, tăng Offer version, giữ event v1 không có Offer trio và kiểm constraint/rollback trên PostgreSQL thật.
-- [ ] Bổ sung worker xử lý Offer `SENT` quá `expires_at`; hiện phản hồi quá hạn đã bị chặn nhưng row chưa tự chuyển trạng thái.
+- [x] Bổ sung worker xử lý Offer `SENT` quá `expires_at`: scheduled scan bounded batch dùng `FOR UPDATE SKIP LOCKED` chuyển row sang terminal `EXPIRED` với `responded_at = expires_at`, Flyway V10 mở rộng constraint và backfill row quá hạn; Application giữ nguyên `OFFER` và worker không phát `application-events`.
 
 ## P04 — Application Recruiter Dashboard và AI Match
 
@@ -859,7 +874,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
   - [x] Ghi điểm bằng `expectedVersion`/atomic compare-and-set; lỗi giữ nguyên điểm, không đổi status/`updated_at`, không ghi history hoặc outbox.
 - [x] Bổ sung filter kỹ năng Recruiter từ immutable Application-time Profile snapshot: `skills` repeated/comma, tối đa 10, ANY exact case-insensitive, kết hợp filter hiện có và pagination deterministic cho mọi sort.
 - [x] Persist snapshot schema/Profile aggregate/expected count và names-only skills trong cùng transaction submission; không backfill Application lịch sử, late SQL mutation bị DB chặn.
-- [x] Full Application verify mới nhất đạt **286 unit/WebMvc/security + 71 PostgreSQL/Kafka integration test** sau strict JWT/JWKS consumer gate và Offer lifecycle consistency V9; canonical `application-events` v1 và root Nginx query-free Application access log vẫn được giữ nguyên.
+- [x] Full Application verify mới nhất đạt **299 unit/WebMvc/security + 81 PostgreSQL/Kafka integration test** sau strict JWT/JWKS consumer gate, Offer lifecycle consistency V9 và Offer auto-expiry worker V10; canonical `application-events` v1 và root Nginx query-free Application access log vẫn được giữ nguyên.
 - [x] Bổ sung controlled transaction/load gate độc lập cho năm race quan trọng: đúng **10.000 service call** ở concurrency 32, 5.000 winner/5.000 conflict `409` dự kiến, 0 unexpected/5xx/deadlock/timeout, p95 114,567 ms, p99 162,895 ms và 585,53 call/s.
 - [x] Test dữ liệu rỗng, range thiếu/sai/quá 366 ngày, quyền công ty, timezone PostgreSQL, `DAY/WEEK/MONTH` và DST.
 - [x] Verify AI Match đạt tổng cộng 162 unit test và 35 integration test PostgreSQL/Kafka; riêng task mới bổ sung 36 unit test và 6 integration test.

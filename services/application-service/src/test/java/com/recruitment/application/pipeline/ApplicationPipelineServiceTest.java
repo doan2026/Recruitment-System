@@ -339,6 +339,91 @@ class ApplicationPipelineServiceTest {
     }
 
     @Test
+    void expiredOfferLetsTheRecruiterStillCloseTheApplication() {
+        OfferEntity offer = stubOfferedApplication(3L);
+        when(offer.getStatus()).thenReturn(OfferStatus.EXPIRED);
+        when(applications.transition(
+            applicationId,
+            ApplicationStatus.REJECTED,
+            NOW,
+            3L
+        )).thenReturn(1);
+
+        service.changeStatus(
+            applicationId,
+            recruiterId,
+            "Bearer token",
+            new ChangeApplicationStatusRequest(
+                ApplicationStatus.REJECTED,
+                "Offer lapsed without a response",
+                3L
+            )
+        );
+
+        // The worker already made the Offer terminal, so the transition has
+        // nothing left to cancel and must not report a conflict.
+        verify(offers, never()).cancelSent(any(), any(), anyLong());
+        verify(applications).transition(
+            applicationId,
+            ApplicationStatus.REJECTED,
+            NOW,
+            3L
+        );
+        verify(outbox).save(any());
+    }
+
+    @Test
+    void expiredOfferLetsTheCandidateStillWithdraw() {
+        OfferEntity offer = stubOfferedApplication(2L);
+        when(offer.getStatus()).thenReturn(OfferStatus.EXPIRED);
+        when(applications.transition(
+            applicationId,
+            ApplicationStatus.WITHDRAWN,
+            NOW,
+            2L
+        )).thenReturn(1);
+
+        service.withdraw(
+            applicationId,
+            candidateId,
+            new WithdrawApplicationRequest("Accepted elsewhere", 2L)
+        );
+
+        verify(offers, never()).cancelSent(any(), any(), anyLong());
+        verify(applications).transition(
+            applicationId,
+            ApplicationStatus.WITHDRAWN,
+            NOW,
+            2L
+        );
+    }
+
+    @Test
+    void alreadyRespondedOfferStillBlocksTheTerminalTransition() {
+        OfferEntity offer = stubOfferedApplication(3L);
+        when(offer.getStatus()).thenReturn(OfferStatus.ACCEPTED);
+
+        assertThatThrownBy(() -> service.changeStatus(
+            applicationId,
+            recruiterId,
+            "Bearer token",
+            new ChangeApplicationStatusRequest(
+                ApplicationStatus.REJECTED,
+                "No longer hiring",
+                3L
+            )
+        ))
+            .isInstanceOf(BusinessException.class)
+            .extracting("code")
+            .isEqualTo("APPLICATION_CHANGED_CONCURRENTLY");
+
+        verify(offers, never()).cancelSent(any(), any(), anyLong());
+        verify(applications, never())
+            .transition(any(), any(), any(), anyLong());
+        verify(outbox, never()).save(any());
+    }
+
+    @Test
     void offerCancellationRaceFailsBeforeApplicationMutation() {
         stubOfferedApplication(3L);
         when(offers.cancelSent(applicationId, NOW, 0L)).thenReturn(0);
