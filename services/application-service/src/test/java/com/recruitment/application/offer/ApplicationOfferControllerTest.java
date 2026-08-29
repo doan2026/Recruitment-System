@@ -59,7 +59,7 @@ class ApplicationOfferControllerTest {
     private static final UUID FILE_ID = UUID.fromString(
         "50000000-0000-0000-0000-000000000001"
     );
-    private static final String TOKEN = "offer-token";
+    private static final String TOKEN = "header.payload.signature";
     private static final String AUTHORIZATION = "Bearer " + TOKEN;
     private static final Instant SENT_AT =
         Instant.parse("2026-08-25T08:00:00Z");

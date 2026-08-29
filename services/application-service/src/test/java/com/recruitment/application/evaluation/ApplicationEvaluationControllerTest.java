@@ -52,7 +52,8 @@ class ApplicationEvaluationControllerTest {
     private static final UUID EVALUATOR_ID = UUID.fromString(
         "30000000-0000-0000-0000-000000000001"
     );
-    private static final String AUTHORIZATION = "Bearer recruiter-token";
+    private static final String TOKEN = "header.payload.signature";
+    private static final String AUTHORIZATION = "Bearer " + TOKEN;
     private static final Instant CREATED_AT =
         Instant.parse("2026-08-25T08:00:00Z");
 
@@ -297,8 +298,8 @@ class ApplicationEvaluationControllerTest {
         String role,
         String body
     ) {
-        when(jwtDecoder.decode("recruiter-token")).thenReturn(Jwt
-            .withTokenValue("recruiter-token")
+        when(jwtDecoder.decode(TOKEN)).thenReturn(Jwt
+            .withTokenValue(TOKEN)
             .header("alg", "RS256")
             .subject(subject)
             .claim("role", role)

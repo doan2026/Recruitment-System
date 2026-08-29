@@ -30,11 +30,19 @@ spring:
         enable.idempotence: true
     consumer:
       group-id: application-service
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          public-key-location: file:${JWT_PUBLIC_KEY_PATH}
+
+security:
+  jwt:
+    issuer: ${JWT_ISSUER}
+    audience: ${JWT_AUDIENCE}
+    public-key: ${JWT_PUBLIC_KEY:}
+    public-key-path: ${JWT_PUBLIC_KEY_PATH:}
+    jwks-uri: ${JWT_JWKS_URI:}
+    jwks-allowed-hosts: ${JWT_JWKS_ALLOWED_HOSTS:}
+    allow-insecure-jwks: ${JWT_ALLOW_INSECURE_JWKS:false}
+    jwks-timeout-ms: ${JWT_JWKS_TIMEOUT_MS:3000}
+    jwks-cache-ttl-ms: ${JWT_JWKS_CACHE_TTL_MS:300000}
+    jwks-refresh-cooldown-ms: ${JWT_JWKS_REFRESH_COOLDOWN_MS:10000}
 
 clients:
   job-service-url: ${JOB_SERVICE_URL:http://job-search-service:3000}

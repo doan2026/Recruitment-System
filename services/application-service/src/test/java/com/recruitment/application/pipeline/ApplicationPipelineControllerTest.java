@@ -37,7 +37,7 @@ class ApplicationPipelineControllerTest {
     private static final UUID RECRUITER_ID = UUID.fromString(
         "10000000-0000-4000-8000-000000000001"
     );
-    private static final String TOKEN = "pipeline-token";
+    private static final String TOKEN = "header.payload.signature";
     private static final String AUTHORIZATION = "Bearer " + TOKEN;
     private static final Instant NOW = Instant.parse(
         "2026-08-28T08:00:00Z"

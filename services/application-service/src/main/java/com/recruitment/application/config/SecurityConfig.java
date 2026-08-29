@@ -1,11 +1,12 @@
 package com.recruitment.application.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Collectors;
+import java.util.Set;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,6 +27,24 @@ import org.springframework.security.web.SecurityFilterChain;
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {
+    private static final Set<String> SYSTEM_ROLES = Set.of(
+        "CANDIDATE",
+        "RECRUITER",
+        "ADMIN"
+    );
+
+    @Bean
+    StrictBearerTokenResolver strictBearerTokenResolver() {
+        return new StrictBearerTokenResolver();
+    }
+
+    @Bean
+    SecurityAuthenticationEntryPoint securityAuthenticationEntryPoint(
+        ObjectMapper objectMapper
+    ) {
+        return new SecurityAuthenticationEntryPoint(objectMapper);
+    }
+
     @Bean
     InternalProfileAuthenticationFilter internalProfileAuthenticationFilter(
         @Value("${internal.profile-api-key}") String internalProfileApiKey,
@@ -48,7 +67,8 @@ public class SecurityConfig {
         @Value("${clients.profile-internal-api-key}")
             String profileInternalApiKey,
         @Value("${clients.internal-api-key:}") String sharedInternalApiKey,
-        JwtDecoder jwtDecoder
+        JwtDecoder jwtDecoder,
+        StrictBearerTokenResolver bearerTokenResolver
     ) {
         for (String otherKey : List.of(
             internalProfileApiKey,
@@ -67,7 +87,8 @@ public class SecurityConfig {
         }
         return new InternalInterviewAuthenticationFilter(
             internalInterviewApiKey,
-            jwtDecoder
+            jwtDecoder,
+            bearerTokenResolver
         );
     }
 
@@ -136,12 +157,19 @@ public class SecurityConfig {
 
     @Bean
     @Order(3)
-    SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain securityFilterChain(
+        HttpSecurity http,
+        StrictBearerTokenResolver bearerTokenResolver,
+        SecurityAuthenticationEntryPoint authenticationEntryPoint
+    ) throws Exception {
         return http
             .csrf(csrf -> csrf.disable())
             .sessionManagement(session -> session.sessionCreationPolicy(
                 SessionCreationPolicy.STATELESS
             ))
+            .exceptionHandling(exceptions -> exceptions
+                .authenticationEntryPoint(authenticationEntryPoint)
+            )
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(
                     "/actuator/health",
@@ -152,9 +180,13 @@ public class SecurityConfig {
                 ).permitAll()
                 .anyRequest().authenticated()
             )
-            .oauth2ResourceServer(oauth -> oauth.jwt(jwt ->
-                jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())
-            ))
+            .oauth2ResourceServer(oauth -> oauth
+                .bearerTokenResolver(bearerTokenResolver)
+                .authenticationEntryPoint(authenticationEntryPoint)
+                .jwt(jwt -> jwt.jwtAuthenticationConverter(
+                    jwtAuthenticationConverter()
+                ))
+            )
             .build();
     }
 
@@ -180,19 +212,10 @@ public class SecurityConfig {
     private Converter<Jwt, JwtAuthenticationToken> jwtAuthenticationConverter() {
         return jwt -> {
             Object roleClaim = jwt.getClaim("role");
-            List<GrantedAuthority> authorities;
-            if (roleClaim instanceof String role) {
-                authorities = List.of(new SimpleGrantedAuthority("ROLE_" + role));
-            } else if (roleClaim instanceof List<?> roles) {
-                authorities = roles.stream()
-                    .filter(String.class::isInstance)
-                    .map(String.class::cast)
-                    .map(role -> (GrantedAuthority)
-                        new SimpleGrantedAuthority("ROLE_" + role))
-                    .collect(Collectors.toList());
-            } else {
-                authorities = List.of();
-            }
+            List<GrantedAuthority> authorities =
+                roleClaim instanceof String role && SYSTEM_ROLES.contains(role)
+                ? List.of(new SimpleGrantedAuthority("ROLE_" + role))
+                : List.of();
             return new JwtAuthenticationToken(
                 jwt,
                 authorities,

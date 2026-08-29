@@ -28,6 +28,39 @@ routes discard client-supplied internal identity headers.
 | `GET /actuator/health` | Direct health check | Public |
 | `GET /docs` | `GET /applications/docs` | Public |
 
+## Access-token verification and JWKS rotation
+
+Every non-public, non-internal route accepts exactly one raw
+`Authorization: Bearer <compact-jwt>` header. The scheme is
+case-insensitive, but it must be followed by exactly one ASCII space; duplicate
+headers, commas, controls, trailing data, malformed compact tokens, and tokens
+larger than 8 KiB are rejected before signature verification.
+
+Application Service verifies the canonical Auth access-token contract: exact
+protected header fields `alg=RS256`, `typ=JWT`, and RFC 7638 public-key
+thumbprint `kid`; exact configured issuer and scalar audience; lowercase UUIDv4
+`sub` and `jti`; one string role from `CANDIDATE`, `RECRUITER`, or `ADMIN`; and
+integral, ordered, non-expired `iat`/`exp` claims with at most 60 seconds of
+future clock skew. The same decoder validates the Recruiter token forwarded by
+Interview Service; Profile and Interview service-key boundaries remain
+separate.
+
+`JWT_ISSUER` and `JWT_AUDIENCE` are mandatory. Configure exactly one key
+source: `JWT_PUBLIC_KEY`, `JWT_PUBLIC_KEY_PATH`, or `JWT_JWKS_URI`. Static RSA
+public keys are validated and cached once. JWKS mode additionally requires an
+exact lowercase hostname in `JWT_JWKS_ALLOWED_HOSTS`; HTTPS and the fixed
+`/auth/.well-known/jwks.json` path are mandatory unless development HTTP is
+explicitly enabled with `JWT_ALLOW_INSECURE_JWKS=true`.
+
+JWKS retrieval disables redirects and compression, has bounded timeout/body
+limits, accepts only an exact 1–16 key RSA signing set, and validates every
+`kid` as its RFC 7638 thumbprint. Current and previous keys are cached with a
+monotonic TTL, single-flight refresh, and unknown-key cooldown. A refresh is
+published atomically, and an expired key is never served stale. Invalid tokens
+receive a generic no-store 401; a temporarily unavailable key set receives a
+sanitized no-store 503; unexpected verification failures receive a sanitized
+500. Token, PEM, JWKS URL, and upstream response details are never returned.
+
 Recruiter access is scoped by Company Service membership. The
 `GET /by-user/{userId}` contract must return both `companyId` and
 `memberRole`. Both `MEMBER` and `OWNER` can list, view, and transition
@@ -403,8 +436,8 @@ V7-to-V8 migration without historical backfill, strict v2
 Profile parsing, transactional snapshot persistence/rollback, metadata and
 child-row protection, exact `ANY` filtering, combined filters, company
 isolation, legacy/empty-snapshot behavior, and deterministic tied-value
-pagination. The verified Application Service suite passes 260 unit tests and
-63 PostgreSQL/Kafka integration tests.
+pagination. The verified Application Service suite passes 282
+unit/WebMvc/security tests and 63 PostgreSQL/Kafka integration tests.
 
 In Root Compose, use three distinct keys: `PROFILE_INTERNAL_API_KEY_APPLICATION`
 maps to Application's `PROFILE_INTERNAL_API_KEY` and Profile's

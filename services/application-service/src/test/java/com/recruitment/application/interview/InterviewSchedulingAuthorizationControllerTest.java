@@ -34,7 +34,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 class InterviewSchedulingAuthorizationControllerTest {
     private static final String INTERNAL_KEY =
         "interview-to-application-test-key-000000000000001";
-    private static final String TOKEN = "forwarded-recruiter-token";
+    private static final String TOKEN = "header.payload.signature";
     private static final UUID RECRUITER_ID = UUID.fromString(
         "10000000-0000-4000-8000-000000000001"
     );

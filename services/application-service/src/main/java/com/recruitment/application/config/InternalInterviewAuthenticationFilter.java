@@ -15,9 +15,10 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -30,10 +31,12 @@ public class InternalInterviewAuthenticationFilter
 
     private final byte[] expectedKey;
     private final JwtDecoder jwtDecoder;
+    private final StrictBearerTokenResolver bearerTokenResolver;
 
     public InternalInterviewAuthenticationFilter(
         String configuredKey,
-        JwtDecoder jwtDecoder
+        JwtDecoder jwtDecoder,
+        StrictBearerTokenResolver bearerTokenResolver
     ) {
         String key = configuredKey == null ? "" : configuredKey;
         byte[] bytes = key.getBytes(StandardCharsets.UTF_8);
@@ -50,6 +53,7 @@ public class InternalInterviewAuthenticationFilter
         }
         this.expectedKey = bytes;
         this.jwtDecoder = jwtDecoder;
+        this.bearerTokenResolver = bearerTokenResolver;
     }
 
     @Override
@@ -60,17 +64,22 @@ public class InternalInterviewAuthenticationFilter
     ) throws ServletException, IOException {
         String service = singleHeader(request, SERVICE_HEADER);
         String key = singleHeader(request, KEY_HEADER);
-        String authorization = singleHeader(
-            request,
-            HttpHeaders.AUTHORIZATION
-        );
-        String token = bearerToken(authorization);
-
         if (
             !INTERVIEW_SERVICE.equals(service) ||
-            !matches(key) ||
-            token == null
+            !matches(key)
         ) {
+            unauthorized(response);
+            return;
+        }
+
+        String token;
+        try {
+            token = bearerTokenResolver.resolve(request);
+        } catch (OAuth2AuthenticationException exception) {
+            unauthorized(response);
+            return;
+        }
+        if (token == null) {
             unauthorized(response);
             return;
         }
@@ -88,9 +97,15 @@ public class InternalInterviewAuthenticationFilter
                 unauthorized(response);
                 return;
             }
-        } catch (JwtException | IllegalArgumentException exception) {
+        } catch (AuthKeyUnavailableException exception) {
+            unavailable(response);
+            return;
+        } catch (BadJwtException | IllegalArgumentException exception) {
             SecurityContextHolder.clearContext();
             unauthorized(response);
+            return;
+        } catch (RuntimeException exception) {
+            internalError(response);
             return;
         }
 
@@ -117,19 +132,6 @@ public class InternalInterviewAuthenticationFilter
         return value;
     }
 
-    private String bearerToken(String authorization) {
-        if (
-            authorization == null ||
-            !authorization.startsWith("Bearer ")
-        ) return null;
-        String token = authorization.substring(7);
-        if (
-            token.isBlank() ||
-            token.chars().anyMatch(Character::isWhitespace)
-        ) return null;
-        return token;
-    }
-
     private String canonicalUuid(String value) {
         if (value == null) return null;
         UUID uuid = UUID.fromString(value);
@@ -145,13 +147,49 @@ public class InternalInterviewAuthenticationFilter
 
     private void unauthorized(HttpServletResponse response)
         throws IOException {
-        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        writeError(
+            response,
+            HttpServletResponse.SC_UNAUTHORIZED,
+            "INTERNAL_AUTH_INVALID",
+            "Internal service authentication failed"
+        );
+    }
+
+    private void unavailable(HttpServletResponse response)
+        throws IOException {
+        writeError(
+            response,
+            HttpServletResponse.SC_SERVICE_UNAVAILABLE,
+            "AUTH_KEY_UNAVAILABLE",
+            "Access token verification key is temporarily unavailable"
+        );
+    }
+
+    private void internalError(HttpServletResponse response)
+        throws IOException {
+        writeError(
+            response,
+            HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
+            "INTERNAL_SERVER_ERROR",
+            "Internal server error"
+        );
+    }
+
+    private void writeError(
+        HttpServletResponse response,
+        int status,
+        String code,
+        String message
+    ) throws IOException {
+        SecurityContextHolder.clearContext();
+        response.setStatus(status);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
+        response.setHeader(HttpHeaders.PRAGMA, "no-cache");
         response.getWriter().write(
-            "{\"code\":\"INTERNAL_AUTH_INVALID\"," +
-            "\"message\":\"Internal service authentication failed\"," +
+            "{\"code\":\"" + code + "\"," +
+            "\"message\":\"" + message + "\"," +
             "\"details\":null}"
         );
     }
