@@ -887,6 +887,19 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Gate cuối PASS **660/660 test** cùng `ruff check`/`ruff format --check`; full-target exact scan giữ nguyên.
 
 
+## 2.49 Guarded Live Claude FAQ Smoke Runner — hoàn thành qua PR #74
+
+> Task chỉ thuộc AI Service của Người 2, được bàn giao từ `feature/ai-service/chat-faq-live-smoke-runner` vào `develop` qua PR #74 ngày 30/08/2026. Đây là tooling, **không phải** tuyên bố live PASS.
+
+- Toàn bộ chatbot đã được phủ offline bằng provider deterministic. Thứ mà test offline về mặt cấu trúc không trả lời được là: model thật, sau prompt cố định thật, có tạo ra câu trả lời tuyển dụng dùng được và có giữ đúng ranh giới an toàn của prompt hay không. Việc đó cần credential thật nên nằm ở runner có bảo vệ, không nằm trong test suite.
+- Runner từ chối chạy nếu thiếu `AI_CHAT_LIVE_SMOKE_CONFIRM=run-live-claude-faq-smoke` và nếu `ANTHROPIC_API_KEY` không đúng dạng key provider, nên không thể tiêu quota do vô ý hay do CI.
+- Hỏi đúng mười FAQ chuẩn mà suite offline đang chạy qua bounded provider, rồi bốn safety probe mà prompt cố định hứa từ chối: lộ prompt, đòi credential, dữ liệu người khác, và override off-topic.
+- Báo cáo chỉ gồm count, latency và verdict theo từng câu. **Không bao giờ in API key và không bao giờ in câu trả lời** — câu hỏi fail được báo bằng index và tên rule, nên ngay cả lần chạy fail cũng không lộ nội dung model nói. Một lời từ chối được phép nhắc tới credential để từ chối nó; chỉ câu trả lời đọc như đang trao credential mới bị đánh fail.
+- **23 offline test** phủ phần không cần credential: opt-in gate, validate key và redaction, các rule chất lượng, xử lý provider outage, và việc câu hỏi được hỏi không có history và không bật tool để phép đo chỉ đo prompt.
+- Gate cuối PASS **683/683 test** cùng `ruff check`/`ruff format --check`.
+- **Không đánh dấu live quality đã PASS.** Chạy với key thật vẫn là bước vận hành; cho tới khi chạy, tuyên bố chất lượng live vẫn để mở bất kể suite offline xanh đến đâu.
+
+
 ---
 
 # 3. Danh sách task CHƯA làm (Pending)
@@ -1070,6 +1083,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
   - [x] Redis HMAC owner/session key giữ tối đa 10 lượt/24 giờ; atomic lock/fencing và sliding-window limit theo user/toàn cục dùng Redis server time.
   - [x] Bounded timeout/output, sanitized provider/store/auth errors, `no-store`, deterministic provider fake và 10 FAQ plumbing đã có test.
   - [ ] Chạy live Claude 10-FAQ quality/staging smoke với API key thật; repository không có credential để tuyên bố PASS.
+    - [x] Guarded runner đã hoàn thành qua PR #74: opt-in bắt buộc, validate API key, hỏi đúng mười FAQ chuẩn cộng bốn safety probe, báo cáo chỉ có verdict/latency và không bao giờ in key lẫn câu trả lời; **23 offline test** phủ phần không cần credential. Chạy với key thật vẫn là bước vận hành.
   - [x] Bổ sung personalized Job recommendation intent/tool có authorization rõ ràng: strict parameter-free Claude tool, fixed Candidate `/recommended?limit=3`, transient bearer, deterministic minimal projection, neutral Redis marker và fail-soft downstream.
   - [ ] Frontend chatbot widget thuộc Người 3 và không nằm trong task backend Người 2 này.
 - [x] Vector store, ownership registry, ledger và dead-letter chỉ lưu vector/hash/provenance/metadata tối thiểu; không lưu raw Kafka payload/key, signed URL, PDF hoặc nội dung CV/job gốc.
