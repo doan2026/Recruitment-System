@@ -22,7 +22,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 | User/Profile Service | Người 1 | 🟡 Persistence, Candidate CRUD/completion, hai consent aggregate tách biệt cho Job preferences và Recruiter discovery, Media, Application CV contract v1, skill snapshot contract v2, lifecycle, backend Builder, deletion fence, transactional `cv-events` và controlled historical CV baseline đã hoàn thành; baseline chưa execute trên dữ liệu thật, frontend Builder/PDF renderer cùng consent/preferences UI còn pending |
 | File/Media Service | Người 1 | 🟡 Core signed upload/confirm, Profile consumer, AI private-download consumer contract, durable cleanup/reconciliation và guarded six-policy Cloudinary smoke runner đã hoàn thành; live staging execution, Offer letter, các consumer khác và production hardening còn pending |
 | Admin & Statistics Service | Người 1 | ⏳ Scaffold |
-| Company Service | Người 2 | 🟡 Nghiệp vụ chính, ownership logo/ảnh/video qua Media, migration backup/restore, domain audit duyệt/OWNER, public search/load và real Auth–Company invitation identity gate đã hoàn thành; real Admin/File multi-service E2E còn pending |
+| Company Service | Người 2 | 🟡 Nghiệp vụ chính, ownership logo/ảnh/video qua Media, migration backup/restore, domain audit duyệt/OWNER, public search/load, real Auth–Company invitation identity gate và Company–Media contract integration đã hoàn thành; real Admin approval E2E còn pending vì Admin Service chưa implement, live Cloudinary vẫn thuộc P09 |
 | Job & Search Service | Người 2 | 🟡 CRUD/search, transactional `job-events`, controlled historical Job baseline, Redis/BullMQ/Elasticsearch integration, Candidate job recommendation, consent-scoped Recruiter candidate recommendation, controlled search/deep-pagination/Vietnamese mapping load gate, Candidate-facing 100.000-Job full-target HTTP/load gate và strict canonical JWT/JWKS consumer gate đã hoàn thành; production relevance corpus/monitoring còn pending |
 | Application Service | Người 2 | 🟡 Các luồng từ Submission đến AI Match, canonical Profile CV contract, durable usage/deletion gate, Application-time skill snapshot, canonical `application-events` v1, strict canonical JWT/JWKS consumer gate, controlled concurrency/load gate 10.000 call, Offer terminal-state consistency Flyway V9 và Offer auto-expiry worker Flyway V10 đã hoàn thành; còn P17 deployed E2E, HTTP/multi-replica load và production rollout |
 | AI Service | Người 2 | 🟡 Provider `/match`, consumer `job-events`, strict `cv-events` private-PDF embedding worker, internal `/recommend/jobs`/`/recommend/candidates`, CV HNSW/controlled exact-allowlist gate, Candidate-facing 100.000-Job full-target HTTP/load gate, backend chatbot Candidate, personalized Job recommendation tool v1 và distributed limiter cho hai surface recommendation đã hoàn thành ở mức code và service test; còn live Claude 10-FAQ quality/staging smoke, deployed/multi-replica E2E/load/monitoring và source-side baseline trên dữ liệu thật |
@@ -835,6 +835,20 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Không đánh dấu hoàn tất real-model relevance tiếng Việt, deployed/multi-replica load, production monitoring/SLO, filter-aware ANN hay limiter tầng gateway; các hạng mục đó vẫn pending.
 
 
+## 2.45 Company–Media Contract Integration — hoàn thành qua PR #70
+
+> Task chỉ thuộc Company Service của Người 2, được bàn giao từ `feature/company-service/media-contract-integration` vào `develop` qua PR #70 ngày 30/08/2026. Task không sửa Media Service, service của Người 1/3, shared gateway/Compose hay frontend, và không tuyên bố live Cloudinary hoặc Admin E2E đã hoàn tất.
+
+- Trước task này Company chỉ có unit spec (`jest`, `rootDir: src`), chưa có bất kỳ test nào chạy với PostgreSQL thật hay HTTP thật. Bổ sung `test/company-media.integration.test.js` chạy Company app thật + PostgreSQL 16 thật, gọi qua HTTP thật tới deterministic stand-in của Media internal API. Đây đúng chuẩn đã áp cho Profile–Media, không phải live Cloudinary.
+- Stand-in chỉ trả lời sáu route internal mà Company thực sự gọi và trả đúng envelope client validate, nên lệch shape sẽ làm fail suite thay vì lọt im lặng.
+- Phủ 19 kịch bản: upload intent OWNER gửi đúng body scoped và commit kèm cleanup job; non-OWNER không hề chạm Media nên caller bị từ chối không tiêu quota Media; `Idempotency-Key` forward nguyên vẹn; confirm resolve canonical URL và replay trả từ URL đã lưu không gọi Media lần hai; confirm nhầm công ty khác, sai asset type hoặc intent hết hạn đều bị chặn trước khi gọi Media.
+- Attach logo verify ownership/type trước khi bind; gallery bind từng entry theo đúng asset type riêng. Media outage fail-closed `503` đã làm sạch, không lộ internal key lẫn origin Media, và không để lại row Company hay intent. Status bị Media từ chối map sang lỗi sanitized riêng; envelope hỏng bị từ chối thay vì lưu.
+- Thay logo đẩy file cũ vào durable cleanup queue; operation worker thực sự chạy detach cleanup và xóa abandoned intent qua Media, retry cleanup lỗi với `nextAttemptAt` lùi lại thay vì bỏ, và không bao giờ xóa file còn đang attach cục bộ. Mọi lời gọi Media đều mang internal key và không bao giờ mang token người dùng cuối.
+- Bổ sung `compose.test.yml` với PostgreSQL 16 disposable, Dockerfile stage `test` (stage `runtime` vẫn nằm cuối nên build mặc định không đổi), script `test:unit`/`test:integration` và guard `ALLOW_COMPANY_SCHEMA_RESET` + tên database phải kết thúc bằng `_test`.
+- Gate cuối PASS **306/306 unit test + 19/19 integration test** trên compose sạch từ đầu, gồm `prisma migrate deploy` sáu migration trên database rỗng; `git diff --check` PASS.
+- Không đánh dấu hoàn tất live Cloudinary E2E (vẫn thuộc P09, repo không có credential/preset/fixture) và real Admin approval E2E (Admin Service mới ở mức scaffold, toàn bộ P10 chưa implement). Vì vậy checkbox tổng P06 vẫn để trống.
+
+
 ---
 
 # 3. Danh sách task CHƯA làm (Pending)
@@ -920,7 +934,8 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 - [ ] Chạy integration test với Auth/Admin/File Service thật.
   - [x] Auth–Company invitation acceptance dùng JWT từ real `/auth/login` và durable `/auth/me`: email binding, account lock/delete/role/email change, replay/concurrency và Auth outage đều PASS không mutation sai.
-  - [ ] Real Admin approval và File/Media end-to-end vẫn pending; vì vậy checkbox tổng không được đánh dấu hoàn thành.
+  - [x] Company–Media contract integration: Company app thật + PostgreSQL 16 thật chạy qua HTTP thật với deterministic stand-in của Media internal API, phủ upload intent/confirm/verify/bind/release/delete, outage fail-closed và durable cleanup worker. Đây không phải live Cloudinary.
+  - [ ] Real Admin approval vẫn pending vì Admin Service mới ở mức scaffold (toàn bộ P10 chưa implement), và live Cloudinary E2E vẫn thuộc P09; vì vậy checkbox tổng không được đánh dấu hoàn thành.
 - [x] Xác minh ownership của logo, ảnh và video qua File/Media thay vì chỉ nhận reference; dùng upload/confirm OWNER-only với durable exact upload-intent guard, abandoned-upload quota cleanup, canonical verify, generation bind-before-commit và leased attach/detach reconciliation.
 - [x] Chạy Prisma migration trên database sạch và kiểm tra backup/restore cùng restore-based rollback; verifier PostgreSQL 16 fail-closed, migration deploy lặp, drift/ledger/data/constraint và corrupt-archive negative đều PASS.
 - [x] Bổ sung append-only Company domain audit cho duyệt công ty và thay đổi OWNER; actor từ canonical JWT, mutation/audit cùng transaction và PostgreSQL migration/audit/backup/restore gate PASS.
@@ -964,7 +979,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - [x] Implement signed upload, confirm chỉ bằng `fileId`, owner-scoped metadata/download và soft delete theo ownership; có idempotency, quota, rate limit, lease recovery và fencing.
 - [x] Kiểm tra canonical format/MIME policy, byte size, image dimensions, video duration, resource/delivery type, public ID/folder/context và RAW magic bytes; deep parser/malware scan vẫn pending.
 - [x] Scheduled cleanup/reconciliation cho intent hết hạn, exact orphan, object sibling/replacement, `REJECTED`, stale lease và delete retry; có distributed cycle/job lease-fencing, hai clean pass, bounded Cloudinary pagination/timeout và PostgreSQL integration test.
-- [x] API nội bộ xác minh `file_id`, cấp private download và bind/release reference theo scope riêng; Profile và AI CV worker đã được wiring/contract-test bằng fake provider deterministic, còn Company/Application/Chat/Interview và live Cloudinary E2E pending.
+- [x] API nội bộ xác minh `file_id`, cấp private download và bind/release reference theo scope riêng; Profile, AI CV worker và Company đã được wiring/contract-test bằng fake provider deterministic, còn Application/Chat/Interview và live Cloudinary E2E pending.
 - [ ] Bổ sung media type/contract riêng cho Offer letter; không dùng tạm type khác.
 - [x] Test intent hết hạn, file giả mạo, exact size boundary đủ sáu type, provider outage, delete đang được tham chiếu/failure, stale lease/fencing, rate/quota concurrency, scheduler lease loss/watchdog/error path, expired finalize CAS, priority, orphan/sibling cleanup và retry recovery trên PostgreSQL 16; full Media đạt **26 unit + 26 integration test**.
 - [x] Bổ sung guarded live-smoke runner cho sáu signed preset: exact Admin audit, fixture magic/size guard, Media confirm/verify/access/delete, bounded/redacted output và exact finally cleanup; **9 offline runner test** đã qua và runtime image fail-closed khi chưa opt-in.
