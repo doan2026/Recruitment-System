@@ -12,6 +12,8 @@
     "prisma:migrate:deploy": "prisma migrate deploy",
     "pretest": "prisma generate",
     "test": "jest --runInBand",
+    "test:unit": "jest --runInBand",
+    "test:integration": "node --test --test-concurrency=1 test/*.integration.test.js",
     "test:watch": "jest --watch"
   },
   "dependencies": {

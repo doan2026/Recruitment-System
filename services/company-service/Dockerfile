@@ -9,7 +9,13 @@ COPY nest-cli.json tsconfig.json ./
 COPY prisma prisma
 COPY src src
 RUN npm run build
-FROM base
+FROM build AS test
+WORKDIR /app
+COPY jest.config.js tsconfig.spec.json ./
+COPY test test
+CMD ["npm", "run", "test:integration"]
+
+FROM base AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json .

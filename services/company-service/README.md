@@ -238,6 +238,46 @@ COMPANY_MEDIA_OPERATION_RETRY_MAX_SECONDS=3600
 The root Compose wires the same `MEDIA_INTERNAL_API_KEY_COMPANY` into Media and
 Company and waits for Media readiness before starting Company.
 
+## Media contract integration suite
+
+`test/company-media.integration.test.js` runs the real Company application and
+a real PostgreSQL 16 against a deterministic stand-in for the Media internal
+API, so the whole media lifecycle is exercised over real HTTP rather than a
+mocked client. This is the same standard already applied to the Profile–Media
+boundary; it is deliberately **not** a live Cloudinary run, which stays a
+separate File/Media gate.
+
+The stand-in answers only the six internal routes Company actually calls and
+returns exactly the envelopes the client validates, so a drift in the response
+shape fails the suite instead of passing silently. The suite proves:
+
+- an OWNER upload intent reaches Media with the exact scoped body, and the
+  intent plus its deterministic cleanup job are committed together;
+- a non-OWNER never reaches Media at all, so a rejected caller cannot spend
+  Media quota;
+- an `Idempotency-Key` is forwarded verbatim;
+- confirm resolves the canonical URL, and a replay is answered from the stored
+  URL without a second Media call;
+- confirming another Company's intent, a mismatched asset type or an expired
+  intent is refused before Media is called;
+- attaching a logo verifies ownership and type before binding, and a gallery
+  binds every entry under its own asset type;
+- a Media outage fails closed with a sanitized `503` that leaks neither the
+  internal key nor the Media origin, and leaves no Company or intent row;
+- a rejected Media status maps to its own sanitized error, and a malformed
+  envelope is refused instead of being stored;
+- replacing a logo hands the previous file to the durable cleanup queue;
+- the operation worker drives detach cleanup and abandoned-intent deletion
+  through Media, retries a failing cleanup with a later attempt instead of
+  dropping it, and never deletes a file that is still attached locally;
+- every Media call carries the internal key and never the end-user token.
+
+Run it through Compose, which supplies the disposable database:
+
+```bash
+docker compose -f compose.test.yml run --rm --build company-tests
+```
+
 ## Run and verify
 
 ```bash
@@ -257,12 +297,19 @@ Checks:
 ```bash
 npm test
 npm run build
+docker compose -f compose.test.yml run --rm --build company-tests
 ./scripts/verify-postgres-migration.sh
 ./scripts/verify-auth-company-invitation-guards.sh
 COMPANY_AUTH_INTEGRATION_CONFIRM=run-disposable-auth-company-integration \
   ./scripts/verify-auth-company-invitation.sh
 ./scripts/verify-public-search-load.sh
 ```
+
+`npm test` runs the unit suite alone and needs no database. The Compose target
+runs `prisma migrate deploy`, the unit suite and the Media contract integration
+suite against a disposable PostgreSQL 16, and refuses to run unless
+`ALLOW_COMPANY_SCHEMA_RESET=true` and the database name ends in `_test`. See
+[Media contract integration suite](#media-contract-integration-suite) below.
 
 The migration verifier creates only disposable PostgreSQL 16 resources and
 checks a clean two-migration baseline, Media and audit upgrade idempotency,

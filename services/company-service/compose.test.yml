@@ -1,0 +1,42 @@
+name: recruitment-company-service-test
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: company_test
+      POSTGRES_USER: company_test
+      POSTGRES_PASSWORD: company_test_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U company_test -d company_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  company-tests:
+    build:
+      context: .
+      target: test
+    environment:
+      DATABASE_URL: postgresql://company_test:company_test_password@postgres-test:5432/company_test?schema=company
+      ALLOW_COMPANY_SCHEMA_RESET: "true"
+      # The integration suite starts its own deterministic Media stand-in and
+      # overrides this before the application is created.
+      MEDIA_SERVICE_URL: http://media-service.invalid:3000
+      MEDIA_INTERNAL_API_KEY: company-media-integration-key-000000000000001
+      MEDIA_REQUEST_TIMEOUT_MS: "500"
+      COMPANY_MEDIA_OPERATION_ENABLED: "false"
+      JWT_ISSUER: https://auth.recruitment.local
+      JWT_AUDIENCE: recruitment-api
+      AUTH_SERVICE_URL: http://auth-service.invalid:8080
+      AUTH_SERVICE_ALLOWED_HOSTS: auth-service.invalid
+      COMPANY_PUBLIC_CURSOR_HMAC_KEY: company-media-integration-cursor-hmac-key-0001
+      CORS_ORIGINS: http://localhost:3000
+      TZ: Asia/Ho_Chi_Minh
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -c
+      - npx prisma migrate deploy && npm run test:unit && npm run test:integration
