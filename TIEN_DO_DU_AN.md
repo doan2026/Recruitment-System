@@ -849,6 +849,18 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Không đánh dấu hoàn tất live Cloudinary E2E (vẫn thuộc P09, repo không có credential/preset/fixture) và real Admin approval E2E (Admin Service mới ở mức scaffold, toàn bộ P10 chưa implement). Vì vậy checkbox tổng P06 vẫn để trống.
 
 
+## 2.46 Application–AI Match Contract Gate — hoàn thành qua PR #71
+
+> Task chỉ thuộc Người 2, được bàn giao từ `feature/application-service/ai-match-contract-integration` vào `develop` qua PR #71 ngày 30/08/2026. Application và AI đều là service của Người 2 nên gate này không đụng service của Người 1/3, shared gateway/Compose hay frontend.
+
+- `AiMatchContractIT` chạy **AI Service thật** (image build từ module `ai-service`, tự chạy Alembic) trên pgvector thật, và gọi qua đúng `AiClient` cùng request factory của `ClientConfig` mà service triển khai dùng. Trước đó `/match` chỉ từng được kiểm bằng `MockRestServiceServer`, tức là chưa bao giờ chạm dây thật.
+- **Gate bắt được lỗi production ngay lần chạy đầu.** JDK HTTP client mặc định HTTP/2, qua cleartext sẽ gửi `h2c` upgrade; AI Service chạy uvicorn, parser `h11` từ chối request đó bằng `400 Invalid HTTP request received`. Nghĩa là **mọi lời gọi `/match` từ Application sẽ hỏng trên dây** trong môi trường thật, trong khi toàn bộ unit test vẫn xanh vì `MockRestServiceServer` chặn ở tầng trên transport. `ClientConfig` nay ghim HTTP/1.1 cho mọi downstream. Các downstream Node không bị ảnh hưởng vì bỏ qua header upgrade lạ.
+- Vector được seed bằng unit basis vector nên mọi cosine kỳ vọng là chính xác: trùng nhau `100.00`, trực giao `50.00`, đối nhau `0.00` — trường hợp đối nhau chính là thứ một phép clamp sẽ âm thầm giấu đi.
+- Gate khóa các reason not-ready `CV_EMBEDDING_NOT_FOUND`, `JOB_EMBEDDING_NOT_FOUND`, `EMBEDDING_MODEL_MISMATCH`; chứng minh Job đã deactivate không phân biệt được với embedding thiếu nên không lộ việc vector vẫn còn; và kiểm internal key sai cùng provider không tới được đều fail closed không lộ trạng thái store.
+- Gate cuối PASS **299/299 unit test + 93/93 integration test** (từ 81, thêm 12 contract test) với PostgreSQL 16, pgvector, Kafka 3.8 và AI Service thật; `git diff --check` PASS.
+- Gate cần full repository checkout vì image provider build từ module anh em, và không tuyên bố deployed multi-replica load, gateway E2E hay real-model relevance đã hoàn tất.
+
+
 ---
 
 # 3. Danh sách task CHƯA làm (Pending)
@@ -1130,6 +1142,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
   - [x] Interview Query đã có service-level contract test cho Candidate/Recruiter role, current Company membership, SQL visibility/redaction, Application-derived availability và downstream fail-closed; deployed multi-service REST E2E vẫn pending.
 - [ ] Hoàn thiện contract test Kafka cho tất cả producer/consumer thật và duplicate event.
   - [x] AI Job consumer đã được kiểm tra với payload đúng shape Job producer, broker Kafka thật, duplicate event, DLQ và commit offset.
+  - [x] Application → AI `/match` đã có contract gate với AI Service thật qua PR #71; gate bắt được lỗi h2c upgrade làm hỏng mọi lời gọi tới uvicorn và đã sửa bằng cách ghim HTTP/1.1.
   - [x] Job producer đã được kiểm tra từ PostgreSQL transaction/outbox tới Kafka thật: rollback khi outbox lỗi, concurrent CAS, version `1/2/3`, salary biên, Kafka key/payload và trạng thái published.
   - [x] Profile CV producer đã được kiểm tra PostgreSQL transaction/outbox → Kafka 3.8 thật: exact key/chín trường, version order, `published_at` và terminal flush không phát thêm.
   - [x] AI CV consumer Kafka 3.8 → PostgreSQL/pgvector kiểm `UPSERTED → DEACTIVATED`, source unavailable → `DELETED`, malformed/oversized JSON, redacted DLQ và commit offset. Duplicate/order/ownership/tombstone được kiểm ở PostgreSQL integration; Media/parser dùng fake deterministic nên deployed E2E vẫn pending.
