@@ -969,6 +969,19 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Việc này làm SLO **đo được**. Nó **không phải** triển khai monitoring: scrape, dashboard, alert rule và error budget vẫn là việc hạ tầng.
 
 
+## 2.55 Job & Search SLO Metrics Surface — hoàn thành qua PR #80
+
+> Task chỉ thuộc Job & Search Service của Người 2, được bàn giao từ `feature/job-search-service/slo-instrumentation` vào `develop` qua PR #80 ngày 30/08/2026.
+
+- Service thứ ba trong bốn service của Người 2 được trang bị instrumentation, sau AI (PR #77) và Application (PR #79). Trước đó Job & Search không có gì để đo.
+- `GET /metrics` phát Prometheus exposition, bảo vệ bằng **credential riêng** cố ý khác `INTERNAL_API_KEY`: một service được phép đọc Job availability không có việc gì phải đọc tần suất request và phân bố latency của cả deployment. Guard kiểm key thay vì token, so sánh constant-time, và từ chối header bị nhân đôi.
+- **Không identifier nào chạm tới label.** Path Job được **template hoá** thay vì bỏ đi, nên `/{id}` và `/{id}/exists` vẫn là series hữu ích mà không bao giờ gắn nhãn theo Job id; mọi path lạ khác gom về `other` — ba trăm path bị quét vẫn chỉ sinh một series.
+- Request được ghi bằng middleware nên một trận 404 hiện ra như sự kiện availability thay vì biến mất trước khi tới handler. Cài đặt **không phụ thuộc thư viện ngoài**.
+- **18 test** phủ: template hoá path Job, gom path lạ, tách 2xx/4xx/5xx, histogram cumulative, không lộ Job id, quét 300 path chỉ thêm một series, duration âm bị kẹp, guard chấp nhận key đúng/từ chối key sai/thiếu/nhân đôi và từ chối chạy nếu key chưa cấu hình đủ dài.
+- Gate cuối PASS **20/20 integration test**; suite unit đạt **570/571**, riêng `job-outbox.integration.spec.ts` fail vì cần Kafka topic mà lệnh `npm test` không cấp — đã kiểm chứng lỗi này **có sẵn trên code chưa sửa**, không do task này.
+- Việc này làm SLO **đo được**. Nó **không phải** triển khai monitoring.
+
+
 ---
 
 # 3. Danh sách task CHƯA làm (Pending)

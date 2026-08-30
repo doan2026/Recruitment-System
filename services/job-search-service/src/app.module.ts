@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
@@ -11,6 +11,11 @@ import {
 import { JobEventPublisherService } from './job-event-publisher.service';
 import { CompanyClientService } from './company-client.service';
 import { JobController } from './job.controller';
+import {
+  MetricsController,
+  MetricsMiddleware,
+  MetricsRegistry,
+} from './metrics';
 import { JobExpiryService } from './job-expiry.service';
 import { JobIndexingService } from './job-indexing.service';
 import { AiRecommendationClientService } from './ai-recommendation-client.service';
@@ -30,8 +35,10 @@ import { PrismaService } from './prisma.service';
     ConfigModule.forRoot({ isGlobal: true }),
     JwtModule.register({}),
   ],
-  controllers: [JobController],
+  controllers: [JobController, MetricsController],
   providers: [
+    MetricsRegistry,
+    MetricsMiddleware,
     PrismaService,
     CompanyClientService,
     JobService,
@@ -53,4 +60,10 @@ import { PrismaService } from './prisma.service';
     { provide: APP_FILTER, useClass: ApiExceptionFilter },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    // Recorded for every path, so a 404 flood and a crash are both visible as
+    // availability events rather than disappearing before any handler runs.
+    consumer.apply(MetricsMiddleware).forRoutes('*');
+  }
+}
