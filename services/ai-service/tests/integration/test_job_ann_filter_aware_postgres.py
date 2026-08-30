@@ -32,6 +32,7 @@ pytestmark = pytest.mark.integration
 
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 CORPUS_SIZE = 2_000
+DUPLICATED_VECTORS = 20
 LOCATIONS = ("Ha Noi", "Da Nang", "Ho Chi Minh")
 JOB_TYPES = ("FULL_TIME", "PART_TIME", "REMOTE")
 DIMENSIONS = 384
@@ -54,6 +55,24 @@ def clean_embedding_tables() -> None:
 @pytest.fixture(scope="module")
 def seeded_corpus(database_url: str) -> str:
     random.seed(20260830)
+    vectors = [
+        _vector(
+            [
+                round(random.uniform(-1.0, 1.0), 6),
+                round(random.uniform(-1.0, 1.0), 6),
+                round(random.uniform(-1.0, 1.0), 6),
+                round(random.uniform(-1.0, 1.0), 6),
+            ]
+        )
+        for _ in range(CORPUS_SIZE)
+    ]
+    # Production embeds text, so two Jobs posted with the same description land
+    # on the same vector and therefore the same distance to any probe. Random
+    # floats never collide, so the corpus reproduces that duplication instead of
+    # leaving the tie-break premise untested. Offsets are 1000 apart, which
+    # keeps `is_active` (index % 10 != 0) identical inside each pair.
+    for offset in range(1, DUPLICATED_VECTORS + 1):
+        vectors[CORPUS_SIZE - offset] = vectors[CORPUS_SIZE - offset - 1_000]
     with psycopg.connect(database_url) as connection:
         connection.execute("DELETE FROM ai.job_embeddings")
         with connection.cursor() as cursor:
@@ -69,14 +88,7 @@ def seeded_corpus(database_url: str) -> str:
                     copy.write_row(
                         (
                             str(UUID(f"40000000-0000-4000-8000-{index:012d}")),
-                            _vector(
-                                [
-                                    round(random.uniform(-1.0, 1.0), 6),
-                                    round(random.uniform(-1.0, 1.0), 6),
-                                    round(random.uniform(-1.0, 1.0), 6),
-                                    round(random.uniform(-1.0, 1.0), 6),
-                                ]
-                            ),
+                            vectors[index],
                             "d" * 64,
                             MODEL_NAME,
                             LOCATIONS[index % len(LOCATIONS)],
@@ -250,8 +262,9 @@ def test_distances_repeat_so_the_tie_break_is_not_optional(
 
     assert tied_groups is not None
     assert total_active is not None and total_active[0] > 0
-    # Distance alone is not a total order: two Jobs can sit at the same cosine
+    # Distance alone is not a total order: two Jobs sit at the same cosine
     # distance, so a cursor built on distance only could revisit or skip rows.
     # That is why the tie-break in the previous test cannot simply be dropped
-    # to make the index reachable.
-    assert tied_groups[0] >= 0
+    # to make the index reachable. Every duplicated pair seeded above is active
+    # or inactive together, so an inactive pair contributes nothing here.
+    assert tied_groups[0] > 0

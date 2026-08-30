@@ -11,6 +11,7 @@ from app.main import create_app
 
 SCOPED_KEY = "job-search-scoped-internal-key-000001"
 CANDIDATE_SCOPED_KEY = "job-search-candidate-scoped-key-000001"
+METRICS_SCOPED_KEY = "ai-service-metrics-scrape-key-0000001"
 DATABASE_URL = "postgresql://postgres/recruitment"
 
 
@@ -90,6 +91,7 @@ def test_settings_from_environment_strips_values_and_reads_timeouts(
         "INTERNAL_API_KEY_JOB_SEARCH_CANDIDATES",
         CANDIDATE_SCOPED_KEY,
     )
+    monkeypatch.setenv("INTERNAL_API_KEY_METRICS", f"  {METRICS_SCOPED_KEY}  ")
     monkeypatch.setenv("DATABASE_CONNECT_TIMEOUT_SECONDS", "7")
     monkeypatch.setenv("DATABASE_STATEMENT_TIMEOUT_MS", "3500")
 
@@ -100,6 +102,7 @@ def test_settings_from_environment_strips_values_and_reads_timeouts(
         internal_api_key="shared-secret",
         internal_api_key_job_search=SCOPED_KEY,
         internal_api_key_job_search_candidates=CANDIDATE_SCOPED_KEY,
+        internal_api_key_metrics=METRICS_SCOPED_KEY,
         database_connect_timeout_seconds=7,
         database_statement_timeout_ms=3500,
     )

@@ -58,10 +58,11 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 | Real Admin approval E2E | **Admin Service chưa tồn tại** — toàn bộ P10 còn trống và thuộc Người 1. Không thể E2E với một service chưa có mã | Company–Media contract integration đã hoàn thành (#70); lát cắt Auth đã PASS trước đó (#60) |
 | Frontend chatbot widget | **Thuộc Người 3**, không nằm trong phạm vi backend của Người 2 | — |
 
-### Hai lỗi production được phát hiện trong quá trình làm
+### Lỗi production được phát hiện trong quá trình làm
 
 - **h2c upgrade** (PR #71): JDK HTTP client mặc định HTTP/2 nên gửi h2c upgrade qua cleartext; uvicorn từ chối, làm **mọi lời gọi `/match` từ Application hỏng trên dây** trong môi trường thật, trong khi toàn bộ unit test vẫn xanh vì `MockRestServiceServer` chặn ở tầng trên transport. Đã sửa bằng cách ghim HTTP/1.1.
-- **Race migration khi khởi động nhiều replica** (PR #78): runtime image chạy `alembic upgrade head` trước Uvicorn nên mọi replica đều migrate; khởi động đồng thời thì đua nhau và replica thua **crash-loop suốt một lần rolling deploy**. Đã sửa bằng PostgreSQL advisory lock.
+- **Race migration khi khởi động nhiều replica** (PR #78): runtime image chạy `alembic upgrade head` trước Uvicorn nên mọi replica đều migrate; khởi động đồng thời thì đua nhau và replica thua **crash-loop suốt một lần rolling deploy**. Đây là hành vi README đã cảnh báo sẵn và cách xử lý đúng vẫn là **một migration job chạy trước, rồi mới bật replica API**.
+  - **Đính chính (30/08/2026):** PR #78 đã thử thêm PostgreSQL advisory lock để xếp hàng các migrator. Audit chứng minh cách đó **sai và đã revert**: `CREATE INDEX CONCURRENTLY` ở revision `20260829_06` chờ mọi transaction cùng database cũ hơn nó, mà replica đang chặn ở advisory lock chính là một transaction như vậy — thành **deadlock**. Chi tiết ở mục 2.53 và 2.57.
 
 ### Một kết luận loại trừ
 
@@ -912,7 +913,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - pgvector trong image là **0.8.6**, có iterative index scan (`hnsw.iterative_scan`) với `strict_order` giữ nguyên thứ tự khoảng cách chính xác. Đây đúng là hình dạng của hạng mục "filter-aware ANN" tồn đọng, nên đã điều tra trực tiếp trên schema thật.
 - **Kết luận: không áp dụng được** cho `/recommend/jobs` với hợp đồng phân trang hiện tại. Rào cản không nằm ở index cũng không nằm ở filter:
   - index HNSW partial trên active row **phục vụ được** `ORDER BY vector <=> const` thuần, và vẫn phục vụ được khi thêm các filter Job — nghĩa là scan filter-aware sẽ với tới được nếu thứ tự cho phép;
-  - query production tính điểm trong CTE rồi sắp xếp ở ngoài, làm thứ tự **tách rời khỏi scan** nên không index vector nào phục vụ được — vì vậy chỉ bật GUC thì không thay đổi gì;
+  - **Đính chính (30/08/2026):** bản đầu quy thêm nguyên nhân cho hình dạng CTE ("tính điểm trong CTE rồi sắp xếp ở ngoài nên index không phục vụ được"). Audit chạy đúng control mà suite thiếu — CTE **không kèm** tie-break — và PostgreSQL inline CTE một-tham-chiếu rồi **vẫn dùng index**. Vậy CTE không phải nguyên nhân; tie-break mới là nguyên nhân duy nhất, đúng như gạch đầu dòng kế tiếp;
   - làm phẳng query cũng **không đủ**: index chỉ phục vụ khóa khoảng cách đơn thuần, thêm tie-break `job_id` là index hết dùng được, vì ordering operator không kết hợp được với sort key thường.
 - Tie-break đó chính là thứ HMAC keyset cursor stateless phụ thuộc vào: khoảng cách đơn thuần **không phải total order**, hai Job cùng cosine distance sẽ khiến continuation lặp hoặc bỏ sót row. Nên áp dụng ANN ở đây đồng nghĩa từ bỏ trang cursor đầy đủ và tái lập được — đó là thay đổi hợp đồng phân trang, không phải một cờ tuning.
 - Bằng chứng được giữ dưới dạng test chạy được (`tests/integration/test_job_ann_filter_aware_postgres.py`, sáu test) thay vì ghi chú suông, để kết luận không mục theo thời gian và để người sau không tốn công thử lại.
@@ -967,6 +968,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 
 - SLO về availability và latency cần con số tồn tại lâu hơn một request, mà service **không có gì cả**: không counter, không histogram, không có gì để trỏ monitor vào. Nghĩa là hạng mục "production monitoring/SLO" trước đây vĩnh viễn không đóng được vì thiếu bước này.
 - `GET /metrics` nay phát Prometheus exposition cho mọi request service phục vụ, được bảo vệ bằng đúng internal credential như các internal surface khác, và trả `no-store` — tần suất request và phân bố latency là thông tin vận hành, không phải thông tin công khai.
+- **Đính chính (30/08/2026):** dùng lại `INTERNAL_API_KEY` nghiệp vụ cho scrape là sai — ai gọi được `/match` cũng đọc được toàn bộ hồ sơ traffic. Nay có `INTERNAL_API_KEY_METRICS` riêng và tùy chọn; chi tiết ở mục 2.57.
 - **Không có identifier trong label.** Mỗi series chỉ mang tên route và status class. Gắn nhãn theo `cv_id`, `job_id` hay user sẽ biến một lần scrape thành bản ghi ai đã hỏi gì — đúng thứ phần còn lại của service được xây để tránh.
 - **Cardinality có chặn.** Chỉ route đã biết mới có nhãn riêng; mọi path khác gom về `other`, nên scanner quét path ngẫu nhiên không làm phình registry: 500 path lạ vẫn chỉ sinh **một** series.
 - Request được ghi nhận bất kể kết quả, gồm cả từ chối và lỗi chưa bắt, vì một trận 401 và một lần crash đều là sự kiện availability. Cài đặt **không phụ thuộc thư viện ngoài** nên runtime image vẫn nhẹ đúng như dự án chủ ý.
@@ -982,7 +984,8 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - Gate cross-replica ở mục 2.51 chứng minh bất biến đúng khi hai replica dùng chung database và Redis. Gate này hỏi câu còn lại: **cặp replica thực sự phục vụ được gì dưới tải đồng thời**.
 - **Kết quả đo trên hai replica với 5.000 Job, 1.000 call ở concurrency 8:** mọi call thành công, p50 **42,7 ms**, p95 **59,4 ms**, p99 **71,3 ms**, max **81,5 ms**, **182,3 request/giây**, tải chia đúng **500/500**.
 - Gate **fail một lần chạy có tải lệch**, vì tải lệch nghĩa là các con số không nói lên điều gì về việc chạy hai replica. Nó báo count theo từng replica để chuyện đó lộ ra thay vì bị trung bình hoá.
-- **Việc dựng gate này phát hiện một lỗi thật.** Runtime image chạy `alembic upgrade head` trước khi khởi động Uvicorn, nên **mọi replica đều migrate lúc khởi động**. Khởi động hai replica cùng lúc thì chúng **đua nhau**: một cái tạo version table trong khi cái kia đang làm đúng việc đó, cái thua exit non-zero và sẽ **crash-loop suốt một lần rolling deploy**. Migration nay lấy PostgreSQL session advisory lock nên replica đồng thời **xếp hàng**, cái thứ hai đơn giản là thấy việc đã xong.
+- Việc dựng gate này chạm đúng vào race khởi động mà README của service **đã cảnh báo sẵn**: runtime image chạy `alembic upgrade head` trước Uvicorn nên khởi động hai replica cùng lúc là cả hai cùng migrate và cái thua exit non-zero. Mô hình triển khai đúng vẫn là **một migration job chạy trước, rồi mới bật replica API** — và các replica của gate được bật đúng theo thứ tự đó: một cái trước cho migrate xong, rồi mới tới cái thứ hai.
+- **Đính chính (30/08/2026):** bản đầu của task này thay vào đó thêm PostgreSQL session advisory lock để xếp hàng các migrator lúc khởi động. **Cách đó đã bị rút lại vì sai**: revision `20260829_06` build CV HNSW bằng `CREATE INDEX CONCURRENTLY`, mà lệnh này chờ mọi transaction cùng database cũ hơn lần build. Replica đang bị chặn ở advisory lock **chính là** một transaction như vậy, nên builder chờ replica bị chặn còn replica bị chặn chờ lock của builder — **deadlock**, biến crash-loop thành tất định đúng vào lần deploy đáng lo nhất thay vì sửa nó. Audit ngày 30/08/2026 phát hiện điều này và `env.py` đã được revert.
 - **11 offline test** phủ logic gate: request lỗi làm fail gate, vượt ngân sách p95, throughput dưới sàn, và **tải lệch bị bắt thay vì trung bình hoá** (lệch 1 call vẫn chấp nhận).
 - Gate cuối PASS **743/743 test** cùng `ruff check`/`ruff format --check`; gate tải hai replica thật PASS.
 - Đây là bằng chứng có kiểm soát trên một máy — không gateway, không CDN, không độ trễ mạng và không phân bố dữ liệu production. **Không phải** tuyên bố capacity.
@@ -1011,7 +1014,8 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - **Không identifier nào chạm tới label.** Path Job được **template hoá** thay vì bỏ đi, nên `/{id}` và `/{id}/exists` vẫn là series hữu ích mà không bao giờ gắn nhãn theo Job id; mọi path lạ khác gom về `other` — ba trăm path bị quét vẫn chỉ sinh một series.
 - Request được ghi bằng middleware nên một trận 404 hiện ra như sự kiện availability thay vì biến mất trước khi tới handler. Cài đặt **không phụ thuộc thư viện ngoài**.
 - **18 test** phủ: template hoá path Job, gom path lạ, tách 2xx/4xx/5xx, histogram cumulative, không lộ Job id, quét 300 path chỉ thêm một series, duration âm bị kẹp, guard chấp nhận key đúng/từ chối key sai/thiếu/nhân đôi và từ chối chạy nếu key chưa cấu hình đủ dài.
-- Gate cuối PASS **20/20 integration test**; suite unit đạt **570/571**, riêng `job-outbox.integration.spec.ts` fail vì cần Kafka topic mà lệnh `npm test` không cấp — đã kiểm chứng lỗi này **có sẵn trên code chưa sửa**, không do task này.
+- **Đính chính (30/08/2026):** endpoint này **không dùng được** như đã bàn giao — `@Get(':id')` của `JobController` nuốt mất `/metrics`, JWT guard toàn cục chặn scrape, interceptor bọc exposition trong envelope JSON, guard chấp nhận placeholder, và bảng route liệt kê route không tồn tại. Đã sửa hết; chi tiết ở mục 2.57.
+- Gate cuối PASS **20/20 integration test** cùng suite metrics riêng. **Đính chính (30/08/2026):** bản đầu ghi "570/571, `job-outbox.integration.spec.ts` fail"; audit cho thấy cách diễn đạt đó gây hiểu nhầm — spec ấy không chạy được dưới `npm test` vì thiếu Kafka topic, và con số 570/571 không phải kết quả có ý nghĩa để trích dẫn. Kết quả đáng tin là 20/20 integration cộng suite metrics.
 - Việc này làm SLO **đo được**. Nó **không phải** triển khai monitoring.
 
 
@@ -1023,8 +1027,34 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - `GET /metrics` phát Prometheus exposition, bảo vệ bằng credential riêng. Scrape không mang user nên guard kiểm key thay vì token, so sánh constant-time, và từ chối header bị nhân đôi.
 - **Không identifier nào chạm tới label.** Path Company được template hoá nên `/{id}/members` và `/{id}/media/confirm` vẫn là series hữu ích mà không gắn nhãn theo Company id — và path mang **hai** identifier như `/{id}/members/{id}` thì **mất cả hai**. Mọi path lạ gom về `other`.
 - Request ghi bằng middleware nên một trận 404 hiện ra như sự kiện availability thay vì biến mất trước khi tới handler. Không thêm dependency nào.
-- Gate cuối PASS **324/324 unit test + 19/19 integration test** (từ 306, thêm 18 test metrics).
+- **Đính chính (30/08/2026):** như Job & Search, endpoint này cũng bị JWT guard toàn cục chặn, bị interceptor bọc envelope và chấp nhận placeholder key; gateway lại chưa xóa header nội bộ trên `/companies/`. Đã sửa hết; chi tiết ở mục 2.57.
+- Gate cuối PASS **325/325 unit test + 19/19 integration test**.
 - Việc này làm SLO **đo được** cho toàn bộ bốn service. Nó **không phải** triển khai monitoring: scrape, dashboard, alert rule và error budget vẫn là việc hạ tầng.
+
+
+## 2.57 Audit lại toàn bộ phần Người 2 — sửa lỗi do audit tìm ra
+
+> Không phải task mới mà là một lượt **soát lại có đối chứng** toàn bộ việc đã bàn giao của Người 2, chạy ngày 30/08/2026 theo yêu cầu. Mỗi phát hiện đều bị phản biện độc lập trước khi được nhận: **57 phát hiện, 21 được xác nhận, 36 bị bác bỏ**. Phần lớn phát hiện được xác nhận nằm ở chính bốn PR metrics gần nhất (#77, #79, #80, #81) và ở advisory lock của #78.
+
+**Nhóm 1 — `/metrics` của Company và Job & Search không dùng được trong production.** Test unit vẫn xanh vì chúng gọi thẳng vào controller, bỏ qua guard và interceptor toàn cục:
+- Job & Search: `JobController` khai báo `@Get(':id')` ở path gốc và được đăng ký **trước** `MetricsController`, nên `/metrics` bị nuốt và trả lỗi UUID sai. Đã đổi thứ tự đăng ký controller.
+- Cả hai service: JWT guard toàn cục từ chối scrape vì scrape **không mang token người dùng**. Đã đánh dấu `@Public()` — guard key riêng vẫn giữ nguyên nên endpoint không hề công khai.
+- Cả hai service: `ApiResponseInterceptor` toàn cục bọc giá trị trả về trong envelope `{data, meta}`, **không phải Prometheus exposition hợp lệ** và không scraper nào đọc được. Đã ghi thẳng vào response bằng `@Res()`.
+- Cả hai service: guard chỉ kiểm độ dài ≥ 32 byte, mà **placeholder trong `.env.example` dài 42 byte** nên một deployment quên thay key sẽ chấp nhận một credential đã công khai trong repository. Đã từ chối placeholder và giá trị chưa trim.
+
+**Nhóm 2 — bảng route của Job & Search sai.** `KNOWN_ROUTES` liệt kê những route service không hề có, đồng thời **thiếu** các route thật (`/`, `/mine`, `/pending`, `/reindex`, `/reindex/failures`, `/reindex/failures/retry`); các route ghi và route recruiter (`/{id}/publish`, `/{id}/approve`, `/{id}/reject`, `/{id}/close`, `/{id}/recommended-candidates`) rơi hết vào `other`, tức **một lượt publish hỏng sẽ vô hình đúng trong chỉ số sinh ra để bắt nó**.
+
+**Nhóm 3 — AI Service dùng lại credential nghiệp vụ cho scrape.** `/metrics` trước đây yêu cầu `INTERNAL_API_KEY`, nghĩa là ai gọi được `/match` cũng đọc được toàn bộ hồ sơ traffic của deployment — đúng kiểu tái sử dụng mà ba service kia đã từ chối. Nay có `INTERNAL_API_KEY_METRICS` riêng, **tùy chọn**: không cấu hình thì scrape luôn trả 401 chứ không rơi về key nghiệp vụ.
+
+**Nhóm 4 — chưa nối dây triển khai.** `docker-compose.yml` chưa truyền key metrics cho service nào, `.env.example` gốc chưa khai báo, và `location /companies/` của nginx **chưa xóa header `X-Internal-Api-Key`** như mọi route service khác — nghĩa là client có thể tự trình credential nội bộ vào một path nay có `/metrics` phía sau. Đã sửa cả bốn service và gateway.
+
+**Nhóm 5 — hai test không thể fail.**
+- FAQ live smoke: hai trong bốn safety probe chỉ fail được ở độ dài hoặc rò rỉ prompt, nên **một câu trả lời vui vẻ chiều theo probe vẫn PASS**. Đã thêm luật `did_not_refuse`.
+- Test tiền đề ANN khẳng định "khoảng cách không phải total order" nhưng lại assert `count >= 0` — **luôn đúng** — và corpus toàn vector ngẫu nhiên nên không hề có cặp trùng khoảng cách. Corpus nay seed cặp vector trùng (đúng như production: hai Job cùng mô tả cho cùng embedding) và assert `> 0`.
+
+**Nhóm 6 — đính chính tài liệu.** Ba khẳng định sai đã được sửa tại chỗ: hình dạng CTE **không phải** nguyên nhân ANN không dùng được (PostgreSQL inline CTE một-tham-chiếu rồi vẫn dùng index; tie-break mới là nguyên nhân duy nhất), con số "570/571" không phải kết quả có ý nghĩa để trích dẫn, và lệnh repro relevance gate thiếu mount thư mục `scripts`.
+
+**Gate sau khi sửa:** AI **745/745** test cùng `ruff check`/`ruff format --check` sạch; Company **325 unit + 19 integration**; Job & Search **553 unit + 20 integration**. Ba mục còn tồn của Người 2 (live Claude, corpus production + hạ tầng, Admin approval E2E) **không đổi** — chúng bị chặn bởi thiếu key, thiếu dữ liệu/hạ tầng thật và một service chưa tồn tại, không phải bởi lỗi mã.
 
 
 ---

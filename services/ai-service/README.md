@@ -380,9 +380,6 @@ The blocker is not the index and not the filters:
 - the partial active-row HNSW index serves a pure `ORDER BY vector <=> const`
   ordering, and keeps serving it with the Job filters applied, so a
   filter-aware scan would be reachable if the ordering allowed it;
-- the production query scores inside a CTE and orders the outer result, which
-  detaches the ordering from the scan and puts any vector index out of reach —
-  so a GUC alone changes nothing;
 - flattening the query is not enough either. The index serves the distance key
   alone; adding the deterministic `job_id` tie-break makes it unusable, because
   an ordering operator cannot be combined with an ordinary sort key.
@@ -490,12 +487,21 @@ The gate fails a run whose load was not balanced, because an unbalanced split
 means the numbers say nothing about running two replicas. It reports the
 per-replica counts so that is visible rather than averaged away.
 
-Building this found a real defect. The runtime image runs `alembic upgrade
-head` before starting Uvicorn, so every replica migrates at startup. Starting
-two at once raced: one created the version table while the other was doing the
-same, and the loser exited non-zero and would crash-loop through a rolling
-deploy. Migrations now take a PostgreSQL session advisory lock, so concurrent
-replicas queue and the second simply finds the work already done.
+Building this ran into the startup-migration race this README already warns
+about: the runtime image runs `alembic upgrade head` before starting Uvicorn, so
+starting two replicas at once has them both migrate and the loser exits
+non-zero. That is why the deployment model documented above is one migration
+job before any API replica starts, and that is the order the replicas for this
+gate were brought up in: start one, let it migrate, then start the second.
+
+An earlier attempt serialised the startup migrators with a PostgreSQL session
+advisory lock instead. That was withdrawn: revision `20260829_06` builds the CV
+HNSW with `CREATE INDEX CONCURRENTLY`, and `CREATE INDEX CONCURRENTLY` waits on
+every same-database transaction older than the build. A replica blocked on the
+advisory lock is exactly such a transaction, so the builder waits on the blocked
+replica while the blocked replica waits on the builder's lock — a deadlock that
+would have made the crash-loop deterministic on the one deploy that matters
+rather than fixing it.
 
 This is controlled evidence on one host — no gateway, no CDN, no network
 latency and no production data distribution. It is not a capacity claim.
@@ -592,6 +598,7 @@ domains (backend, frontend, kế toán, nhân sự), two Jobs and one CV each.
 docker build --target worker -t ai-service:relevance-gate .
 docker run --rm --network none \
   -v recruitment-system_ai-model-cache:/models \
+  -v "$PWD/scripts:/app/scripts:ro" \
   -e PYTHONPATH=/app -w /app \
   ai-service:relevance-gate python scripts/vietnamese_relevance_gate.py
 ```

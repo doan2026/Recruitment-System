@@ -35,7 +35,9 @@ import { PrismaService } from './prisma.service';
     ConfigModule.forRoot({ isGlobal: true }),
     JwtModule.register({}),
   ],
-  controllers: [JobController, MetricsController],
+  // MetricsController first: JobController declares @Get(':id') at the root
+  // path, which would otherwise match /metrics and reject it as a bad UUID.
+  controllers: [MetricsController, JobController],
   providers: [
     MetricsRegistry,
     MetricsMiddleware,

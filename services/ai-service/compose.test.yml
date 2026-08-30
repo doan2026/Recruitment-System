@@ -64,6 +64,7 @@ services:
       INTERNAL_API_KEY: integration-test-internal-key
       INTERNAL_API_KEY_JOB_SEARCH: integration-job-search-key-00000001
       INTERNAL_API_KEY_JOB_SEARCH_CANDIDATES: integration-candidate-key-00000000001
+      INTERNAL_API_KEY_METRICS: integration-metrics-scrape-key-000000001
     depends_on:
       postgres-test:
         condition: service_healthy

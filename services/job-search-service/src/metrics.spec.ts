@@ -30,6 +30,25 @@ describe('route normalisation', () => {
     expect(normalizeRoute(`/${jobId}/exists`)).toBe('/{id}/exists');
   });
 
+  it('names the write and recruiter routes instead of burying them', () => {
+    const jobId = '20000000-0000-4000-8000-000000000001';
+
+    // Sharing the `other` bucket with 404 scans would make a failing publish
+    // or approval invisible in the very metric meant to catch it.
+    expect(normalizeRoute(`/${jobId}/publish`)).toBe('/{id}/publish');
+    expect(normalizeRoute(`/${jobId}/approve`)).toBe('/{id}/approve');
+    expect(normalizeRoute(`/${jobId}/reject`)).toBe('/{id}/reject');
+    expect(normalizeRoute(`/${jobId}/close`)).toBe('/{id}/close');
+    expect(normalizeRoute(`/${jobId}/recommended-candidates`)).toBe(
+      '/{id}/recommended-candidates',
+    );
+    expect(normalizeRoute('/mine')).toBe('/mine');
+    expect(normalizeRoute('/pending')).toBe('/pending');
+    expect(normalizeRoute('/reindex/failures/retry')).toBe(
+      '/reindex/failures/retry',
+    );
+  });
+
   it('collapses anything else so scanning cannot grow the registry', () => {
     expect(normalizeRoute('/wp-admin')).toBe('other');
     expect(normalizeRoute('/search/../../etc/passwd')).toBe('other');
@@ -145,6 +164,19 @@ describe('metrics guard', () => {
     expect(() =>
       new MetricsGuard(config('short')).canActivate(context({})),
     ).toThrow('INTERNAL_API_KEY_METRICS');
+  });
+
+  it('refuses the placeholder shipped in .env.example', () => {
+    // It is 42 bytes, so a bare length check would have accepted a credential
+    // that is published in this repository.
+    const placeholder = 'replace-with-a-distinct-metrics-scrape-key';
+
+    expect(placeholder.length).toBeGreaterThanOrEqual(32);
+    expect(() =>
+      new MetricsGuard(config(placeholder)).canActivate(
+        context({ 'x-internal-api-key': placeholder }),
+      ),
+    ).toThrow('non-placeholder');
   });
 
   it('answers unauthorised rather than leaking the expected key', () => {

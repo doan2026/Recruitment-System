@@ -50,6 +50,37 @@ def require_internal_api_key(
         )
 
 
+def require_metrics_scrape_access(
+    supplied_key: Annotated[str | None, Depends(internal_api_key_header)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> None:
+    """Guards the scrape with its own credential.
+
+    Deliberately not ``INTERNAL_API_KEY``: a caller allowed to ask for a match
+    score has no business reading the request rates and latency distribution of
+    the whole deployment.
+    """
+    configured = settings.internal_api_key_metrics
+    if not configured:
+        # No scrape credential configured means no scrape: falling back to a
+        # business key is exactly the reuse this dependency exists to prevent.
+        raise ServiceError(
+            status_code=401,
+            code="INVALID_INTERNAL_API_KEY",
+            message="A valid internal API key is required",
+        )
+    expected_key = configured.encode("utf-8")
+    if supplied_key is None or not secrets.compare_digest(
+        supplied_key.encode("utf-8"),
+        expected_key,
+    ):
+        raise ServiceError(
+            status_code=401,
+            code="INVALID_INTERNAL_API_KEY",
+            message="A valid internal API key is required",
+        )
+
+
 def require_job_search_recommendation_access(
     supplied_key: Annotated[str | None, Depends(job_search_api_key_header)],
     settings: Annotated[Settings, Depends(get_settings)],

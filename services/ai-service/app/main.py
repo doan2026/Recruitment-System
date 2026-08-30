@@ -68,6 +68,7 @@ from app.security import (
     require_internal_api_key,
     require_job_search_candidate_recommendation_access,
     require_job_search_recommendation_access,
+    require_metrics_scrape_access,
 )
 from app.user_auth import (
     AuthKeyUnavailable,
@@ -365,10 +366,11 @@ def create_app(
     )
     def metrics(
         request: Request,
-        _: Annotated[None, Depends(require_internal_api_key)],
+        _: Annotated[None, Depends(require_metrics_scrape_access)],
     ) -> Response:
-        # Operational detail is not public: the scrape uses the same internal
-        # credential as the other internal surfaces.
+        # Operational detail is not public, and it is guarded by its own
+        # credential: a caller allowed to score a match must not also be able
+        # to read the traffic profile of the whole deployment.
         registry = cast(MetricsRegistry, request.app.state.metrics)
         return Response(
             content=registry.render(),
