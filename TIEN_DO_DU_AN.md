@@ -186,7 +186,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - **Công nghệ:** Next.js 14, React 18, TypeScript.
 - **Chức năng chính:** auth UI; hồ sơ/CV; công ty; job search/detail; apply/bookmark; recruiter pipeline/offer/dashboard; interview/video/chat/notification; admin console.
 - **Phụ thuộc:** API Gateway và hợp đồng API của toàn bộ backend.
-- **Trạng thái:** mới có layout và trang “Platform base is running”.
+- **Trạng thái:** mới có scaffold — thư mục `frontend/` đúng **8 file** (Next.js 14.2.5, React 18.3.1, TypeScript 5.5.4), `app/page.tsx` in một dòng “Platform base is running.”, `app/layout.tsx` rỗng. Chưa có route, component, API client, state management, lint hay test. **0/59 checkbox P16**; riêng phần tiêu thụ bốn service của Người 2 được liệt kê chi tiết ở mục P16.N2 (**0/52**).
 
 ## T14 — Tích hợp, kiểm thử và vận hành
 
@@ -1335,6 +1335,81 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [ ] Frontend Interview calendar/Jitsi, realtime chat và notification center.
 - [ ] Admin dashboard, company/job approval, user/report management và export.
 - [ ] Loading/error/empty state, responsive UI, accessibility và E2E test.
+
+### P16.N2 — FE tiêu thụ bốn service của Người 2 (0/52)
+
+> Bổ sung ngày 30/08/2026 theo yêu cầu. Đây là danh sách chi tiết task FE **chưa làm**, nhưng **chỉ giới hạn ở phần tiêu thụ bốn service của Người 2** (Company, Job & Search, Application, AI chatbot). FE của Auth, Profile, Media, Interview, Notification, Admin và Chat **không** nằm trong danh sách này. Bản thân việc code FE vẫn **thuộc Người 3** — mục này ghi ra để thấy backend của Người 2 đang chờ FE làm những gì, không phải chuyển việc sang Người 2.
+>
+> **Hiện trạng FE:** thư mục `frontend/` có đúng **8 file** — scaffold Next.js 14.2.5 + React 18.3.1 + TypeScript 5.5.4; `app/page.tsx` in một dòng "Platform base is running.", `app/layout.tsx` rỗng. Chưa có route, component, API client, state management, lint hay test; `package.json` chỉ có ba script `dev`/`build`/`start`.
+>
+> Danh sách bám theo **48 endpoint user-facing có thật**, khảo sát trực tiếp từ code controller và đối chiếu với `infra/nginx/nginx.conf` — không suy đoán từ tài liệu.
+
+#### Nền tảng dùng chung (làm trước mọi màn hình)
+
+- [ ] API client bóc envelope thống nhất: thành công là `{data, meta}`, lỗi là `{code, message, details}`. Hiển thị theo `code` chứ không hiển thị `message` thô; `details` mới là chỗ mang thông tin điều hướng (`currentStatus`, `reason`, `eligibleAt`, `retryAfterSeconds`).
+- [ ] Gọi đúng đường dẫn có **dấu `/` cuối** cho ba route collection — `POST /companies/`, `POST /jobs/`, `POST|GET /applications/`. Gateway chỉ khai báo `location /companies/`, `/jobs/`, `/applications/`, nên bỏ dấu `/` là nhận 404 **từ nginx**, không phải từ service; lỗi này không có mã nghiệp vụ để bắt.
+- [ ] Bộ xử lý `409` dùng chung cho optimistic locking: tải lại resource, so sánh, cho người dùng quyết định gửi lại — **không retry mù**. Áp cho `APPLICATION_CHANGED_CONCURRENTLY`, `JOB_STATE_CHANGED`, `COMPANY_UPDATE_CONFLICT`.
+- [ ] Bộ xử lý `429`/`503` phân biệt hai nhóm: nhóm **có** `Retry-After` (đếm ngược, tự thử lại) và nhóm **không có** như `MEDIA_UPLOAD_RATE_LIMITED` của Company hay AI rate-limit quy về `503` ở Application (phải tự cài backoff và khoá nút).
+- [ ] Tôn trọng `Cache-Control: private, no-store` + `Vary: Authorization` trên gợi ý việc làm, gợi ý ứng viên, danh sách hồ sơ, metadata/link tải CV và chat: không service worker, không `localStorage`, và **xoá sạch state khi đăng xuất hoặc đổi tài khoản**.
+- [ ] Kiểm định dạng UUID v4 trước khi điều hướng vào trang chi tiết, vì id sai định dạng bị chặn bằng `400 INVALID_JOB_ID` trước khi tới service.
+- [ ] Không gửi field lạ trong body/query: `ValidationPipe` của Company và Job bật `forbidNonWhitelisted`, còn `/ai/chat` bật `extra=forbid` — thừa một field là `400`/`422`.
+
+#### Company Service — 16 endpoint
+
+- [ ] Màn tạo công ty + empty-state onboarding: coi `404 COMPANY_NOT_FOUND` của `GET /companies/me` là "recruiter chưa có công ty" và điều hướng sang màn tạo, **không** hiện màn hình lỗi.
+- [ ] Máy trạng thái xác minh `PENDING → VERIFIED | REJECTED → (gửi lại) → PENDING`: hiện `rejectReason`, chỉ mở nút gửi lại khi `REJECTED`, xử lý `409 INVALID_RESUBMISSION_TRANSITION` khi trạng thái đã đổi ở tab khác.
+- [ ] Dialog cảnh báo chuyển trạng thái ngầm: sửa `name` hoặc `taxCode` của công ty đang `VERIFIED` qua `PUT /companies/:id` sẽ **tự đưa công ty về `PENDING`** và xoá `rejectReason`. Backend không hỏi xác nhận — FE phải tự hỏi và cập nhật lại badge.
+- [ ] Handshake tải media ba bước: `POST /media/signature` (kèm `Idempotency-Key` tự sinh) → upload thẳng lên `uploadUrl` → `POST /media/confirm` → rồi mới `PUT /companies/:id` với `fileId`. FE tự kiểm `maxBytes`/`allowedFormats`, đếm ngược `expiresAt`, xin chữ ký mới khi hết hạn và dọn `fileId` đã confirm nhưng chưa gắn.
+- [ ] Ngữ nghĩa **replace-all** của trường media trong `PUT`: mỗi lần lưu phải gửi lại toàn bộ thư viện kèm `sortOrder` (kéo thả để sắp xếp, xoá ảnh = bỏ khỏi mảng); tự kiểm tối đa 10 IMAGE + 1 VIDEO, không trùng `fileId` kể cả trùng logo, không gửi đồng thời `logo` với `removeLogo=true`.
+- [ ] Xử lý `409 COMPANY_UPDATE_CONFLICT`: API **không** có `If-Match` hay `version` trong body, nên phải `GET /companies/me` lại, so `aggregateVersion`, merge thay đổi rồi gửi lại kèm thông báo "dữ liệu vừa bị người khác sửa".
+- [ ] Trang tìm kiếm công ty công khai với cursor pagination: giữ `nextCursor` mờ, **khoá không cho đổi `q`/`limit`** giữa các lần tải thêm (cursor ký HMAC kèm `q`+`limit`, sai là `400`), infinite scroll dựa trên `hasMore` vì **không có `total`** nên không làm được thanh số trang.
+- [ ] Trang công ty công khai: chịu được `logo`/`logoUrl` `null` và phần tử media thiếu `mediaReferenceId` bị lọc khỏi response — cần placeholder, không giả định ảnh vừa confirm đã hiện ngay.
+- [ ] Luồng mời thành viên phía OWNER: hiện `invitationToken` **đúng một lần** để copy/gửi thủ công (backend không tự gửi mail và không trả lại token lần hai; mời lại cùng email sẽ vô hiệu token cũ).
+- [ ] Luồng nhận lời mời phía người được mời: phân biệt rõ `404`, `410` hết hạn, `409` không còn hiệu lực, `409` cần phát lại, `409` đã có công ty, `403` sai email, `401` tài khoản không hợp lệ — mỗi trường hợp một CTA khác nhau.
+- [ ] Màn quản lý thành viên + chuyển quyền sở hữu: sau `PATCH transfer-ownership` người gọi **lập tức bị hạ xuống MEMBER**, nên phải tải lại vai trò và ẩn toàn bộ menu OWNER ngay trong cùng phiên.
+- [ ] Ẩn/khoá trước các nút OWNER-only: guard chỉ kiểm system role, quyền OWNER kiểm ở tầng service và trả `403 COMPANY_OWNER_REQUIRED`. Không tự lấy `memberRole` thì MEMBER sẽ thấy nút rồi bị `403`.
+- [ ] Màn admin duyệt công ty (`GET /companies/` + `PATCH /companies/:id/verify`): hàng đợi lọc theo trạng thái, phân trang `{page, limit, total, totalPages}`. Endpoint đã có sẵn, nhưng console admin nằm ở P16 admin và phụ thuộc Admin Service của Người 1.
+
+#### Job & Search Service — 15 endpoint
+
+- [ ] Máy trạng thái tin `DRAFT → PENDING_APPROVAL → PUBLISHED → CLOSED` (và `EXPIRED` do job nền tự đặt): server **không** trả danh sách hành động cho phép, FE phải tự suy ra nút khả dụng từ `status`.
+- [ ] Đổi nhãn nút "Đăng tin" cho đúng nghĩa: `PATCH /jobs/:id/publish` là **gửi đi chờ duyệt**, không phải đăng ngay. Kèm màn hiện `rejectionReason` khi admin trả tin về `DRAFT` và luồng sửa–gửi lại.
+- [ ] Form tạo/sửa tin tự validate trước khi gửi: `deadline` phải sau hôm nay; `isNegotiable=true` thì bỏ trống `salaryMin`/`salaryMax`, ngược lại phải đủ cả hai và `min <= max`; `skills` ít nhất một giá trị không rỗng, tối đa 50.
+- [ ] Trang tìm việc công khai với **hai chế độ phân trang**: OFFSET (`page`/`limit`) chặn ở 10.000 kết quả — gặp `400 JOB_SEARCH_PAGE_TOO_DEEP` phải mời người dùng chuyển sang cursor hoặc lọc hẹp lại; CURSOR phải giữ nguyên toàn bộ `filters`/`sort`/`limit`, đổi bộ lọc là vứt cursor và tìm lại từ đầu.
+- [ ] Coi `409 JOB_SEARCH_CURSOR_STALE` và `409 RECOMMENDATION_CURSOR_STALE` là **tín hiệu khởi động lại danh sách**, không phải màn hình lỗi: giữ vị trí cuộn hợp lý và báo mềm.
+- [ ] Hiển thị minh bạch nguồn dữ liệu: search trả `source = ELASTICSEARCH | POSTGRESQL`; gợi ý trả `source = AI | PREFERENCES | LATEST` kèm `fallbackReason` (`NO_ACTIVE_CV`, `PROFILE_UNAVAILABLE`, `AI_UNAVAILABLE`, `AI_NOT_READY`, `AI_RESPONSE_INVALID`, `AI_RESULTS_STALE`) — **mỗi lý do một CTA riêng**, ví dụ `NO_ACTIVE_CV` thì dẫn đi tải CV.
+- [ ] Chỉ bật cuộn vô hạn cho gợi ý việc làm khi `source = AI`: ở chế độ fallback `nextCursor` **luôn null**, phải ẩn nút "xem thêm".
+- [ ] Màn gợi ý ứng viên cho một tin: xử lý đủ tập lý do rỗng — `NO_DISCOVERABLE_CANDIDATES` (chưa ai bật đồng ý, cổng consent nằm ở Profile Service), `JOB_EMBEDDING_NOT_FOUND`/`JOB_EMBEDDING_INACTIVE` (tin chưa vector hoá, gợi người dùng chờ), `NO_ACTIVE_CV_EMBEDDINGS`, `EMBEDDING_MODEL_MISMATCH`, `NO_MATCHING_CV_EMBEDDINGS`. **Danh sách rỗng vẫn là HTTP 200**, không được coi là lỗi.
+- [ ] Debounce + khoá bấm lại cho `/jobs/:id/recommended-candidates`: nginx giới hạn 30 req/phút mỗi IP và trả JSON **của gateway** kèm `Retry-After: 60` — bộ xử lý lỗi phải chịu được cả body của gateway lẫn body của service.
+- [ ] Bảng quản lý tin của recruiter: `GET /jobs/mine` trả **toàn bộ mảng**, FE phải tự phân trang/lọc/sắp xếp phía client.
+- [ ] Phân biệt phạm vi theo vai trò công ty mà API **không trả tường minh**: OWNER thấy mọi tin của công ty, MEMBER chỉ thấy tin mình tạo và sẽ nhận `403 JOB_ACCESS_DENIED` khi thao tác lên tin của người khác.
+- [ ] Màn admin duyệt tin (`GET /jobs/pending` + `approve`/`reject`): hàng đợi **bị cắt cứng ở 50 bản ghi, không có cursor** — phải cảnh báo admin khi hàng đợi có thể đang bị cắt bớt.
+- [ ] Trang vận hành reindex Elasticsearch (`POST /jobs/reindex`, `GET /jobs/reindex/failures`, `POST /jobs/reindex/failures/retry`): xem dead letter và replay. Thuộc console admin.
+
+#### Application Service — 16 endpoint
+
+- [ ] Lưu và gắn `expectedVersion` cho **mọi lệnh ghi** (đổi trạng thái, rút hồ sơ, gửi offer, phản hồi offer, làm mới match score): giữ `version` từ mọi response và gắn vào request kế tiếp.
+- [ ] Luồng phản hồi offer giữ **hai version độc lập** (`expectedOfferVersion` + `expectedApplicationVersion`) và tách **bốn** loại `409` thành bốn thông báo/hành động khác nhau: `OFFER_EXPIRED`, `OFFER_ALREADY_RESPONDED`, `OFFER_CHANGED_CONCURRENTLY`, `APPLICATION_CHANGED_CONCURRENTLY`.
+- [ ] Máy trạng thái hồ sơ phía client để chỉ hiện nút hợp lệ: `APPLIED→REVIEWING`, `REVIEWING→INTERVIEW`, `→REJECTED` (bắt buộc lý do) từ `APPLIED`/`REVIEWING`/`INTERVIEW`/`OFFER`; `INTERVIEW→OFFER` chỉ qua `POST /offer`; `OFFER→HIRED|REJECTED` chỉ do ứng viên phản hồi; `WITHDRAWN` từ bốn trạng thái active. Đoán sai là `409 INVALID_APPLICATION_TRANSITION`.
+- [ ] Màn nộp hồ sơ xử lý cooldown: `details.eligibleAt` cho biết mốc 30 ngày kể từ lần `REJECTED` gần nhất — hiện ngày cụ thể thay vì lỗi chung.
+- [ ] Bảng hồ sơ của nhà tuyển dụng: phân trang **offset** (`page`/`size`, tối đa 100) cùng bộ lọc `job_id`/`status`/`appliedFrom`/`appliedTo`/`skills` và ba kiểu sắp xếp. Đây **không** phải cursor nên phải xử lý trôi dữ liệu khi có hồ sơ mới chèn vào giữa các trang; tự validate `appliedFrom <= appliedTo` trước khi gửi.
+- [ ] Handshake upload file offer với Media **trước khi** gọi `POST /offer`: phải có cặp `fileId` + `fileUrl` đã xác nhận, thiếu một trong hai là `400`; bỏ file thì gửi cả hai rỗng.
+- [ ] Hai loại phản hồi suy giảm phải render được thay vì báo lỗi: danh sách bookmark trả `200` với `job=null` khi Job Service lỗi (thẻ placeholder), và dashboard trả `warnings[]` cùng `summary.activeJobs.available=false` (hiện số liệu một phần kèm cảnh báo).
+- [ ] Nút làm mới match score xử lý riêng `409 AI_MATCH_NOT_READY` kèm `details.reason`: đây là trạng thái "chưa sẵn sàng" cần cho thử lại/poll, **khác hẳn** `409` xung đột version.
+- [ ] Màn xem/tải CV của recruiter: `expiresAt` rất ngắn nên phải mở ngay và xin link mới khi hết hạn; không cache metadata lẫn link.
+- [ ] Bù ba lỗ hổng API hiện có: ứng viên **không lấy được `version`** từ `GET /applications/my` (phải gọi thêm `GET /applications/:id` trước khi rút hồ sơ); **không có endpoint đọc offer** nên `offerId` phải lấy từ Notification Service; **không có endpoint GET đánh giá** nên phải tự nhớ trạng thái "đã đánh giá" từ `409`.
+- [ ] Chú ý ba prefix khác nhau: hồ sơ ở `/applications/`, bookmark ở `/applications/bookmarks`, còn **phản hồi offer nằm ở prefix riêng `/offers/`**.
+
+#### AI chatbot — 1 endpoint
+
+- [ ] Tự sinh và giữ `session_id`: backend **không có** endpoint tạo session. Phải sinh UUID v4 canonical chữ thường và giữ nguyên suốt hội thoại; sai định dạng là `422`.
+- [ ] Tự dựng toàn bộ khung hội thoại: API chỉ trả một câu trả lời cho một tin nhắn và **không có endpoint đọc lại lịch sử** (lịch sử ở Redis chỉ để làm ngữ cảnh cho model). Reload trang là mất hiển thị dù server vẫn còn ngữ cảnh.
+- [ ] Khoá gửi theo từng session: chỉ một request `/ai/chat` đang bay cho mỗi `session_id`; gặp `409 CHAT_SESSION_BUSY` thì báo và thử lại, **tuyệt đối không gửi trùng** vì server có thể đã ghi lượt đó vào lịch sử.
+- [ ] Ba loại backpressure ba cách xử lý: `429 CHAT_RATE_LIMITED` (đếm ngược theo `Retry-After`, chặn ô nhập), `503 CHAT_BUSY` (có `Retry-After`, tự retry ngắn với backoff), `503 CHAT_PROVIDER_UNAVAILABLE`/`CHAT_HISTORY_UNAVAILABLE` (không có `Retry-After`, để người dùng bấm thử lại).
+- [ ] Render UI theo trạng thái tính năng: `503 CHAT_NOT_CONFIGURED` thì **ẩn hẳn widget**, `403 CHAT_ACCESS_FORBIDDEN` nghĩa là tài khoản không phải CANDIDATE, `401` thì chạy refresh token rồi gửi lại.
+- [ ] Validate trước ở client đúng luật server: chuẩn hoá NFC, trim, chặn rỗng, giới hạn **đồng thời** 2.000 ký tự **và** 8.000 byte UTF-8 (tiếng Việt có dấu tốn nhiều byte hơn ký tự), lọc ký tự điều khiển.
+- [ ] Render câu trả lời **an toàn, không dựng HTML thô**: model có thể trả danh sách việc làm đánh số và UUID dạng chữ, nhưng **không kèm dữ liệu job có cấu trúc, không có `source` hay `fallbackReason`** — muốn có link sang màn Việc làm phù hợp thì FE phải tự nhận diện ý định.
+- [ ] Không gọi thẳng `/ai/match`, `/ai/recommend/jobs`, `/ai/recommend/candidates`: nginx trả `404` và server đòi `X-Internal-Api-Key`. Gợi ý việc phải qua `/jobs/recommended`, gợi ý ứng viên phải qua `/jobs/:id/recommended-candidates`.
 
 ## P17 — Kiểm thử tích hợp, bảo mật và phát hành
 
