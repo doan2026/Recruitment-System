@@ -256,6 +256,11 @@ export function normalizeError(code: string): string {
     JOB_STATE_CHANGED: "Trạng thái tin tuyển dụng vừa thay đổi. Hãy tải lại và so sánh trước khi tiếp tục.",
     JOB_SEARCH_PAGE_TOO_DEEP: "Kết quả quá sâu. Hãy lọc hẹp hơn hoặc chuyển sang tải thêm.",
     MEDIA_UPLOAD_RATE_LIMITED: "Bạn tải file quá nhiều lần. Hãy chờ rồi thử lại.",
+    MEDIA_PROVIDER_UPLOAD_FAILED: "Nhà cung cấp chưa nhận file. Hãy xin chữ ký mới rồi thử lại.",
+    MEDIA_UPLOAD_POLICY_MISMATCH: "File không khớp chính sách tải lên hiện tại. Hãy chọn lại file.",
+    COMPANY_MEDIA_UPLOAD_INTENT_INVALID: "Phiên tải media không còn hợp lệ. Hãy xin chữ ký mới.",
+    COMPANY_MEDIA_UPLOAD_INTENT_CONFLICT: "Phiên tải media đã thay đổi. Hãy chọn lại file và xin chữ ký mới.",
+    COMPANY_MEDIA_UPLOAD_CONFIRM_CONFLICT: "Trạng thái file đã thay đổi. Hãy tải lại hồ sơ trước khi tiếp tục.",
     OFFER_READ_UNAVAILABLE: "Offer chỉ được mở từ thông báo vì Application API chưa có endpoint đọc offer.",
   };
   return messages[code] ?? "Không thể hoàn tất yêu cầu. Hãy thử lại.";
