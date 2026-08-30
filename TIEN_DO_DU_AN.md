@@ -22,10 +22,10 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 | User/Profile Service | Người 1 | 🟡 Persistence, Candidate CRUD/completion, hai consent aggregate tách biệt cho Job preferences và Recruiter discovery, Media, Application CV contract v1, skill snapshot contract v2, lifecycle, backend Builder, deletion fence, transactional `cv-events` và controlled historical CV baseline đã hoàn thành; baseline chưa execute trên dữ liệu thật, frontend Builder/PDF renderer cùng consent/preferences UI còn pending |
 | File/Media Service | Người 1 | 🟡 Core signed upload/confirm, Profile consumer, AI private-download consumer contract, durable cleanup/reconciliation và guarded six-policy Cloudinary smoke runner đã hoàn thành; live staging execution, Offer letter, các consumer khác và production hardening còn pending |
 | Admin & Statistics Service | Người 1 | ⏳ Scaffold |
-| Company Service | Người 2 | 🟡 Nghiệp vụ chính, ownership logo/ảnh/video qua Media, migration backup/restore, domain audit duyệt/OWNER, public search/load, real Auth–Company invitation identity gate và Company–Media contract integration đã hoàn thành; real Admin approval E2E còn pending vì Admin Service chưa implement, live Cloudinary vẫn thuộc P09 |
-| Job & Search Service | Người 2 | 🟡 CRUD/search, transactional `job-events`, controlled historical Job baseline, Redis/BullMQ/Elasticsearch integration, Candidate job recommendation, consent-scoped Recruiter candidate recommendation, controlled search/deep-pagination/Vietnamese mapping load gate, Candidate-facing 100.000-Job full-target HTTP/load gate và strict canonical JWT/JWKS consumer gate đã hoàn thành; production relevance corpus/monitoring còn pending |
-| Application Service | Người 2 | 🟡 Các luồng từ Submission đến AI Match, canonical Profile CV contract, durable usage/deletion gate, Application-time skill snapshot, canonical `application-events` v1, strict canonical JWT/JWKS consumer gate, controlled concurrency/load gate 10.000 call, Offer terminal-state consistency Flyway V9 và Offer auto-expiry worker Flyway V10 đã hoàn thành; còn P17 deployed E2E, HTTP/multi-replica load và production rollout |
-| AI Service | Người 2 | 🟡 Provider `/match`, consumer `job-events`, strict `cv-events` private-PDF embedding worker, internal `/recommend/jobs`/`/recommend/candidates`, CV HNSW/controlled exact-allowlist gate, Candidate-facing 100.000-Job full-target HTTP/load gate, backend chatbot Candidate, personalized Job recommendation tool v1 và distributed limiter cho hai surface recommendation đã hoàn thành ở mức code và service test; còn live Claude 10-FAQ quality/staging smoke, deployed/multi-replica E2E/load/monitoring và source-side baseline trên dữ liệu thật |
+| Company Service | Người 2 | 🟡 **Đã làm:** nghiệp vụ chính, ownership media, migration backup/restore, domain audit, public search/load, Auth–Company identity gate, Company–Media contract integration, metrics/SLO. **Chưa làm:** real Admin approval E2E — chặn vì Admin Service chưa implement; live Cloudinary thuộc P09 |
+| Job & Search Service | Người 2 | ✅ **P05 đóng 20/20.** Đã làm: CRUD/search, transactional `job-events`, historical baseline, Redis/BullMQ/Elasticsearch, hai chiều recommendation, load/cursor/Vietnamese gate, strict JWT/JWKS, contract gate với Application, metrics/SLO. **Chưa làm:** deployed E2E/load trên hạ tầng thật |
+| Application Service | Người 2 | ✅ **P03 11/11, P04 13/13.** Đã làm: Submission→AI Match, canonical CV contract, usage/deletion gate, skill snapshot, `application-events` v1, strict JWT/JWKS, concurrency gate 10.000 call, Offer terminal-state V9 và auto-expiry V10, contract gate với AI và Job thật, metrics/SLO. **Chưa làm:** deployed E2E và HTTP/multi-replica load trên hạ tầng thật |
+| AI Service | Người 2 | 🟡 **Đã làm:** provider `/match`, consumer `job-events`/`cv-events`, hai chiều recommendation, HNSW/exact-allowlist gate, full-target HTTP gate, chatbot Candidate và recommendation tool, distributed limiter, filter-aware ANN đã điều tra và loại trừ, relevance tiếng Việt đo bằng model thật, bất biến và load cross-replica, metrics/SLO. **Chưa làm:** live Claude 10-FAQ (thiếu API key), corpus production quy mô thật, deployed load/monitoring |
 | Interview & Video Call Service | Người 3 | 🟡 Scheduling foundation, transactional `SCHEDULED interview-events`, role-aware detail/history/my, Recruiter Company calendar và advisory availability v1 đã hoàn thành; arbitrary interviewer/panel, lifecycle/Jitsi/feedback và các event action còn lại pending |
 | Chat Service | Người 3 | ⏳ Prototype realtime |
 | Notification Service | Người 3 | 🟡 `application-events` v1 và `SCHEDULED interview-events` v1 → private in-app inbox đã hoàn thành với PostgreSQL/Kafka thật; BullMQ, FCM, SMTP, device/settings API, Chat/remaining Interview lifecycle và reminder còn pending |
@@ -34,6 +34,39 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 | Tích hợp, kiểm thử và vận hành | Phối hợp cả nhóm | 🟡 Nhiều service-level PostgreSQL/Kafka/security suite đã có; deployed cross-service E2E, load và release gate toàn hệ thống còn pending |
 
 ---
+
+## Trạng thái chốt của Người 2 (cập nhật 30/08/2026)
+
+Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của P03, P04 và P05 đã đóng**; còn sáu checkbox mở ở P06 và P11, trong đó một mục thuộc Người 3.
+
+### Đã làm
+
+| Section | Checkbox | Ghi chú |
+| --- | --- | --- |
+| P03 Application Offer | **11/11** | Đóng hoàn toàn, kể cả auto-expiry worker |
+| P04 Dashboard & AI Match | **13/13** | Đóng hoàn toàn |
+| P05 Job & Search | **20/20** | Đóng hoàn toàn |
+| P06 Company | 6/8 | Chỉ còn Admin approval E2E |
+| P11 AI | 44/48 | Còn live Claude, corpus production, widget của Người 3 |
+
+### Chưa làm, và vì sao
+
+| Mục | Vì sao chưa làm được | Đã chuẩn bị sẵn gì |
+| --- | --- | --- |
+| Live Claude 10-FAQ quality/staging smoke | Repository không có `ANTHROPIC_API_KEY`. Không thể tuyên bố PASS mà không chạy thật | Runner guarded hoàn chỉnh (PR #74) với 23 offline test; cấp key là chạy được ngay |
+| Corpus production quy mô thật + deployed load/capacity + production monitoring/SLO | Cần dữ liệu tuyển dụng thật và hạ tầng triển khai thật, cả hai đều nằm ngoài repository | Relevance đo bằng model thật (#75), bất biến cross-replica (#76), load hai replica (#78), metrics/SLO đủ bốn service (#77, #79, #80, #81) |
+| Real Admin approval E2E | **Admin Service chưa tồn tại** — toàn bộ P10 còn trống và thuộc Người 1. Không thể E2E với một service chưa có mã | Company–Media contract integration đã hoàn thành (#70); lát cắt Auth đã PASS trước đó (#60) |
+| Frontend chatbot widget | **Thuộc Người 3**, không nằm trong phạm vi backend của Người 2 | — |
+
+### Hai lỗi production được phát hiện trong quá trình làm
+
+- **h2c upgrade** (PR #71): JDK HTTP client mặc định HTTP/2 nên gửi h2c upgrade qua cleartext; uvicorn từ chối, làm **mọi lời gọi `/match` từ Application hỏng trên dây** trong môi trường thật, trong khi toàn bộ unit test vẫn xanh vì `MockRestServiceServer` chặn ở tầng trên transport. Đã sửa bằng cách ghim HTTP/1.1.
+- **Race migration khi khởi động nhiều replica** (PR #78): runtime image chạy `alembic upgrade head` trước Uvicorn nên mọi replica đều migrate; khởi động đồng thời thì đua nhau và replica thua **crash-loop suốt một lần rolling deploy**. Đã sửa bằng PostgreSQL advisory lock.
+
+### Một kết luận loại trừ
+
+**Filter-aware ANN không áp dụng được** cho `/recommend/jobs` với hợp đồng phân trang hiện tại (PR #73). Index HNSW chỉ phục vụ khoá khoảng cách đơn thuần; thêm tie-break `job_id` — thứ mà stateless keyset cursor bắt buộc phải có — là index hết dùng được. Áp dụng ANN đồng nghĩa từ bỏ trang cursor đầy đủ và tái lập được, tức đổi hợp đồng phân trang chứ không phải bật một cờ. Một cờ opt-in đã được prototype rồi **gỡ bỏ có chủ đích** vì sẽ là code chết. Kết luận được giữ dưới dạng sáu test chạy được để không mục theo thời gian.
+
 
 # 1. Tổng hợp tất cả task hiện có
 
@@ -80,7 +113,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** tạo hồ sơ công ty; OWNER xin chữ ký/confirm upload và gắn media đã xác minh; cập nhật; gửi duyệt và Admin xác minh; hiển thị trang công khai; mời, chấp nhận, xóa và chuyển quyền thành viên.
 - **Chức năng chính:** profile CRUD, logo/ảnh/video Media-backed, trạng thái `PENDING/VERIFIED/REJECTED`, ownership, invitation token, public company page và endpoint tra cứu membership cho service khác.
 - **Phụ thuộc:** Auth, File/Media và Admin.
-- **Trạng thái:** nghiệp vụ chính và Company–Media ownership đã merge vào `develop` qua PR #54; migration backup/restore đã verify qua PR #55; append-only domain audit cho duyệt công ty/chuyển OWNER hoàn thành qua PR #56; public search/load hoàn thành qua PR #57. Real Auth–Company invitation identity gate đã PASS; real Admin/File multi-service E2E vẫn pending.
+- **Trạng thái:** nghiệp vụ chính và Company–Media ownership đã merge vào `develop` qua PR #54; migration backup/restore đã verify qua PR #55; append-only domain audit cho duyệt công ty/chuyển OWNER hoàn thành qua PR #56; public search/load hoàn thành qua PR #57. Real Auth–Company invitation identity gate đã PASS; Company–Media contract integration với PostgreSQL thật và HTTP thật hoàn thành qua PR #70; metrics/SLO surface hoàn thành qua PR #81. **Chưa làm:** real Admin approval E2E — bị chặn vì Admin Service mới ở mức scaffold, và live Cloudinary E2E vẫn thuộc P09.
 
 ## T06 — Job & Search Service
 
@@ -89,7 +122,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** recruiter tạo/sửa tin nháp; gửi duyệt; Admin duyệt/từ chối; đóng/hết hạn tin; tìm kiếm và lọc; đồng bộ Elasticsearch; phát `job-events`; lấy gợi ý từ AI.
 - **Chức năng chính:** Job CRUD, state machine `DRAFT → PENDING_APPROVAL → PUBLISHED/REJECTED → CLOSED/EXPIRED`, tìm kiếm full-text và filter, reindex, PostgreSQL fallback, endpoint kiểm tra job còn nhận hồ sơ.
 - **Phụ thuộc:** Auth, Company, Admin, Elasticsearch, Redis, Kafka và AI.
-- **Trạng thái:** CRUD, publishing, search, durable Elasticsearch indexing, availability, thống kê job active, `job-events` v1 qua transactional outbox và Candidate job recommendation đã hoàn thành; PR #48 bổ sung explicit-preference fallback deterministic. PR #49 bổ sung Recruiter-only candidate recommendation với Company/Job capability, version binding và post-resolution revalidation. Controlled 100.000-Job search load gate, deep cursor pagination, Vietnamese mapping v4 và strict canonical access-token/JWKS verification ở mức service test đã PASS; CV Candidate index/filter gate hoàn thành ở mục 2.34 và Candidate-facing `/recommend/jobs` full-target HTTP/load gate hoàn thành ở mục 2.41. Còn deployed Auth–Job negative E2E, real-model relevance tiếng Việt, deployed/multi-replica load, distributed rate limit và production monitoring.
+- **Trạng thái:** CRUD, publishing, search, durable Elasticsearch indexing, availability, thống kê job active, `job-events` v1 qua transactional outbox và Candidate job recommendation đã hoàn thành; PR #48 bổ sung explicit-preference fallback deterministic. PR #49 bổ sung Recruiter-only candidate recommendation với Company/Job capability, version binding và post-resolution revalidation. Controlled 100.000-Job search load gate, deep cursor pagination, Vietnamese mapping v4 và strict canonical access-token/JWKS verification ở mức service test đã PASS; CV Candidate index/filter gate hoàn thành ở mục 2.34 và Candidate-facing `/recommend/jobs` full-target HTTP/load gate hoàn thành ở mục 2.41. Application–Job internal contract gate với Job Service thật hoàn thành qua PR #72; metrics/SLO surface hoàn thành qua PR #80. **Chưa làm:** deployed Auth–Job negative E2E và deployed load/capacity trên hạ tầng thật.
 
 ## T07 — Application Service
 
@@ -98,7 +131,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** nộp đơn; Bookmark; Candidate theo dõi timeline; HR lọc và quản lý hồ sơ; state machine; đánh giá nội bộ; gửi/phản hồi Offer; thống kê recruiter; tính lại điểm AI theo yêu cầu.
 - **Chức năng chính:** Application, ApplicationHistory, Evaluation, Offer, Bookmark; optimistic locking; phân quyền theo Candidate/công ty; refresh `match_score`; phát `application-events`.
 - **Phụ thuộc:** Auth, Profile, Job, Company, AI, File/Media và Notification qua Kafka.
-- **Trạng thái:** các luồng đến Recruiter Dashboard và AI Match phía Application đã merge. Canonical Profile verification, recruiter CV metadata/download và Flyway V6 usage ledger đã merge qua PR #39; Flyway V7 permanent deletion gate và submission serialization qua PR #42; Profile v2 consumer, Flyway V8 snapshot/filter qua PR #47; canonical `application-events` JSON Schema/fixtures và v1 producer cho Submission/Pipeline/Offer hoàn thành qua PR #50; strict canonical JWT/JWKS consumer gate hoàn thành qua PR #64; controlled concurrency/load gate 10.000 call hoàn thành qua PR #65; Offer `SENT` được đồng bộ nguyên tử sang `CANCELLED` khi Application ở `OFFER` bị reject/withdraw và legacy được backfill bằng Flyway V9 qua PR #67.
+- **Trạng thái:** các luồng đến Recruiter Dashboard và AI Match phía Application đã merge. Canonical Profile verification, recruiter CV metadata/download và Flyway V6 usage ledger đã merge qua PR #39; Flyway V7 permanent deletion gate và submission serialization qua PR #42; Profile v2 consumer, Flyway V8 snapshot/filter qua PR #47; canonical `application-events` JSON Schema/fixtures và v1 producer cho Submission/Pipeline/Offer hoàn thành qua PR #50; strict canonical JWT/JWKS consumer gate hoàn thành qua PR #64; controlled concurrency/load gate 10.000 call hoàn thành qua PR #65; Offer `SENT` được đồng bộ nguyên tử sang `CANCELLED` khi Application ở `OFFER` bị reject/withdraw và legacy được backfill bằng Flyway V9 qua PR #67. Offer quá hạn được worker chuyển sang terminal `EXPIRED` với Flyway V10 qua PR #68; contract gate với AI Service thật qua PR #71 đã phát hiện và sửa lỗi h2c upgrade làm hỏng mọi lời gọi `/match`; contract gate với Job Service thật qua PR #72; metrics/SLO surface qua PR #79. **Chưa làm:** deployed E2E và HTTP/multi-replica load trên hạ tầng thật.
 
 ## T08 — AI Service
 
@@ -108,7 +141,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - **Luồng hoạt động:** consume `cv-events`; consume `job-events`; cập nhật/xóa vector; cosine similarity; recommend jobs/CVs; match CV-job; chatbot có lịch sử ngắn hạn.
 - **Chức năng chính:** đã có `/ai/match`, internal `/recommend/jobs`, internal `/recommend/candidates`, consumer idempotent và Candidate-only `POST /chat`; Job Service public surface cho Recruiter chỉ trả projection Candidate tối thiểu. Chatbot có personalized Job recommendation tool bật độc lập bằng feature flag, chỉ gọi fixed Candidate `/recommended?limit=3` khi Claude trả exact intent không tham số.
 - **Phụ thuộc:** schema `cv-events`, `job-events`, Kafka, PostgreSQL pgvector và Redis.
-- **Trạng thái:** đã có vector store/migration, internal auth/readiness, provider `/match`, worker Job embedding, dedicated CV embedding worker dùng private Media download, internal `/recommend/jobs`, consent-scoped `/recommend/candidates`, backend chatbot Candidate và personalized Job recommendation tool v1. Chatbot khóa RS256/JWKS, fixed recruitment-only prompt, Redis history HMAC 10 lượt/24 giờ, renewable exact-token session lease/fencing, distributed sliding limit theo user/toàn cục, timeout/output hữu hạn, lỗi làm sạch và `no-store`; token Candidate chỉ được chuyển tạm thời tới fixed Job endpoint sau exact tool intent và không được lưu vào history. Exact Candidate–CV pair, authoritative Job version và HMAC cursor đã được khóa qua PR #49; CV HNSW cùng controlled 100.000-CV index/filter/exact-allowlist gate và Candidate-facing 100.000-Job full-target HTTP/load gate đã PASS. PR #69 bổ sung distributed limiter Redis cho `/recommend/jobs` và `/recommend/candidates`. Còn live Claude 10-FAQ quality/staging smoke, frontend chatbot widget của Người 3, deployed/multi-replica E2E/load/monitoring và limiter tầng gateway của Người 3.
+- **Trạng thái:** đã có vector store/migration, internal auth/readiness, provider `/match`, worker Job embedding, dedicated CV embedding worker dùng private Media download, internal `/recommend/jobs`, consent-scoped `/recommend/candidates`, backend chatbot Candidate và personalized Job recommendation tool v1. Chatbot khóa RS256/JWKS, fixed recruitment-only prompt, Redis history HMAC 10 lượt/24 giờ, renewable exact-token session lease/fencing, distributed sliding limit theo user/toàn cục, timeout/output hữu hạn, lỗi làm sạch và `no-store`; token Candidate chỉ được chuyển tạm thời tới fixed Job endpoint sau exact tool intent và không được lưu vào history. Exact Candidate–CV pair, authoritative Job version và HMAC cursor đã được khóa qua PR #49; CV HNSW cùng controlled 100.000-CV index/filter/exact-allowlist gate và Candidate-facing 100.000-Job full-target HTTP/load gate đã PASS. PR #69 bổ sung distributed limiter Redis cho `/recommend/jobs` và `/recommend/candidates`. Filter-aware ANN đã điều tra và **loại trừ** qua PR #73 vì index chỉ phục vụ khoá khoảng cách đơn thuần; guarded live-FAQ runner qua PR #74; relevance tiếng Việt đo bằng model thật qua PR #75 (precision@1 1.0, bỏ dấu 1.0, tách sạch 0.25); bất biến cross-replica qua PR #76; metrics/SLO surface qua PR #77; load hai replica qua PR #78 đã phát hiện và sửa race migration làm replica crash-loop khi rolling deploy. **Chưa làm:** live Claude 10-FAQ (thiếu API key), corpus production quy mô thật và deployed load/monitoring trên hạ tầng thật; frontend chatbot widget và limiter tầng gateway thuộc Người 3.
 
 ## T09 — Interview & Video Call Service
 
