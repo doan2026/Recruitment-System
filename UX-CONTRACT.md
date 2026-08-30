@@ -37,7 +37,7 @@
 | Date | Native date baseline | UX contract | native | locale + keyboard |
 | Form | Shared `.field`/form policy | UX contract | create / edit | validation + build |
 | Scrollbar | `frontend/app/globals.css` | DESIGN.md | stable gutter | computed style |
-| CRUD | Route + demo API adapter | P16.N2 | return / stay | full-flow E2E pending |
+| CRUD | Route + `frontend/lib/person2Api.ts` | P16.N2 | explicit demo / gateway | API unit + full-flow E2E pending |
 
 ## Component behavior
 
@@ -54,7 +54,7 @@
 - Recruiter-owned `/jobs/mine`: client filter/page because API trả toàn bộ mảng.
 - Candidate search: offset hoặc cursor đúng hợp đồng backend; đổi filter xóa cursor.
 - Recommendation: load-more chỉ khi source AI có `nextCursor`.
-- URL state: sẽ là nguồn chính khi nối API thật; dữ liệu demo hiện giữ local state.
+- URL state: vẫn pending; adapter đã hỗ trợ API Gateway thật nhưng filter hiện giữ local state.
 - Empty/no-results/error/loading: state riêng, không đổi footprint bất ngờ.
 - Back/scroll restoration: route detail quay về owning list; hoàn thiện khi nối URL filter thật.
 
@@ -90,6 +90,9 @@
 - 409 phải reload + so sánh + quyết định gửi lại, không retry mù.
 - 429/503 dùng `Retry-After` khi có; không có header thì backoff có giới hạn và nút thử lại.
 - Private/no-store data không ghi localStorage và phải xóa khi logout/đổi account.
+- `apiClientCore.ts` là owner của envelope, error-code mapping, timeout/abort, retry policy, UUID v4 và allowlist field.
+- `NEXT_PUBLIC_API_MODE=demo|gateway` là lựa chọn tường minh; lỗi gateway không tự rơi về dữ liệu demo.
+- Access token chỉ giữ trong memory qua `setApiAccessToken`; `clearApiSession` phát revision để consumer xóa state bảo vệ.
 
 ## Validation
 
@@ -105,7 +108,7 @@
 
 ## Verification
 
-- Required static commands: strict premium audit, anti-pattern grep, `npm run build`.
+- Required static commands: strict premium audit, anti-pattern grep, `npm test`, `npm run typecheck`, `npm run build`.
 - Browser matrix: Chrome desktop + narrow viewport, keyboard, reduced motion; full E2E pending.
 - Accessibility: semantic buttons/links/table, labels, focus-visible, live status.
 - Canonical sibling: Candidate job list và Recruiter job list.

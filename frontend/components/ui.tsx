@@ -62,6 +62,26 @@ export function LoadingState({ label = "Đang tải dữ liệu" }: { label?: st
   );
 }
 
+export function ErrorState({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <div className="notice notice-danger" role="alert">
+      <strong>Chưa tải được dữ liệu</strong>
+      <p>{message}</p>
+      {onRetry ? (
+        <button className="btn btn-secondary" type="button" onClick={onRetry}>
+          Thử lại
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export function Metric({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return (
     <div className="metric">

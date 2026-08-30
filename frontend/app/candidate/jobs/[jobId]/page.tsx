@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ApplyForm } from "../../../../components/ApplyForm";
-import { getPublicJob, getRecommendationsForCandidate, type Job } from "../../../../lib/demoData";
+import { toUserMessage } from "../../../../lib/apiClient";
+import { getPublicJob, getRecommendationsForCandidate, type Job } from "../../../../lib/person2Api";
 
 function formatCurrency(vnd: number) {
   return `${vnd.toLocaleString("vi-VN")} VNĐ`;
@@ -16,8 +17,24 @@ function JobChip({ title, value }: { title: string; value: string }) {
 }
 
 export default async function CandidateJobDetailPage({ params }: { params: { jobId: string } }) {
-  const jobResp = await getPublicJob(params.jobId);
-  const recResp = await getRecommendationsForCandidate();
+  let jobResp;
+  let recResp;
+  try {
+    [jobResp, recResp] = await Promise.all([
+      getPublicJob(params.jobId),
+      getRecommendationsForCandidate(),
+    ]);
+  } catch (reason: unknown) {
+    return (
+      <main>
+        <div className="notice notice-danger" role="alert">
+          <strong>Chưa tải được việc làm</strong>
+          <p>{toUserMessage(reason)}</p>
+        </div>
+        <Link className="btn" href="/candidate/jobs">Quay về danh sách</Link>
+      </main>
+    );
+  }
 
   if (!jobResp.data) {
     return (
@@ -63,8 +80,8 @@ export default async function CandidateJobDetailPage({ params }: { params: { job
 
         <section className="panel">
           <h2>Phần ứng viên</h2>
-          <p className="help">Form apply: `expectedVersion` lấy từ detail trước rồi gửi kèm vào write commands.</p>
-          <ApplyForm jobId={job.id} expectedVersion={job.aggregateVersion} />
+          <p className="help">Form tạo hồ sơ gửi đúng `jobId`, `cvId`, `coverLetter` và `source`; version chỉ dùng cho lệnh ghi sau khi hồ sơ đã tồn tại.</p>
+          <ApplyForm jobId={job.id} />
           <p className="status-line">Checklist: giữ form trên client nếu API trả `409 APPLICATION_CHANGED_CONCURRENTLY` sẽ mở lại dữ liệu mới.</p>
         </section>
       </section>

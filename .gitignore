@@ -9,6 +9,8 @@ service-account*.json
 **/dist/
 **/target/
 **/.next/
+**/.test-dist/
+**/*.tsbuildinfo
 **/__pycache__/
 *.py[cod]
 **/.pytest_cache/

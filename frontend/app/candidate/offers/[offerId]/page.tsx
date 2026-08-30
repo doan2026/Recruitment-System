@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { getOffer, Offer } from "../../../../lib/demoData";
+import { ErrorState, LoadingState } from "../../../../components/ui";
+import { toUserMessage } from "../../../../lib/apiClient";
+import { getOffer, Offer } from "../../../../lib/person2Api";
 
 type Phase = "accept" | "decline" | "request";
 
@@ -11,18 +13,29 @@ export default function CandidateOfferResponsePage({ params }: { params: { offer
   const [loading, setLoading] = useState(true);
   const [phase, setPhase] = useState<Phase | null>(null);
   const [message, setMessage] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let running = true;
-    getOffer(params.offerId).then((resp) => {
-      if (!running) return;
-      setOffer(resp.data || null);
-      setLoading(false);
-    });
+    const controller = new AbortController();
+    setLoading(true);
+    setLoadError("");
+    getOffer(params.offerId, controller.signal)
+      .then((response) => {
+        if (running) setOffer(response.data || null);
+      })
+      .catch((reason: unknown) => {
+        if (running) setLoadError(toUserMessage(reason));
+      })
+      .finally(() => {
+        if (running) setLoading(false);
+      });
     return () => {
       running = false;
+      controller.abort();
     };
-  }, [params.offerId]);
+  }, [params.offerId, reloadKey]);
 
   function submit(action: Phase) {
     setPhase(action);
@@ -33,7 +46,11 @@ export default function CandidateOfferResponsePage({ params }: { params: { offer
   }
 
   if (loading) {
-    return <main>Đang tải...</main>;
+    return <main><LoadingState label="Đang tải offer" /></main>;
+  }
+
+  if (loadError) {
+    return <main><ErrorState message={loadError} onRetry={() => setReloadKey((value) => value + 1)} /></main>;
   }
 
   if (!offer) {

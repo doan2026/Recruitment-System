@@ -2,7 +2,14 @@
   "name": "recruitment-web",
   "version": "0.0.1",
   "private": true,
-  "scripts": { "dev": "next dev", "build": "next build", "start": "next start" },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "npm run test:api",
+    "test:api": "tsc -p tsconfig.api-test.json && node --test .test-dist/apiClient.test.js",
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": { "next": "14.2.35", "react": "18.3.1", "react-dom": "18.3.1" },
   "devDependencies": { "typescript": "5.5.4", "@types/node": "22.0.0", "@types/react": "18.3.3", "@types/react-dom": "18.3.0" }
 }

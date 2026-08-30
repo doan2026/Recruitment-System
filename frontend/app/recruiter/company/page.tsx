@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Metric, PageHeader, StatusBadge } from "../../../components/ui";
-import { type Company, getCompany } from "../../../lib/demoData";
+import { ErrorState, Metric, PageHeader, StatusBadge } from "../../../components/ui";
+import { toUserMessage } from "../../../lib/apiClient";
+import { type Company, getCompany } from "../../../lib/person2Api";
 
 type UploadStep = "idle" | "signed" | "uploaded" | "confirmed";
 
@@ -13,17 +14,28 @@ export default function RecruiterCompanyPage() {
   const [status, setStatus] = useState("");
   const [name, setName] = useState("");
   const [taxCode, setTaxCode] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let active = true;
-    getCompany().then((response) => {
-      if (!active) return;
-      setCompany(response.data);
-      setName(response.data.name);
-      setTaxCode(response.data.taxCode);
-    });
-    return () => { active = false; };
-  }, []);
+    const controller = new AbortController();
+    setLoadError("");
+    getCompany(controller.signal)
+      .then((response) => {
+        if (!active) return;
+        setCompany(response.data);
+        setName(response.data.name);
+        setTaxCode(response.data.taxCode);
+      })
+      .catch((reason: unknown) => {
+        if (active) setLoadError(toUserMessage(reason));
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [reloadKey]);
 
   function saveCompany(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -55,7 +67,11 @@ export default function RecruiterCompanyPage() {
   }
 
   if (!company) {
-    return <main><div className="loading-state" role="status">Đang tải hồ sơ công ty…</div></main>;
+    return (
+      <main>
+        {loadError ? <ErrorState message={loadError} onRetry={() => setReloadKey((value) => value + 1)} /> : <div className="loading-state" role="status">Đang tải hồ sơ công ty…</div>}
+      </main>
+    );
   }
 
   const tone = company.verificationStatus === "VERIFIED" ? "success" : company.verificationStatus === "REJECTED" ? "danger" : "warning";
