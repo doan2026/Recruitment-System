@@ -469,6 +469,46 @@ vector-store work happens. Scoped authorization and payload validation both run
 before the charge, so an unauthenticated or malformed caller can never drain
 another subject's budget.
 
+## Cross-replica invariant gate
+
+Running more than one API replica is only safe if the parts of the service that
+look stateless really are. Three things had never been checked across
+processes, and each fails quietly rather than loudly:
+
+- a cursor issued by one replica must be accepted by another, or load balancing
+  silently breaks pagination for every Candidate;
+- the same request must return the same page from either replica, or results
+  flicker as the balancer moves a session around;
+- the distributed rate limit must be one shared budget, not one per replica, or
+  the real limit silently multiplies by the replica count.
+
+`scripts/multi_replica_gate.py` drives two real replicas over HTTP against one
+shared PostgreSQL and one shared Redis:
+
+```bash
+AI_REPLICA_A_URL=http://127.0.0.1:18101 \
+AI_REPLICA_B_URL=http://127.0.0.1:18102 \
+AI_JOB_SEARCH_KEY=<scoped key> \
+AI_GATE_CV_ID=<seeded cv uuid> \
+AI_GATE_RATE_BUDGET=10 \
+  python scripts/multi_replica_gate.py
+```
+
+Measured on two replicas with a subject budget of ten: page one from replica A
+continued correctly on replica B with no repeated Job, both replicas returned
+identical items and an identical cursor, and the budget probe accepted exactly
+the six calls left after the earlier checks had spent four. A per-replica
+limiter would have granted about twice that before the first rejection.
+
+The probe alternates replicas deliberately, so a per-process limiter shows up
+as over-granting rather than as a slightly different number, and it accounts
+for calls the earlier checks already spent instead of assuming a full budget
+remains.
+
+This is controlled evidence for cross-replica correctness, not a capacity or
+latency benchmark. Deployed load, gateway behaviour and production monitoring
+remain separate.
+
 ## Vietnamese relevance gate
 
 Every embedding test elsewhere uses synthetic vectors, which proves the
