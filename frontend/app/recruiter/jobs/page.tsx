@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { EmptyState, ErrorState, LoadingState, Metric, PageHeader, StatusBadge } from "../../../components/ui";
-import { toUserMessage } from "../../../lib/apiClient";
+import { TransientRecoveryState } from "../../../components/TransientRecoveryState";
+import { EmptyState, LoadingState, Metric, PageHeader, StatusBadge } from "../../../components/ui";
+import { ApiClientError } from "../../../lib/apiClient";
 import { getRecruiterJobs, type Job, type JobStatus } from "../../../lib/person2Api";
 
 export default function RecruiterJobsPage() {
@@ -11,7 +12,8 @@ export default function RecruiterJobsPage() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | JobStatus>("ALL");
-  const [loadError, setLoadError] = useState("");
+  const [loadError, setLoadError] = useState<unknown>(null);
+  const [failureCount, setFailureCount] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -19,13 +21,19 @@ export default function RecruiterJobsPage() {
     let active = true;
     const controller = new AbortController();
     setLoading(true);
-    setLoadError("");
+    setLoadError(null);
     getRecruiterJobs(controller.signal)
       .then((response) => {
-        if (active) setJobs(response.data);
+        if (active) {
+          setJobs(response.data);
+          setFailureCount(0);
+        }
       })
       .catch((reason: unknown) => {
-        if (active) setLoadError(toUserMessage(reason));
+        if (active && !(reason instanceof ApiClientError && reason.code === "REQUEST_CANCELLED")) {
+          setLoadError(reason);
+          setFailureCount((value) => value + 1);
+        }
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -76,7 +84,13 @@ export default function RecruiterJobsPage() {
 
       <section className="panel">
         <div className="list-meta"><strong>{visibleJobs.length} tin phù hợp</strong><span className="help">Dữ liệu được phân trang phía client theo hợp đồng /jobs/mine</span></div>
-        {loadError ? <ErrorState message={loadError} onRetry={() => setReloadKey((value) => value + 1)} /> : null}
+        {loadError ? (
+          <TransientRecoveryState
+            error={loadError}
+            failureCount={failureCount}
+            onRetry={() => setReloadKey((value) => value + 1)}
+          />
+        ) : null}
         {loading ? <LoadingState /> : null}
         {!loading && !loadError && visibleJobs.length === 0 ? <EmptyState title="Không có tin phù hợp" description="Thử xóa từ khóa hoặc đổi trạng thái lọc." /> : null}
         {!loading && !loadError && visibleJobs.length ? (

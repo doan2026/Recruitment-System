@@ -514,6 +514,10 @@ textarea { resize: none; }
 .conflict-table { min-width: 620px; }
 .conflict-table th[scope="row"] { color: var(--text); text-transform: none; letter-spacing: 0; }
 .conflict-table td { max-width: 260px; overflow-wrap: anywhere; }
+.transient-recovery { display: flex; min-height: 178px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 10px; }
+.transient-recovery p { margin: 0; }
+.transient-recovery .help { min-height: 24px; color: inherit; }
+.transient-recovery .btn { min-width: 168px; }
 
 .chat-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; }
 .chat-box { min-height: 420px; max-height: 560px; padding: 20px; background: linear-gradient(180deg, #fbfffc, #f6f9ff); }

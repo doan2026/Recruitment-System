@@ -15,6 +15,7 @@ import {
   isOptimisticConflict,
   prepareConflictSnapshot,
 } from "./conflictRecovery";
+import { createTransientRecoveryPlan } from "./transientRecovery";
 
 process.env.NEXT_PUBLIC_API_BASE_URL = "http://gateway.test";
 
@@ -170,4 +171,44 @@ test("non-optimistic 409 errors are not routed through reload and compare", asyn
     (reason: unknown) => reason === error,
   );
   assert.equal(reloaded, false);
+});
+
+test("Retry-After drives one bounded automatic retry before manual recovery", () => {
+  const error = new ApiClientError({
+    code: "GATEWAY_RATE_LIMITED",
+    status: 429,
+    retryAfterSeconds: 60,
+  });
+
+  assert.deepEqual(createTransientRecoveryPlan(error, 1), {
+    source: "retry-after", delaySeconds: 60, automatic: true, status: 429,
+  });
+  assert.deepEqual(createTransientRecoveryPlan(error, 2), {
+    source: "retry-after", delaySeconds: 60, automatic: false, status: 429,
+  });
+});
+
+test("missing Retry-After uses bounded local backoff and requires a manual retry", () => {
+  const error = new ApiClientError({ code: "MEDIA_UPLOAD_RATE_LIMITED", status: 429 });
+  assert.equal(createTransientRecoveryPlan(error, 1)?.delaySeconds, 2);
+  assert.equal(createTransientRecoveryPlan(error, 4)?.delaySeconds, 16);
+  assert.deepEqual(createTransientRecoveryPlan(error, 10), {
+    source: "local-backoff", delaySeconds: 30, automatic: false, status: 429,
+  });
+
+  const unavailable = new ApiClientError({
+    code: "CHAT_PROVIDER_UNAVAILABLE",
+    status: 503,
+  });
+  assert.deepEqual(createTransientRecoveryPlan(unavailable, 1), {
+    source: "local-backoff",
+    delaySeconds: 2,
+    automatic: false,
+    status: 503,
+  });
+});
+
+test("ordinary errors do not enter transient recovery", () => {
+  const error = new ApiClientError({ code: "COMPANY_UPDATE_CONFLICT", status: 409 });
+  assert.equal(createTransientRecoveryPlan(error), null);
 });
