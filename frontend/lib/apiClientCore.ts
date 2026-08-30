@@ -95,21 +95,48 @@ const SAFE_RETRY_METHODS = new Set(["GET"]);
 const MAX_RETRY_DELAY_MS = 2_000;
 
 let accessToken: string | null = null;
+let sessionAccountId: string | null = null;
 let sessionRevision = 0;
 const sessionListeners = new Set<(revision: number) => void>();
 
-export function setApiAccessToken(token: string | null): void {
-  const normalized = token?.trim() || null;
-  if (normalized === accessToken) return;
-  accessToken = normalized;
+function publishSessionRevision(): void {
   sessionRevision += 1;
   sessionListeners.forEach((listener) => listener(sessionRevision));
 }
 
+export function setApiSession({
+  token,
+  accountId,
+}: { token?: string | null; accountId: string }): void {
+  const normalizedToken = token?.trim() || null;
+  const normalizedAccountId = accountId.trim();
+  if (!normalizedAccountId) {
+    throw new ApiClientError({ code: "SESSION_ACCOUNT_REQUIRED" });
+  }
+
+  const identityChanged = normalizedAccountId !== sessionAccountId;
+  accessToken = normalizedToken;
+  sessionAccountId = normalizedAccountId;
+  if (identityChanged) publishSessionRevision();
+}
+
+/**
+ * Compatibility path when Auth cannot provide a stable account id yet.
+ * Every credential change invalidates protected UI state; prefer setApiSession
+ * to avoid clearing state during a same-account token refresh.
+ */
+export function setApiAccessToken(token: string | null): void {
+  const normalized = token?.trim() || null;
+  if (normalized === accessToken) return;
+  accessToken = normalized;
+  sessionAccountId = null;
+  publishSessionRevision();
+}
+
 export function clearApiSession(): void {
   accessToken = null;
-  sessionRevision += 1;
-  sessionListeners.forEach((listener) => listener(sessionRevision));
+  sessionAccountId = null;
+  publishSessionRevision();
 }
 
 export function subscribeToApiSession(listener: (revision: number) => void): () => void {
@@ -214,6 +241,7 @@ export function normalizeError(code: string): string {
     API_BASE_URL_REQUIRED: "Thiếu cấu hình địa chỉ API Gateway cho server.",
     INVALID_UUID_V4: "Mã định danh không đúng định dạng UUID v4.",
     UUID_GENERATION_UNAVAILABLE: "Không thể tạo phiên trò chuyện an toàn trên trình duyệt này.",
+    SESSION_ACCOUNT_REQUIRED: "Không thể thiết lập phiên vì thiếu định danh tài khoản.",
     UNKNOWN_REQUEST_FIELD: "Dữ liệu gửi đi chứa trường không được API hỗ trợ.",
     JOB_SEARCH_CURSOR_STALE: "Danh sách việc làm đã thay đổi. Hãy tải lại từ đầu.",
     RECOMMENDATION_CURSOR_STALE: "Danh sách gợi ý đã thay đổi. Hãy tải lại từ đầu.",

@@ -92,10 +92,10 @@
 - Shared conflict owner giữ draft trong memory, chỉ reload resource đúng một lần và không gọi lại mutation; consumer phải yêu cầu người dùng chọn bản rồi tự submit lại.
 - 429/503 dùng `Retry-After` khi có; không có header thì backoff có giới hạn và nút thử lại.
 - `transientRecovery.ts` chỉ auto-retry một lần khi server cấp lịch; sau đó hoặc khi thiếu header, khóa nút theo backoff 2–30 giây rồi chờ người dùng chủ động thử lại.
-- Private/no-store data không ghi localStorage và phải xóa khi logout/đổi account.
+- Private/no-store data không ghi Web Storage/service worker; `ApiSessionBoundary` remount toàn bộ page state khi account revision đổi hoặc logout/401.
 - `apiClientCore.ts` là owner của envelope, error-code mapping, timeout/abort, retry policy, UUID v4 và allowlist field.
 - `NEXT_PUBLIC_API_MODE=demo|gateway` là lựa chọn tường minh; lỗi gateway không tự rơi về dữ liệu demo.
-- Access token chỉ giữ trong memory qua `setApiAccessToken`; `clearApiSession` phát revision để consumer xóa state bảo vệ.
+- Access token chỉ giữ trong memory; Auth gọi `setApiSession({ token?, accountId })` để refresh cùng account không xóa state, còn đổi account phát revision. `clearApiSession` luôn phát revision kể cả cookie-only.
 
 ## Validation
 

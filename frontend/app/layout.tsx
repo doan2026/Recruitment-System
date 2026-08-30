@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { ApiSessionBoundary } from "../components/ApiSessionBoundary";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -41,7 +42,9 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
               </div>
             </div>
           </header>
-          <div className="content-wrap">{children}</div>
+          <div className="content-wrap">
+            <ApiSessionBoundary>{children}</ApiSessionBoundary>
+          </div>
           <footer className="site-footer">CareerHub · Không gian nghề nghiệp rõ ràng hơn mỗi ngày</footer>
         </div>
       </body>
