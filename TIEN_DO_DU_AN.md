@@ -928,6 +928,20 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Đây **không phải** benchmark capacity/latency. Deployed load, hành vi gateway và production monitoring vẫn là hạng mục riêng.
 
 
+## 2.52 SLO Metrics Surface — hoàn thành qua PR #77
+
+> Task chỉ thuộc AI Service của Người 2, được bàn giao từ `feature/ai-service/slo-instrumentation` vào `develop` qua PR #77 ngày 30/08/2026. Đây là bước làm cho SLO **đo được**, không phải triển khai monitoring.
+
+- SLO về availability và latency cần con số tồn tại lâu hơn một request, mà service **không có gì cả**: không counter, không histogram, không có gì để trỏ monitor vào. Nghĩa là hạng mục "production monitoring/SLO" trước đây vĩnh viễn không đóng được vì thiếu bước này.
+- `GET /metrics` nay phát Prometheus exposition cho mọi request service phục vụ, được bảo vệ bằng đúng internal credential như các internal surface khác, và trả `no-store` — tần suất request và phân bố latency là thông tin vận hành, không phải thông tin công khai.
+- **Không có identifier trong label.** Mỗi series chỉ mang tên route và status class. Gắn nhãn theo `cv_id`, `job_id` hay user sẽ biến một lần scrape thành bản ghi ai đã hỏi gì — đúng thứ phần còn lại của service được xây để tránh.
+- **Cardinality có chặn.** Chỉ route đã biết mới có nhãn riêng; mọi path khác gom về `other`, nên scanner quét path ngẫu nhiên không làm phình registry: 500 path lạ vẫn chỉ sinh **một** series.
+- Request được ghi nhận bất kể kết quả, gồm cả từ chối và lỗi chưa bắt, vì một trận 401 và một lần crash đều là sự kiện availability. Cài đặt **không phụ thuộc thư viện ngoài** nên runtime image vẫn nhẹ đúng như dự án chủ ý.
+- **26 test** phủ: cardinality có chặn, không lộ identifier, histogram cumulative kết thúc `+Inf`, duration âm bị kẹp, ghi nhận đồng thời không mất count, và `/metrics` yêu cầu credential.
+- Gate cuối PASS **732/732 test** cùng `ruff check`/`ruff format --check`.
+- Việc này làm SLO **đo được**. Nó **không phải** một triển khai monitoring: scrape, dashboard, alert rule và error budget vẫn là việc hạ tầng.
+
+
 ---
 
 # 3. Danh sách task CHƯA làm (Pending)
