@@ -7,6 +7,10 @@ from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool, text
+from sqlalchemy.engine import Connection
+
+# A fixed, service-specific key so only AI Service migrations serialise on it.
+MIGRATION_LOCK_KEY = 8_741_205_311_002_461
 
 config = context.config
 if config.config_file_name is not None:
@@ -52,16 +56,37 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        connection.execute(text("CREATE SCHEMA IF NOT EXISTS ai"))
-        connection.commit()
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            include_schemas=True,
-            version_table_schema="ai",
+        # Every replica runs migrations at startup, so a rolling deploy starts
+        # several at once. Without a lock they race: one creates the version
+        # table or a schema object while another is doing the same, and the
+        # loser exits non-zero and crash-loops. A session advisory lock makes
+        # them queue instead, so the second replica simply finds the work done.
+        connection.execute(
+            text("SELECT pg_advisory_lock(:key)"),
+            {"key": MIGRATION_LOCK_KEY},
         )
-        with context.begin_transaction():
-            context.run_migrations()
+        connection.commit()
+        try:
+            _run_locked_migrations(connection)
+        finally:
+            connection.execute(
+                text("SELECT pg_advisory_unlock(:key)"),
+                {"key": MIGRATION_LOCK_KEY},
+            )
+            connection.commit()
+
+
+def _run_locked_migrations(connection: Connection) -> None:
+    connection.execute(text("CREATE SCHEMA IF NOT EXISTS ai"))
+    connection.commit()
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        include_schemas=True,
+        version_table_schema="ai",
+    )
+    with context.begin_transaction():
+        context.run_migrations()
 
 
 if context.is_offline_mode():
