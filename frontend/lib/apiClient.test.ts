@@ -22,6 +22,10 @@ import {
   normalizeCompanyCreate,
   validateCompanyCreate,
 } from "./companyForm";
+import {
+  companyVerificationView,
+  isInvalidResubmissionTransition,
+} from "./companyVerification";
 import { createTransientRecoveryPlan } from "./transientRecovery";
 
 process.env.NEXT_PUBLIC_API_BASE_URL = "http://gateway.test";
@@ -326,4 +330,33 @@ test("company onboarding omits an empty optional website", () => {
     taxCode: "0101",
   });
   assert.equal(normalized.website, undefined);
+});
+
+test("company verification exposes resubmission only for REJECTED", () => {
+  const statuses = ["DRAFT", "PENDING", "VERIFIED", "REJECTED"] as const;
+  const views = statuses.map((status) => companyVerificationView(status, " Thiếu giấy phép "));
+
+  assert.deepEqual(views.map((view) => view.canResubmit), [false, false, false, true]);
+  assert.deepEqual(views.map((view) => view.rejectReason), [null, null, null, "Thiếu giấy phép"]);
+});
+
+test("company verification does not leak a stale reject reason outside REJECTED", () => {
+  const pending = companyVerificationView("PENDING", "Lý do cũ");
+  assert.equal(pending.rejectReason, null);
+  assert.match(pending.description, /chờ Admin/i);
+});
+
+test("resubmission conflict is recognized by exact code and status", () => {
+  assert.equal(isInvalidResubmissionTransition(new ApiClientError({
+    code: "INVALID_RESUBMISSION_TRANSITION",
+    status: 409,
+  })), true);
+  assert.equal(isInvalidResubmissionTransition(new ApiClientError({
+    code: "COMPANY_UPDATE_CONFLICT",
+    status: 409,
+  })), false);
+  assert.equal(isInvalidResubmissionTransition(new ApiClientError({
+    code: "INVALID_RESUBMISSION_TRANSITION",
+    status: 400,
+  })), false);
 });
