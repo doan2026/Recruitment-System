@@ -1,0 +1,374 @@
+export interface ApiMeta {
+  page?: number;
+  limit?: number;
+  total?: number;
+  totalPages?: number;
+  source?: string;
+  cursor?: string | null;
+  hasMore?: boolean;
+  nextCursor?: string | null;
+  [key: string]: unknown;
+}
+
+export interface ApiEnvelope<T> {
+  data: T;
+  meta: ApiMeta | null;
+}
+
+export interface ApiErrorPayload {
+  code: string;
+  message?: string;
+  details?: Record<string, unknown> | null;
+}
+
+export type RecoveryKind =
+  | "none"
+  | "retry"
+  | "retry-after"
+  | "reload"
+  | "reload-compare"
+  | "restart-list"
+  | "reauthenticate";
+
+export class ApiClientError extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly details: Record<string, unknown>;
+  readonly retryAfterSeconds: number | null;
+  readonly recovery: RecoveryKind;
+
+  constructor({
+    code,
+    status = 0,
+    details,
+    retryAfterSeconds = null,
+  }: {
+    code: string;
+    status?: number;
+    details?: Record<string, unknown> | null;
+    retryAfterSeconds?: number | null;
+  }) {
+    super(normalizeError(code));
+    this.name = "ApiClientError";
+    this.code = code;
+    this.status = status;
+    this.details = details ?? {};
+    this.retryAfterSeconds = retryAfterSeconds;
+    this.recovery = recoveryFor(code, status);
+  }
+}
+
+export const API_PATHS = Object.freeze({
+  companies: "/companies/",
+  companyMine: "/companies/me",
+  companySearch: "/companies/search",
+  jobs: "/jobs/",
+  jobMine: "/jobs/mine",
+  jobSearch: "/jobs/search",
+  jobRecommended: "/jobs/recommended",
+  applications: "/applications/",
+  applicationMine: "/applications/my",
+  bookmarks: "/applications/bookmarks",
+  offers: "/offers/",
+  aiChat: "/ai/chat",
+});
+
+type QueryPrimitive = string | number | boolean;
+export type QueryValue = QueryPrimitive | QueryPrimitive[] | null | undefined;
+
+export interface ApiRequestOptions {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  query?: Record<string, QueryValue>;
+  allowedQueryKeys?: readonly string[];
+  body?: unknown;
+  headers?: HeadersInit;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  privateData?: boolean;
+  maxRetries?: number;
+  fetcher?: typeof fetch;
+}
+
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const TRANSIENT_STATUSES = new Set([429, 503]);
+const SAFE_RETRY_METHODS = new Set(["GET"]);
+const MAX_RETRY_DELAY_MS = 2_000;
+
+let accessToken: string | null = null;
+let sessionRevision = 0;
+const sessionListeners = new Set<(revision: number) => void>();
+
+export function setApiAccessToken(token: string | null): void {
+  const normalized = token?.trim() || null;
+  if (normalized === accessToken) return;
+  accessToken = normalized;
+  sessionRevision += 1;
+  sessionListeners.forEach((listener) => listener(sessionRevision));
+}
+
+export function clearApiSession(): void {
+  accessToken = null;
+  sessionRevision += 1;
+  sessionListeners.forEach((listener) => listener(sessionRevision));
+}
+
+export function subscribeToApiSession(listener: (revision: number) => void): () => void {
+  sessionListeners.add(listener);
+  return () => sessionListeners.delete(listener);
+}
+
+export function getApiSessionRevision(): number {
+  return sessionRevision;
+}
+
+export function isCanonicalUuidV4(value: string): boolean {
+  return UUID_V4_PATTERN.test(value);
+}
+
+export function assertCanonicalUuidV4(value: string, field = "id"): string {
+  if (!isCanonicalUuidV4(value)) {
+    throw new ApiClientError({
+      code: "INVALID_UUID_V4",
+      status: 422,
+      details: { field },
+    });
+  }
+  return value;
+}
+
+export function createChatSessionId(): string {
+  const value = globalThis.crypto?.randomUUID?.().toLowerCase();
+  if (!value) throw new ApiClientError({ code: "UUID_GENERATION_UNAVAILABLE" });
+  return assertCanonicalUuidV4(value, "session_id");
+}
+
+export function collectionPath(path: string): string {
+  if (!path.startsWith("/")) throw new ApiClientError({ code: "INVALID_API_PATH" });
+  return path.endsWith("/") ? path : `${path}/`;
+}
+
+export function selectContractFields<T extends Record<string, unknown>>(
+  input: T,
+  allowedFields: readonly string[],
+): Partial<T> {
+  const allowed = new Set(allowedFields);
+  const unknown = Object.keys(input).filter((key) => !allowed.has(key));
+  if (unknown.length) {
+    throw new ApiClientError({
+      code: "UNKNOWN_REQUEST_FIELD",
+      status: 422,
+      details: { fields: unknown },
+    });
+  }
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== undefined),
+  ) as Partial<T>;
+}
+
+export function buildQuery(
+  query: Record<string, QueryValue> = {},
+  allowedKeys: readonly string[] = Object.keys(query),
+): string {
+  const selected = selectContractFields(query, allowedKeys);
+  const params = new URLSearchParams();
+  Object.entries(selected).forEach(([key, rawValue]) => {
+    if (rawValue === undefined || rawValue === null || rawValue === "") return;
+    const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+    values.forEach((value) => params.append(key, String(value)));
+  });
+  const serialized = params.toString();
+  return serialized ? `?${serialized}` : "";
+}
+
+export function parseRetryAfter(value: string | null, now = Date.now()): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds);
+  const date = Date.parse(value);
+  if (Number.isNaN(date)) return null;
+  return Math.max(0, Math.ceil((date - now) / 1_000));
+}
+
+export function recoveryFor(code: string, status = 0): RecoveryKind {
+  if (code === "JOB_SEARCH_CURSOR_STALE" || code === "RECOMMENDATION_CURSOR_STALE") return "restart-list";
+  if (code.includes("CONFLICT") || code.includes("CHANGED_CONCURRENTLY")) return "reload-compare";
+  if (status === 401) return "reauthenticate";
+  if (status === 429) return "retry-after";
+  if (status === 503 || code === "TIMEOUT" || code === "NETWORK_ERROR") return "retry";
+  if (status === 409) return "reload";
+  return "none";
+}
+
+export function normalizeError(code: string): string {
+  const messages: Record<string, string> = {
+    TIMEOUT: "Máy chủ phản hồi quá lâu. Hãy thử lại.",
+    REQUEST_CANCELLED: "Yêu cầu đã được hủy.",
+    NETWORK_ERROR: "Không thể kết nối máy chủ. Kiểm tra mạng rồi thử lại.",
+    INVALID_API_RESPONSE: "Máy chủ trả dữ liệu không hợp lệ. Hãy thử lại sau.",
+    INVALID_API_PATH: "Đường dẫn API không hợp lệ.",
+    API_BASE_URL_REQUIRED: "Thiếu cấu hình địa chỉ API Gateway cho server.",
+    INVALID_UUID_V4: "Mã định danh không đúng định dạng UUID v4.",
+    UUID_GENERATION_UNAVAILABLE: "Không thể tạo phiên trò chuyện an toàn trên trình duyệt này.",
+    UNKNOWN_REQUEST_FIELD: "Dữ liệu gửi đi chứa trường không được API hỗ trợ.",
+    JOB_SEARCH_CURSOR_STALE: "Danh sách việc làm đã thay đổi. Hãy tải lại từ đầu.",
+    RECOMMENDATION_CURSOR_STALE: "Danh sách gợi ý đã thay đổi. Hãy tải lại từ đầu.",
+    COMPANY_UPDATE_CONFLICT: "Dữ liệu công ty vừa được người khác sửa. Hãy tải lại và so sánh thay đổi.",
+    OFFER_EXPIRED: "Offer đã hết hạn. Hãy liên hệ nhà tuyển dụng.",
+    OFFER_ALREADY_RESPONDED: "Offer này đã được phản hồi.",
+    OFFER_CHANGED_CONCURRENTLY: "Offer vừa được cập nhật. Hãy tải lại trước khi phản hồi.",
+    APPLICATION_CHANGED_CONCURRENTLY: "Hồ sơ vừa thay đổi. Hãy tải lại trước khi tiếp tục.",
+    JOB_SEARCH_PAGE_TOO_DEEP: "Kết quả quá sâu. Hãy lọc hẹp hơn hoặc chuyển sang tải thêm.",
+    MEDIA_UPLOAD_RATE_LIMITED: "Bạn tải file quá nhiều lần. Hãy chờ rồi thử lại.",
+    OFFER_READ_UNAVAILABLE: "Offer chỉ được mở từ thông báo vì Application API chưa có endpoint đọc offer.",
+  };
+  return messages[code] ?? "Không thể hoàn tất yêu cầu. Hãy thử lại.";
+}
+
+export function toUserMessage(error: unknown): string {
+  return error instanceof ApiClientError ? error.message : normalizeError("NETWORK_ERROR");
+}
+
+export function toNoStoreHeaders(): Record<string, string> {
+  return { "Cache-Control": "no-store", Pragma: "no-cache" };
+}
+
+function apiBaseUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ?? "";
+  if (!configured && typeof window === "undefined") {
+    throw new ApiClientError({ code: "API_BASE_URL_REQUIRED" });
+  }
+  return configured.replace(/\/$/, "");
+}
+
+function isEnvelope(value: unknown): value is ApiEnvelope<unknown> {
+  return !!value && typeof value === "object" && "data" in value;
+}
+
+function asErrorPayload(value: unknown, status: number): ApiErrorPayload {
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return {
+      code: typeof record.code === "string" ? record.code : `HTTP_${status}`,
+      message: typeof record.message === "string" ? record.message : undefined,
+      details: record.details && typeof record.details === "object"
+        ? record.details as Record<string, unknown>
+        : null,
+    };
+  }
+  return { code: `HTTP_${status}` };
+}
+
+async function readPayload(response: Response): Promise<unknown> {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("json")) return null;
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+export async function requestApi<T>(
+  path: string,
+  options: ApiRequestOptions = {},
+): Promise<ApiEnvelope<T>> {
+  if (!path.startsWith("/")) throw new ApiClientError({ code: "INVALID_API_PATH" });
+  const method = options.method ?? "GET";
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  const cancelFromCaller = () => controller.abort();
+  options.signal?.addEventListener("abort", cancelFromCaller, { once: true });
+  if (options.signal?.aborted) controller.abort();
+
+  const headers = new Headers(options.headers);
+  headers.set("Accept", "application/json");
+  if (options.privateData) {
+    Object.entries(toNoStoreHeaders()).forEach(([key, value]) => headers.set(key, value));
+  }
+  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+  if (options.body !== undefined) headers.set("Content-Type", "application/json");
+
+  const query = buildQuery(options.query, options.allowedQueryKeys);
+  const url = `${apiBaseUrl()}${path}${query}`;
+  const fetcher = options.fetcher ?? fetch;
+  const maxRetries = options.maxRetries ?? (SAFE_RETRY_METHODS.has(method) ? 1 : 0);
+
+  try {
+    for (let attempt = 0; ; attempt += 1) {
+      let response: Response;
+      try {
+        response = await fetcher(url, {
+          method,
+          headers,
+          credentials: "include",
+          cache: options.privateData ? "no-store" : "default",
+          body: options.body === undefined ? undefined : JSON.stringify(options.body),
+          signal: controller.signal,
+        });
+      } catch {
+        if (controller.signal.aborted) {
+          throw new ApiClientError({ code: timedOut ? "TIMEOUT" : "REQUEST_CANCELLED" });
+        }
+        throw new ApiClientError({ code: "NETWORK_ERROR" });
+      }
+
+      const payload = await readPayload(response);
+      if (response.ok) {
+        if (!isEnvelope(payload)) {
+          throw new ApiClientError({ code: "INVALID_API_RESPONSE", status: response.status });
+        }
+        return {
+          data: payload.data as T,
+          meta: payload.meta && typeof payload.meta === "object" ? payload.meta as ApiMeta : null,
+        };
+      }
+
+      const errorPayload = asErrorPayload(payload, response.status);
+      const detailsRetry = Number(errorPayload.details?.retryAfterSeconds);
+      const retryAfterSeconds = parseRetryAfter(response.headers.get("retry-after"))
+        ?? (Number.isFinite(detailsRetry) && detailsRetry >= 0 ? Math.ceil(detailsRetry) : null);
+      const apiError = new ApiClientError({
+        code: errorPayload.code,
+        status: response.status,
+        details: errorPayload.details,
+        retryAfterSeconds,
+      });
+      if (response.status === 401) clearApiSession();
+      if (!TRANSIENT_STATUSES.has(response.status) || attempt >= maxRetries) throw apiError;
+      if (retryAfterSeconds !== null && retryAfterSeconds * 1_000 > MAX_RETRY_DELAY_MS) {
+        throw apiError;
+      }
+
+      const backoffMs = retryAfterSeconds === null
+        ? Math.min(250 * (2 ** attempt), MAX_RETRY_DELAY_MS)
+        : retryAfterSeconds * 1_000;
+      try {
+        await delay(backoffMs, controller.signal);
+      } catch {
+        throw new ApiClientError({ code: timedOut ? "TIMEOUT" : "REQUEST_CANCELLED" });
+      }
+    }
+  } finally {
+    clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", cancelFromCaller);
+  }
+}

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-export function ApplyForm({ jobId, expectedVersion }: { jobId: string; expectedVersion: number }) {
+export function ApplyForm({ jobId }: { jobId: string }) {
   const [cvId, setCvId] = useState("cv-frontend-01");
   const [note, setNote] = useState("Tôi có kinh nghiệm phù hợp với yêu cầu vị trí. Mong được vào vòng tiếp theo.");
   const [pending, setPending] = useState(false);
@@ -15,7 +15,7 @@ export function ApplyForm({ jobId, expectedVersion }: { jobId: string; expectedV
     setMessage("");
     window.setTimeout(() => {
       setPending(false);
-      setMessage(`Đã tạo bản xem trước ứng tuyển cho ${jobId} với phiên bản v${expectedVersion}.`);
+      setMessage(`Đã tạo bản xem trước ứng tuyển cho .`);
     }, 450);
   }
 

@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { applicationStatusTransitions, CandidateApplication, getApplications } from "../../../lib/demoData";
+import { ErrorState, LoadingState } from "../../../components/ui";
+import { toUserMessage } from "../../../lib/apiClient";
+import { applicationStatusTransitions, CandidateApplication, getApplications } from "../../../lib/person2Api";
 
 function fmtDate(value?: string) {
   if (!value) return "-";
@@ -11,16 +13,30 @@ function fmtDate(value?: string) {
 export default function CandidateApplicationsPage() {
   const [applications, setApplications] = useState<CandidateApplication[]>([]);
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let live = true;
-    getApplications("cand-001").then((resp) => {
-      if (live) setApplications(resp.data);
-    });
+    const controller = new AbortController();
+    setLoading(true);
+    setLoadError("");
+    getApplications(undefined, controller.signal)
+      .then((response) => {
+        if (live) setApplications(response.data);
+      })
+      .catch((reason: unknown) => {
+        if (live) setLoadError(toUserMessage(reason));
+      })
+      .finally(() => {
+        if (live) setLoading(false);
+      });
     return () => {
       live = false;
+      controller.abort();
     };
-  }, []);
+  }, [reloadKey]);
 
   function onAction(app: CandidateApplication, action: string) {
     const nextError = `${app.id}: hành động ${action} đã gửi đi`;
@@ -78,6 +94,8 @@ export default function CandidateApplicationsPage() {
       <h1 className="page-title">Hồ sơ ứng tuyển của tôi</h1>
       <p className="help">Checklist machine-state và optimistic lock đang hiển thị trực quan trước khi gọi API.</p>
       {error ? <p className="notice">{error}</p> : null}
+      {loadError ? <ErrorState message={loadError} onRetry={() => setReloadKey((value) => value + 1)} /> : null}
+      {loading ? <LoadingState label="Đang tải hồ sơ ứng tuyển" /> : null}
       <section className="stack">
         {applications.map((app) => {
           const allowed = applicationStatusTransitions[app.status] || [];

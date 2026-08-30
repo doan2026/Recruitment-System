@@ -2,21 +2,39 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { EmptyState, LoadingState, Metric, PageHeader, StatusBadge } from "../../../components/ui";
-import { getRecruiterJobs, type Job, type JobStatus } from "../../../lib/demoData";
+import { EmptyState, ErrorState, LoadingState, Metric, PageHeader, StatusBadge } from "../../../components/ui";
+import { toUserMessage } from "../../../lib/apiClient";
+import { getRecruiterJobs, type Job, type JobStatus } from "../../../lib/person2Api";
 
 export default function RecruiterJobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | JobStatus>("ALL");
+  const [loadError, setLoadError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let active = true;
-    getRecruiterJobs().then((response) => { if (active) { setJobs(response.data); setLoading(false); } });
-    return () => { active = false; };
-  }, []);
+    const controller = new AbortController();
+    setLoading(true);
+    setLoadError("");
+    getRecruiterJobs(controller.signal)
+      .then((response) => {
+        if (active) setJobs(response.data);
+      })
+      .catch((reason: unknown) => {
+        if (active) setLoadError(toUserMessage(reason));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [reloadKey]);
 
   const visibleJobs = useMemo(() => jobs.filter((job) => {
     const matchesQuery = `${job.title} ${job.location} ${job.department}`.toLocaleLowerCase("vi").includes(query.toLocaleLowerCase("vi"));
@@ -58,9 +76,10 @@ export default function RecruiterJobsPage() {
 
       <section className="panel">
         <div className="list-meta"><strong>{visibleJobs.length} tin phù hợp</strong><span className="help">Dữ liệu được phân trang phía client theo hợp đồng /jobs/mine</span></div>
+        {loadError ? <ErrorState message={loadError} onRetry={() => setReloadKey((value) => value + 1)} /> : null}
         {loading ? <LoadingState /> : null}
-        {!loading && visibleJobs.length === 0 ? <EmptyState title="Không có tin phù hợp" description="Thử xóa từ khóa hoặc đổi trạng thái lọc." /> : null}
-        {!loading && visibleJobs.length ? (
+        {!loading && !loadError && visibleJobs.length === 0 ? <EmptyState title="Không có tin phù hợp" description="Thử xóa từ khóa hoặc đổi trạng thái lọc." /> : null}
+        {!loading && !loadError && visibleJobs.length ? (
           <div className="table-wrap">
             <table className="data-table">
               <caption>Danh sách tin tuyển dụng của TechVision</caption>

@@ -11,11 +11,14 @@
     "Scrollbar": "global-stylesheet",
     "CRUD": "route-and-api-adapter"
   },
-  "requiredCommands": ["build"],
+  "requiredCommands": ["test", "typecheck", "build"],
   "commands": {
+    "test": "npm run test",
+    "typecheck": "npm run typecheck",
     "build": "npm run build"
   },
   "evidence": {
+    "apiClient": "frontend/lib/apiClient.test.ts",
     "build": "frontend/.next/build-manifest.json"
   }
 }

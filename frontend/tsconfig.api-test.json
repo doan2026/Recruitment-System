@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "incremental": false,
+    "isolatedModules": false,
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": ".test-dist"
+  },
+  "include": ["lib/apiClientCore.ts", "lib/apiClient.test.ts"]
+}
