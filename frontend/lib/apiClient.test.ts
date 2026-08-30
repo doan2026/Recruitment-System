@@ -18,6 +18,10 @@ import {
   isOptimisticConflict,
   prepareConflictSnapshot,
 } from "./conflictRecovery";
+import {
+  normalizeCompanyCreate,
+  validateCompanyCreate,
+} from "./companyForm";
 import { createTransientRecoveryPlan } from "./transientRecovery";
 
 process.env.NEXT_PUBLIC_API_BASE_URL = "http://gateway.test";
@@ -272,4 +276,54 @@ test("missing Retry-After uses bounded local backoff and requires a manual retry
 test("ordinary errors do not enter transient recovery", () => {
   const error = new ApiClientError({ code: "COMPANY_UPDATE_CONFLICT", status: 409 });
   assert.equal(createTransientRecoveryPlan(error), null);
+});
+
+test("company onboarding validates every required backend field", () => {
+  const errors = validateCompanyCreate({
+    name: "A",
+    description: "",
+    industry: "",
+    size: "",
+    address: "",
+    website: "ftp://example.vn",
+    taxCode: "",
+  });
+  assert.deepEqual(Object.keys(errors).sort(), [
+    "address", "description", "industry", "name", "size", "taxCode", "website",
+  ]);
+});
+
+test("company onboarding accepts http website and trims the request body", () => {
+  const values = {
+    name: "  Công ty Mới  ",
+    description: "  Nền tảng tuyển dụng  ",
+    industry: "  Công nghệ  ",
+    size: "  51-200  ",
+    address: "  Hà Nội  ",
+    website: "  https://example.vn  ",
+    taxCode: "  0101234567  ",
+  };
+  assert.deepEqual(validateCompanyCreate(values), {});
+  assert.deepEqual(normalizeCompanyCreate(values), {
+    name: "Công ty Mới",
+    description: "Nền tảng tuyển dụng",
+    industry: "Công nghệ",
+    size: "51-200",
+    address: "Hà Nội",
+    website: "https://example.vn",
+    taxCode: "0101234567",
+  });
+});
+
+test("company onboarding omits an empty optional website", () => {
+  const normalized = normalizeCompanyCreate({
+    name: "Công ty Mới",
+    description: "Mô tả",
+    industry: "Công nghệ",
+    size: "10",
+    address: "Hà Nội",
+    website: "  ",
+    taxCode: "0101",
+  });
+  assert.equal(normalized.website, undefined);
 });

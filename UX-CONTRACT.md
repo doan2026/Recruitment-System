@@ -64,6 +64,7 @@
 | Operation | Trigger | Pending | Success destination | Success feedback | Failure recovery | Focus outcome | Source ref |
 |---|---|---|---|---|---|---|---|
 | Create job | Lưu bản nháp | khóa submit | ở form/list | status inline | giữ dữ liệu + lỗi field | field lỗi đầu tiên | P16.N2 Job |
+| Create company | Empty-state CTA | khóa submit | company profile | badge PENDING | giữ form + safe error | field lỗi đầu tiên | P16.N2 Company |
 | Edit company | Lưu thay đổi | khóa submit | ở company | status inline | reload/merge khi 409 | heading/form | P16.N2 Company |
 | Search | Nhập từ khóa | list loader | cùng route | result count | clear/retry | search/list heading | P16.N2 Search |
 | Upload | Bắt đầu tải | từng bước | ở form owner | step status | xin signature mới/retry | bước lỗi | P16.N2 Media handshake |

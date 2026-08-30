@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { ConflictRecoveryPanel } from "../../../components/ConflictRecoveryPanel";
-import { ErrorState, Metric, PageHeader, StatusBadge } from "../../../components/ui";
-import { toUserMessage } from "../../../lib/apiClient";
+import { EmptyState, ErrorState, LoadingState, Metric, PageHeader, StatusBadge } from "../../../components/ui";
+import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import {
   type ConflictSnapshot,
   isOptimisticConflict,
@@ -21,7 +21,7 @@ export default function RecruiterCompanyPage() {
   const [status, setStatus] = useState("");
   const [name, setName] = useState("");
   const [taxCode, setTaxCode] = useState("");
-  const [loadError, setLoadError] = useState("");
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [saveError, setSaveError] = useState("");
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState<ConflictSnapshot<CompanyDraft, Company> | null>(null);
@@ -30,7 +30,7 @@ export default function RecruiterCompanyPage() {
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
-    setLoadError("");
+    setLoadError(null);
     getCompany(controller.signal)
       .then((response) => {
         if (!active) return;
@@ -39,7 +39,7 @@ export default function RecruiterCompanyPage() {
         setTaxCode(response.data.taxCode);
       })
       .catch((reason: unknown) => {
-        if (active) setLoadError(toUserMessage(reason));
+        if (active) setLoadError(reason);
       });
     return () => {
       active = false;
@@ -122,10 +122,30 @@ export default function RecruiterCompanyPage() {
     setStatus(next === "confirmed" ? "Media đã xác nhận. Hãy gắn file vào hồ sơ khi lưu." : "");
   }
 
+  const needsOnboarding = loadError instanceof ApiClientError && loadError.code === "COMPANY_NOT_FOUND";
+
   if (!company) {
     return (
       <main>
-        {loadError ? <ErrorState message={loadError} onRetry={() => setReloadKey((value) => value + 1)} /> : <div className="loading-state" role="status">Đang tải hồ sơ công ty…</div>}
+        <PageHeader
+          eyebrow="RECRUITER · COMPANY"
+          title="Hồ sơ công ty"
+          description="Tạo danh tính doanh nghiệp trước khi đăng tin và mời thành viên."
+        />
+        {needsOnboarding ? (
+          <section className="panel">
+            <EmptyState
+              title="Bạn chưa có hồ sơ công ty"
+              description="Bắt đầu bằng thông tin pháp lý và doanh nghiệp. Hồ sơ mới sẽ ở trạng thái chờ xác minh."
+              href="/recruiter/company/new"
+              action="Tạo hồ sơ công ty"
+            />
+          </section>
+        ) : loadError ? (
+          <ErrorState message={toUserMessage(loadError)} onRetry={() => setReloadKey((value) => value + 1)} />
+        ) : (
+          <LoadingState label="Đang tải hồ sơ công ty" />
+        )}
       </main>
     );
   }

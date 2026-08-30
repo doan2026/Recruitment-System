@@ -6,6 +6,7 @@ import {
   requestApi,
   selectContractFields,
 } from "./apiClient";
+import type { CompanyCreateValues } from "./companyForm";
 import * as demo from "./demoData";
 
 export type {
@@ -197,6 +198,48 @@ function toApplication(value: BackendApplicationListItem): CandidateApplication 
 export async function getCompany(signal?: AbortSignal): Promise<ApiEnvelope<Company>> {
   if (isDemoPerson2Api) return normalizeDemo(demo.getCompany());
   const response = await requestApi<BackendCompany>(API_PATHS.companyMine, { privateData: true, signal });
+  return { ...response, data: toCompany(response.data) };
+}
+
+export async function createCompany(
+  input: Omit<CompanyCreateValues, "website"> & { website?: string },
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<Company>> {
+  const body = selectContractFields({
+    name: input.name,
+    description: input.description,
+    industry: input.industry,
+    size: input.size,
+    address: input.address,
+    website: input.website,
+    taxCode: input.taxCode,
+  }, ["name", "description", "industry", "size", "address", "website", "taxCode"]);
+
+  if (isDemoPerson2Api) {
+    const current = (await normalizeDemo(demo.getCompany())).data;
+    return {
+      data: {
+        ...current,
+        name: input.name,
+        shortName: input.name,
+        taxCode: input.taxCode,
+        verificationStatus: "PENDING",
+        rejectReason: undefined,
+        aggregateVersion: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      meta: null,
+    };
+  }
+
+  const response = await requestApi<BackendCompany>(API_PATHS.companies, {
+    method: "POST",
+    privateData: true,
+    signal,
+    body,
+    maxRetries: 0,
+  });
   return { ...response, data: toCompany(response.data) };
 }
 

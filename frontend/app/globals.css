@@ -364,6 +364,7 @@ textarea:focus-visible {
 }
 
 button:disabled { cursor: not-allowed; opacity: 0.5; }
+.resize-none { resize: none; }
 textarea { resize: none; }
 
 .app-shell { display: flex; min-height: 100vh; flex-direction: column; }
