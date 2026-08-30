@@ -246,6 +246,7 @@ export function normalizeError(code: string): string {
     JOB_SEARCH_CURSOR_STALE: "Danh sách việc làm đã thay đổi. Hãy tải lại từ đầu.",
     COMPANY_NOT_FOUND: "Tài khoản này chưa có hồ sơ công ty.",
     RECRUITER_ALREADY_HAS_COMPANY: "Tài khoản đã thuộc một công ty. Hãy mở hồ sơ hiện có.",
+    INVALID_RESUBMISSION_TRANSITION: "Trạng thái xác minh đã thay đổi. Hãy xem dữ liệu mới nhất.",
     RECOMMENDATION_CURSOR_STALE: "Danh sách gợi ý đã thay đổi. Hãy tải lại từ đầu.",
     COMPANY_UPDATE_CONFLICT: "Dữ liệu công ty vừa được người khác sửa. Hãy tải lại và so sánh thay đổi.",
     OFFER_EXPIRED: "Offer đã hết hạn. Hãy liên hệ nhà tuyển dụng.",

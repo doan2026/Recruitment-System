@@ -9,7 +9,11 @@ import {
   isOptimisticConflict,
   prepareConflictSnapshot,
 } from "../../../lib/conflictRecovery";
-import { type Company, getCompany, updateCompany } from "../../../lib/person2Api";
+import {
+  companyVerificationView,
+  isInvalidResubmissionTransition,
+} from "../../../lib/companyVerification";
+import { type Company, getCompany, resubmitCompanyVerification, updateCompany } from "../../../lib/person2Api";
 
 type UploadStep = "idle" | "signed" | "uploaded" | "confirmed";
 type CompanyDraft = { name: string; taxCode: string };
@@ -23,6 +27,8 @@ export default function RecruiterCompanyPage() {
   const [taxCode, setTaxCode] = useState("");
   const [loadError, setLoadError] = useState<unknown>(null);
   const [saveError, setSaveError] = useState("");
+  const [verificationError, setVerificationError] = useState("");
+  const [resubmitting, setResubmitting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState<ConflictSnapshot<CompanyDraft, Company> | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -92,6 +98,36 @@ export default function RecruiterCompanyPage() {
     }
   }
 
+  async function resubmitVerification() {
+    if (!company || company.verificationStatus !== "REJECTED" || resubmitting) return;
+    setResubmitting(true);
+    setVerificationError("");
+    setStatus("");
+    try {
+      const response = await resubmitCompanyVerification();
+      setCompany(response.data);
+      setName(response.data.name);
+      setTaxCode(response.data.taxCode);
+      setStatus("Đã gửi lại hồ sơ. Trạng thái đã chuyển về chờ xác minh.");
+    } catch (reason: unknown) {
+      if (isInvalidResubmissionTransition(reason)) {
+        try {
+          const latest = (await getCompany()).data;
+          setCompany(latest);
+          setName(latest.name);
+          setTaxCode(latest.taxCode);
+          setStatus("Trạng thái đã thay đổi ở nơi khác. Đã tải dữ liệu mới nhất.");
+        } catch (reloadReason: unknown) {
+          setVerificationError(toUserMessage(reloadReason));
+        }
+      } else {
+        setVerificationError(toUserMessage(reason));
+      }
+    } finally {
+      setResubmitting(false);
+    }
+  }
+
   function useServerCompany() {
     if (!conflict) return;
     setCompany(conflict.server);
@@ -150,7 +186,8 @@ export default function RecruiterCompanyPage() {
     );
   }
 
-  const tone = company.verificationStatus === "VERIFIED" ? "success" : company.verificationStatus === "REJECTED" ? "danger" : "warning";
+  const verification = companyVerificationView(company.verificationStatus, company.rejectReason);
+  const verificationNoticeClass = "notice notice-" + verification.tone;
 
   return (
     <main>
@@ -163,6 +200,7 @@ export default function RecruiterCompanyPage() {
 
       {status ? <p className="notice notice-success" role="status">{status}</p> : null}
       {saveError ? <p className="notice notice-danger" role="alert"><strong>Chưa lưu được hồ sơ.</strong> {saveError}</p> : null}
+      {verificationError ? <p className="notice notice-danger" role="alert"><strong>Chưa gửi lại được hồ sơ.</strong> {verificationError}</p> : null}
 
       <section className="metric-grid" aria-label="Tóm tắt công ty">
         <Metric label="Trạng thái" value={company.verificationStatus} detail="Xác minh doanh nghiệp" />
@@ -178,13 +216,30 @@ export default function RecruiterCompanyPage() {
               <h2>{company.name}</h2>
               <p className="help">MST {company.taxCode} · Chủ sở hữu {company.ownerName}</p>
             </div>
-            <StatusBadge tone={tone}>{company.verificationStatus}</StatusBadge>
+            <StatusBadge tone={verification.tone}>{company.verificationStatus}</StatusBadge>
           </div>
           <div className="notice">
             <strong>Hồ sơ pháp lý</strong>
             <p className="help">Đổi tên hoặc mã số thuế khi đã xác minh sẽ đưa công ty về trạng thái chờ duyệt.</p>
           </div>
-          {company.rejectReason ? <p className="notice notice-danger"><strong>Lý do từ chối:</strong> {company.rejectReason}</p> : null}
+          <div className={verificationNoticeClass} aria-live="polite">
+            <strong>{verification.title}</strong>
+            <p>{verification.description}</p>
+            {verification.rejectReason ? (
+              <p><strong>Lý do từ chối:</strong> {verification.rejectReason}</p>
+            ) : null}
+            {verification.canResubmit ? (
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={resubmitVerification}
+                disabled={resubmitting}
+                aria-busy={resubmitting}
+              >
+                {resubmitting ? "Đang gửi lại…" : "Gửi lại để xác minh"}
+              </button>
+            ) : null}
+          </div>
 
           {conflict ? (
             <ConflictRecoveryPanel

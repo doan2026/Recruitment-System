@@ -201,6 +201,32 @@ export async function getCompany(signal?: AbortSignal): Promise<ApiEnvelope<Comp
   return { ...response, data: toCompany(response.data) };
 }
 
+export async function resubmitCompanyVerification(
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<Company>> {
+  if (isDemoPerson2Api) {
+    const current = (await normalizeDemo(demo.getCompany())).data;
+    return {
+      data: {
+        ...current,
+        verificationStatus: "PENDING",
+        rejectReason: undefined,
+        aggregateVersion: current.aggregateVersion + 1,
+        updatedAt: new Date().toISOString(),
+      },
+      meta: null,
+    };
+  }
+
+  const response = await requestApi<BackendCompany>(`${API_PATHS.companyMine}/submit-verification`, {
+    method: "POST",
+    privateData: true,
+    signal,
+    maxRetries: 0,
+  });
+  return { ...response, data: toCompany(response.data) };
+}
+
 export async function createCompany(
   input: Omit<CompanyCreateValues, "website"> & { website?: string },
   signal?: AbortSignal,

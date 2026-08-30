@@ -186,7 +186,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - **Công nghệ:** Next.js 14, React 18, TypeScript.
 - **Chức năng chính:** auth UI; hồ sơ/CV; công ty; job search/detail; apply/bookmark; recruiter pipeline/offer/dashboard; interview/video/chat/notification; admin console.
 - **Phụ thuộc:** API Gateway và hợp đồng API của toàn bộ backend.
-- **Trạng thái:** 🟡 React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter `demo|gateway` đã nối các read flow, cập nhật Company và tạo Company qua Gateway; các nền tảng safe error, conflict/transient recovery và private session boundary có unit test. `404 COMPANY_NOT_FOUND` đã thành onboarding thay vì lỗi. Auth UI thật, các mutation còn lại và E2E vẫn pending; P16.N2 hiện 8/52.
+- **Trạng thái:** 🟡 React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter `demo|gateway` đã nối các read flow, cập nhật Company và tạo Company qua Gateway; các nền tảng safe error, conflict/transient recovery và private session boundary có unit test. `404 COMPANY_NOT_FOUND` đã thành onboarding thay vì lỗi. Auth UI thật, các mutation còn lại và E2E vẫn pending; P16.N2 hiện 9/52.
 
 ## T14 — Tích hợp, kiểm thử và vận hành
 
@@ -1336,11 +1336,11 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [ ] Admin dashboard, company/job approval, user/report management và export.
 - [ ] Loading/error/empty state, responsive UI, accessibility và E2E test.
 
-### P16.N2 — FE tiêu thụ bốn service của Người 2 (8/52 tích hợp API thật; baseline UI đã có)
+### P16.N2 — FE tiêu thụ bốn service của Người 2 (9/52 tích hợp API thật; baseline UI đã có)
 
 > Bổ sung ngày 30/08/2026 theo yêu cầu. Đây là danh sách chi tiết task FE **chưa làm**, nhưng **chỉ giới hạn ở phần tiêu thụ bốn service của Người 2** (Company, Job & Search, Application, AI chatbot). FE của Auth, Profile, Media, Interview, Notification, Admin và Chat **không** nằm trong danh sách này. Bản thân việc code FE vẫn **thuộc Người 3** — mục này ghi ra để thấy backend của Người 2 đang chờ FE làm những gì, không phải chuyển việc sang Người 2.
 >
-> **Hiện trạng FE cập nhật 30/08/2026:** UI Người 2 hiện có 9 route chính. Các task nền tảng đã thêm adapter `demo|gateway`, read flow thật, cập nhật Company với recovery `409`, shared recovery `429/503` và private session boundary. Company onboarding đã nối `POST /companies/`, validate đúng DTO và đổi `404 COMPANY_NOT_FOUND` thành CTA tạo hồ sơ. Access token chỉ ở memory; request private luôn no-store và đổi account/logout/401 xóa state. Riêng offer hiển thị rõ API chưa có endpoint đọc. Production phải đặt `NEXT_PUBLIC_API_MODE=gateway` và Auth phải gọi `setApiSession`. Chỉ checkbox có implementation + test trực tiếp mới được đánh dấu.
+> **Hiện trạng FE cập nhật 30/08/2026:** UI Người 2 hiện có 9 route chính. Các task nền tảng đã thêm adapter `demo|gateway`, read flow thật, cập nhật Company với recovery `409`, shared recovery `429/503` và private session boundary. Company onboarding đã nối `POST /companies/`, validate đúng DTO và đổi `404 COMPANY_NOT_FOUND` thành CTA tạo hồ sơ. Máy trạng thái xác minh đã nối resubmit thật, chỉ mở action ở `REJECTED` và reload đúng một lần khi trạng thái đổi ở tab khác. Access token chỉ ở memory; request private luôn no-store và đổi account/logout/401 xóa state. Riêng offer hiển thị rõ API chưa có endpoint đọc. Production phải đặt `NEXT_PUBLIC_API_MODE=gateway` và Auth phải gọi `setApiSession`. Chỉ checkbox có implementation + test trực tiếp mới được đánh dấu.
 
 **Bàn giao baseline theo task:**
 
@@ -1356,6 +1356,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [x] Thêm shared transient recovery cho `429/503` và nối vào `/jobs/mine`: phân biệt server `Retry-After` với local backoff 2–30 giây, auto-retry tối đa một lần, khóa duplicate retry; 13/13 unit test PASS.
 - [x] Thêm `ApiSessionBoundary` ở root và `setApiSession({ token?, accountId })`: xóa toàn bộ React page state khi đổi tài khoản/logout/401, giữ state khi refresh token cùng account, hỗ trợ cookie HttpOnly; 16/16 unit test PASS.
 - [x] Thêm Company onboarding: `404 COMPANY_NOT_FOUND` hiển thị empty state, route `/recruiter/company/new` gọi `POST /companies/`, validate/focus lỗi đúng DTO và xử lý membership conflict; 19/19 unit test PASS.
+- [x] Thêm máy trạng thái xác minh Company và nối `POST /companies/me/submit-verification`: chỉ hiện lý do/nút gửi lại ở `REJECTED`, chuyển badge về `PENDING`, xử lý `409 INVALID_RESUBMISSION_TRANSITION` bằng một lần tải lại và không retry mutation; 22/22 unit test PASS.
 - [ ] Nối các màn trên với API Gateway/Auth session thật, hoàn thiện error mapping/409/429/503 và thêm component/E2E test trước khi đóng checkbox endpoint bên dưới.
 >
 > Danh sách bám theo **48 endpoint user-facing có thật**, khảo sát trực tiếp từ code controller và đối chiếu với `infra/nginx/nginx.conf` — không suy đoán từ tài liệu.
@@ -1374,7 +1375,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 #### Company Service — 16 endpoint
 
 - [x] Màn tạo công ty + empty-state onboarding: `404 COMPANY_NOT_FOUND` của `GET /companies/me` được render thành CTA sang `/recruiter/company/new`; form gọi `POST /companies/`, giữ dữ liệu khi lỗi và chuyển về hồ sơ sau khi tạo, không hiển thị màn hình lỗi kỹ thuật.
-- [ ] Máy trạng thái xác minh `PENDING → VERIFIED | REJECTED → (gửi lại) → PENDING`: hiện `rejectReason`, chỉ mở nút gửi lại khi `REJECTED`, xử lý `409 INVALID_RESUBMISSION_TRANSITION` khi trạng thái đã đổi ở tab khác.
+- [x] Máy trạng thái xác minh `PENDING → VERIFIED | REJECTED → (gửi lại) → PENDING`: hiện `rejectReason` và action chỉ ở `REJECTED`; `POST /companies/me/submit-verification` cập nhật ngay badge về `PENDING`; `409 INVALID_RESUBMISSION_TRANSITION` tải lại resource đúng một lần, không retry mutation.
 - [ ] Dialog cảnh báo chuyển trạng thái ngầm: sửa `name` hoặc `taxCode` của công ty đang `VERIFIED` qua `PUT /companies/:id` sẽ **tự đưa công ty về `PENDING`** và xoá `rejectReason`. Backend không hỏi xác nhận — FE phải tự hỏi và cập nhật lại badge.
 - [ ] Handshake tải media ba bước: `POST /media/signature` (kèm `Idempotency-Key` tự sinh) → upload thẳng lên `uploadUrl` → `POST /media/confirm` → rồi mới `PUT /companies/:id` với `fileId`. FE tự kiểm `maxBytes`/`allowedFormats`, đếm ngược `expiresAt`, xin chữ ký mới khi hết hạn và dọn `fileId` đã confirm nhưng chưa gắn.
 - [ ] Ngữ nghĩa **replace-all** của trường media trong `PUT`: mỗi lần lưu phải gửi lại toàn bộ thư viện kèm `sortOrder` (kéo thả để sắp xếp, xoá ảnh = bỏ khỏi mảng); tự kiểm tối đa 10 IMAGE + 1 VIDEO, không trùng `fileId` kể cả trùng logo, không gửi đồng thời `logo` với `removeLogo=true`.
