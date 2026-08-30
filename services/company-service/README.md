@@ -2,6 +2,37 @@
 
 This NestJS service owns company profiles and company membership data.
 
+## Metrics and SLO measurement
+
+Availability and latency SLOs need numbers that outlive a single request, and
+the service had none. `GET /metrics` now serves Prometheus exposition for every
+request the service handles.
+
+```bash
+curl -H "X-Internal-Api-Key: $INTERNAL_API_KEY_METRICS" \
+  http://company-service:3000/metrics
+```
+
+The scrape has its own scoped credential. It carries no user, so the guard
+checks a key rather than a token, compares it in constant time, and rejects a
+duplicated header so a proxy and a caller cannot disagree about the credential.
+
+No identifier reaches a label. A Company path is *templated* rather than
+dropped, so `/{id}/members` and `/{id}/media/confirm` stay useful series
+without ever labelling by Company id — and a path carrying two identifiers,
+like `/{id}/members/{id}`, loses both. Every other unknown path collapses to
+`other`, so scanning cannot grow the registry. Requests are recorded by
+middleware, so a 404 flood is visible as an availability event instead of
+disappearing before any handler runs.
+
+| Metric | Type | Labels |
+| --- | --- | --- |
+| `company_http_requests_total` | counter | `route`, `status` (`2xx`/`4xx`/`5xx`) |
+| `company_http_request_duration_seconds` | histogram | `route` |
+
+This makes SLOs measurable. It is not a monitoring deployment: scraping,
+dashboards, alert rules and error budgets remain infrastructure work.
+
 ## C01 profile, C02 verification and C03 member-management scope
 
 | Internal route | Gateway route | Access |
