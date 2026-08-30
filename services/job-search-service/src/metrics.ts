@@ -4,14 +4,14 @@ import {
   ExecutionContext,
   Get,
   HttpStatus,
-  Header,
   Injectable,
   NestMiddleware,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'node:crypto';
-import { ApiException } from './common';
+import { ApiException, Public } from './common';
 
 /** The narrow slice of the HTTP objects this module needs. */
 interface MetricsRequest {
@@ -42,6 +42,12 @@ const KNOWN_ROUTES = new Set([
   '/recommended',
   '/stats/active',
   '/details/bulk',
+  '/',
+  '/mine',
+  '/pending',
+  '/reindex',
+  '/reindex/failures',
+  '/reindex/failures/retry',
 ]);
 const OTHER_ROUTE = 'other';
 
@@ -49,9 +55,22 @@ export const normalizeRoute = (path: string): string => {
   if (KNOWN_ROUTES.has(path)) return path;
   // A job path carries an identifier, so it is templated rather than dropped:
   // /{id} and /{id}/exists stay useful without ever labelling by job id.
-  if (/^\/[0-9a-f-]{36}\/exists$/i.test(path)) return '/{id}/exists';
-  if (/^\/[0-9a-f-]{36}$/i.test(path)) return '/{id}';
-  return OTHER_ROUTE;
+  const templated = path.replace(
+    /\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
+    '/{id}',
+  );
+  // Write and recruiter routes are named too, so a publish or an approval does
+  // not share the `other` bucket with 404 scans and become invisible.
+  const KNOWN_TEMPLATES = new Set([
+    '/{id}',
+    '/{id}/exists',
+    '/{id}/publish',
+    '/{id}/close',
+    '/{id}/approve',
+    '/{id}/reject',
+    '/{id}/recommended-candidates',
+  ]);
+  return KNOWN_TEMPLATES.has(templated) ? templated : OTHER_ROUTE;
 };
 
 export const statusClass = (status: number): string => {
@@ -150,9 +169,19 @@ export class MetricsGuard implements CanActivate {
     // to read Job availability has no business reading the request rates and
     // latency distribution of the whole deployment.
     const expected = this.config.get<string>('INTERNAL_API_KEY_METRICS');
-    if (!expected || expected.trim().length < 32) {
+    // The placeholder check matters as much as the length one: the value
+    // shipped in .env.example is long enough to pass a bare length test, so
+    // without this a deployment that never replaced it would accept a
+    // credential published in the repository.
+    if (
+      !expected ||
+      expected !== expected.trim() ||
+      expected.length < 32 ||
+      expected.toLowerCase().includes('replace-with')
+    ) {
       throw new Error(
-        'INTERNAL_API_KEY_METRICS must be a key of at least 32 bytes',
+        'INTERNAL_API_KEY_METRICS must be a non-placeholder key of at ' +
+          'least 32 bytes',
       );
     }
     const header = context.switchToHttp().getRequest()
@@ -180,15 +209,30 @@ export class MetricsGuard implements CanActivate {
   }
 }
 
+/** The narrow slice of the response object the scrape needs. */
+interface ScrapeResponse {
+  set(field: string, value: string): unknown;
+  status(code: number): unknown;
+  send(body: string): unknown;
+}
+
 @Controller('metrics')
 export class MetricsController {
   constructor(private readonly registry: MetricsRegistry) {}
 
+  // `@Public()` only tells the global AuthGuard to step aside: a scrape carries
+  // no user token. MetricsGuard below still requires the scoped key, so the
+  // endpoint is not public in any meaningful sense.
+  @Public()
   @Get()
   @UseGuards(MetricsGuard)
-  @Header('Content-Type', 'text/plain; version=0.0.4; charset=utf-8')
-  @Header('Cache-Control', 'no-store')
-  scrape(): string {
-    return this.registry.render();
+  scrape(@Res() response: ScrapeResponse): void {
+    // Written straight to the response: the global ApiResponseInterceptor
+    // wraps any returned value in a {data, meta} envelope, which is not valid
+    // Prometheus exposition and no scraper would parse it.
+    response.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+    response.set('Cache-Control', 'no-store');
+    response.status(200);
+    response.send(this.registry.render());
   }
 }

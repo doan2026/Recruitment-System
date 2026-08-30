@@ -147,6 +147,19 @@ describe('metrics guard', () => {
     ).toThrow();
   });
 
+  it('refuses the placeholder shipped in .env.example', () => {
+    // It is 42 bytes, so a bare length check would have accepted a credential
+    // that is published in this repository.
+    const placeholder = 'replace-with-a-distinct-metrics-scrape-key';
+
+    expect(placeholder.length).toBeGreaterThanOrEqual(32);
+    expect(() =>
+      new MetricsGuard(config(placeholder)).canActivate(
+        context({ 'x-internal-api-key': placeholder }),
+      ),
+    ).toThrow('non-placeholder');
+  });
+
   it('refuses to run without a configured key of usable length', () => {
     expect(() =>
       new MetricsGuard(config(undefined)).canActivate(context({})),

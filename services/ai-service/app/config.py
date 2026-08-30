@@ -34,6 +34,7 @@ class Settings:
     chat_session_lock_seconds: int = 30
     chat_max_concurrent_requests: int = 8
     chat_recommendation_tool_enabled: bool = False
+    internal_api_key_metrics: str = ""
     recommendation_rate_limit_enabled: bool = False
     recommendation_redis_key_secret: str = ""
     recommendation_rate_window_seconds: int = 60
@@ -141,6 +142,10 @@ class Settings:
                 "CHAT_RECOMMENDATION_TOOL_ENABLED",
                 default=False,
             ),
+            internal_api_key_metrics=os.getenv(
+                "INTERNAL_API_KEY_METRICS",
+                "",
+            ).strip(),
             recommendation_rate_limit_enabled=_boolean(
                 "RECOMMENDATION_RATE_LIMIT_ENABLED",
                 default=False,
@@ -230,6 +235,7 @@ class Settings:
             raise RuntimeError(
                 "INTERNAL_API_KEY_JOB_SEARCH_CANDIDATES must be distinct"
             )
+        self._validate_metrics_key()
         if self.chat_enabled:
             self._validate_chat()
         if self.recommendation_rate_limit_enabled:
@@ -261,6 +267,34 @@ class Settings:
             raise RuntimeError(
                 "RECOMMENDATION_GLOBAL_RATE_LIMIT must not be below "
                 "RECOMMENDATION_SUBJECT_RATE_LIMIT"
+            )
+
+    def _validate_metrics_key(self) -> None:
+        """A scrape credential must not double as a business credential.
+
+        Reusing ``INTERNAL_API_KEY`` would let anything allowed to call
+        ``/match`` also read the request rates and latency distribution of the
+        whole deployment, which is the reuse the other three services of this
+        owner explicitly refuse.
+
+        The key is optional: with none configured the scrape simply has no
+        valid credential and always answers 401. That keeps observability
+        opt-in rather than forcing every existing deployment to invent a
+        secret before it can start.
+        """
+        if not self.internal_api_key_metrics:
+            return
+        self._validate_secret(
+            "INTERNAL_API_KEY_METRICS",
+            self.internal_api_key_metrics,
+        )
+        if self.internal_api_key_metrics in {
+            self.internal_api_key,
+            self.internal_api_key_job_search,
+            self.internal_api_key_job_search_candidates,
+        }:
+            raise RuntimeError(
+                "INTERNAL_API_KEY_METRICS must differ from the other internal keys"
             )
 
     def _validate_chat(self) -> None:

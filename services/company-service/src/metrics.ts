@@ -4,14 +4,15 @@ import {
   ExecutionContext,
   Get,
   HttpStatus,
-  Header,
   Injectable,
   NestMiddleware,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'node:crypto';
 import { ApiException } from './common/errors/api-exception';
+import { Public } from './common/auth/public.decorator';
 
 /** The narrow slice of the HTTP objects this module needs. */
 interface MetricsRequest {
@@ -162,9 +163,19 @@ export class MetricsGuard implements CanActivate {
     // to read Company data has no business reading the request rates and
     // latency distribution of the whole deployment.
     const expected = this.config.get<string>('INTERNAL_API_KEY_METRICS');
-    if (!expected || expected.trim().length < 32) {
+    // The placeholder check matters as much as the length one: the value
+    // shipped in .env.example is long enough to pass a bare length test, so
+    // without this a deployment that never replaced it would accept a
+    // credential published in the repository.
+    if (
+      !expected ||
+      expected !== expected.trim() ||
+      expected.length < 32 ||
+      expected.toLowerCase().includes('replace-with')
+    ) {
       throw new Error(
-        'INTERNAL_API_KEY_METRICS must be a key of at least 32 bytes',
+        'INTERNAL_API_KEY_METRICS must be a non-placeholder key of at ' +
+          'least 32 bytes',
       );
     }
     const header = context.switchToHttp().getRequest()
@@ -192,15 +203,30 @@ export class MetricsGuard implements CanActivate {
   }
 }
 
+/** The narrow slice of the response object the scrape needs. */
+interface ScrapeResponse {
+  set(field: string, value: string): unknown;
+  status(code: number): unknown;
+  send(body: string): unknown;
+}
+
 @Controller('metrics')
 export class MetricsController {
   constructor(private readonly registry: MetricsRegistry) {}
 
+  // `@Public()` only tells the global JWT guard to step aside: a scrape carries
+  // no user token. MetricsGuard below still requires the scoped key, so the
+  // endpoint is not public in any meaningful sense.
+  @Public()
   @Get()
   @UseGuards(MetricsGuard)
-  @Header('Content-Type', 'text/plain; version=0.0.4; charset=utf-8')
-  @Header('Cache-Control', 'no-store')
-  scrape(): string {
-    return this.registry.render();
+  scrape(@Res() response: ScrapeResponse): void {
+    // Written straight to the response: the global ApiResponseInterceptor
+    // wraps any returned value in a {data, meta} envelope, which is not valid
+    // Prometheus exposition and no scraper would parse it.
+    response.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+    response.set('Cache-Control', 'no-store');
+    response.status(200);
+    response.send(this.registry.render());
   }
 }
