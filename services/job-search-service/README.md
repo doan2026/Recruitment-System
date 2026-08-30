@@ -30,6 +30,39 @@ Creating a job always stores `DRAFT`. Company membership and VERIFIED status
 are resolved through `GET /companies/by-user/:userId` with the caller JWT.
 OWNER manages every company job; MEMBER only manages jobs they created.
 
+## Metrics and SLO measurement
+
+Availability and latency SLOs need numbers that outlive a single request, and
+the service had none. `GET /metrics` now serves Prometheus exposition for every
+request the service handles.
+
+```bash
+curl -H "X-Internal-Api-Key: $INTERNAL_API_KEY_METRICS" \
+  http://job-search-service:3000/metrics
+```
+
+The scrape has its own scoped credential, deliberately distinct from
+`INTERNAL_API_KEY`: a service authorised to read Job availability has no
+business reading the request rates and latency distribution of the whole
+deployment. It carries no user, so the guard checks a key rather than a token,
+compares it in constant time, and rejects a duplicated header so a proxy and a
+caller cannot disagree about the credential.
+
+No identifier reaches a label. A Job path is *templated* rather than dropped,
+so `/{id}` and `/{id}/exists` stay useful series without ever labelling by Job
+id, and every other unknown path collapses to `other` — three hundred distinct
+scanned paths still produce one series. Requests are recorded by middleware, so
+a 404 flood is visible as an availability event instead of disappearing before
+any handler runs.
+
+| Metric | Type | Labels |
+| --- | --- | --- |
+| `job_http_requests_total` | counter | `route`, `status` (`2xx`/`4xx`/`5xx`) |
+| `job_http_request_duration_seconds` | histogram | `route` |
+
+This makes SLOs measurable. It is not a monitoring deployment: scraping,
+dashboards, alert rules and error budgets remain infrastructure work.
+
 ## Access-token verification
 
 Every non-public, non-internal route accepts exactly one `Authorization` header
