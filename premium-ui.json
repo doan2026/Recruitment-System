@@ -1,0 +1,21 @@
+{
+  "profile": "product-admin",
+  "sourceRoots": ["frontend/app", "frontend/components", "frontend/lib"],
+  "locale": "vi-VN",
+  "canonicalMap": "UX-CONTRACT.md",
+  "requiredCapabilities": ["Select/Listbox", "Date", "Form", "Scrollbar", "CRUD"],
+  "ownership": {
+    "Select/Listbox": "native",
+    "Date": "native",
+    "Form": "shared-field-policy",
+    "Scrollbar": "global-stylesheet",
+    "CRUD": "route-and-api-adapter"
+  },
+  "requiredCommands": ["build"],
+  "commands": {
+    "build": "npm run build"
+  },
+  "evidence": {
+    "build": "frontend/.next/build-manifest.json"
+  }
+}

@@ -186,7 +186,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - **Công nghệ:** Next.js 14, React 18, TypeScript.
 - **Chức năng chính:** auth UI; hồ sơ/CV; công ty; job search/detail; apply/bookmark; recruiter pipeline/offer/dashboard; interview/video/chat/notification; admin console.
 - **Phụ thuộc:** API Gateway và hợp đồng API của toàn bộ backend.
-- **Trạng thái:** mới có scaffold — thư mục `frontend/` đúng **8 file** (Next.js 14.2.5, React 18.3.1, TypeScript 5.5.4), `app/page.tsx` in một dòng “Platform base is running.”, `app/layout.tsx` rỗng. Chưa có route, component, API client, state management, lint hay test. **0/59 checkbox P16**; riêng phần tiêu thụ bốn service của Người 2 được liệt kê chi tiết ở mục P16.N2 (**0/52**).
+- **Trạng thái:** 🟡 Đã có baseline React/Next.js cho phạm vi Người 2: design system theo Stitch, shared UI/API envelope, trang chủ, Candidate job search/detail/apply/application/offer và Recruiter company/job list/create. Production build PASS. Các màn hiện dùng demo adapter để khóa UX/state; chưa nối access token/API Gateway thật nên **chưa đóng checkbox tích hợp API** trong P16.N2.
 
 ## T14 — Tích hợp, kiểm thử và vận hành
 
@@ -1336,11 +1336,20 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [ ] Admin dashboard, company/job approval, user/report management và export.
 - [ ] Loading/error/empty state, responsive UI, accessibility và E2E test.
 
-### P16.N2 — FE tiêu thụ bốn service của Người 2 (0/52)
+### P16.N2 — FE tiêu thụ bốn service của Người 2 (0/52 tích hợp API thật; baseline UI đã có)
 
 > Bổ sung ngày 30/08/2026 theo yêu cầu. Đây là danh sách chi tiết task FE **chưa làm**, nhưng **chỉ giới hạn ở phần tiêu thụ bốn service của Người 2** (Company, Job & Search, Application, AI chatbot). FE của Auth, Profile, Media, Interview, Notification, Admin và Chat **không** nằm trong danh sách này. Bản thân việc code FE vẫn **thuộc Người 3** — mục này ghi ra để thấy backend của Người 2 đang chờ FE làm những gì, không phải chuyển việc sang Người 2.
 >
-> **Hiện trạng FE:** thư mục `frontend/` có đúng **8 file** — scaffold Next.js 14.2.5 + React 18.3.1 + TypeScript 5.5.4; `app/page.tsx` in một dòng "Platform base is running.", `app/layout.tsx` rỗng. Chưa có route, component, API client, state management, lint hay test; `package.json` chỉ có ba script `dev`/`build`/`start`.
+> **Hiện trạng FE cập nhật 30/08/2026:** task `feature/frontend/person2-foundation` đã thay scaffold bằng baseline React/Next.js theo bộ Stitch Professional Career Hub. Đã có token/CSS responsive, navigation, shared state components, demo API envelope và 8 route chính: `/`, `/candidate/jobs`, `/candidate/jobs/[jobId]`, `/candidate/applications`, `/candidate/offers/[offerId]`, `/recruiter/company`, `/recruiter/jobs`, `/recruiter/jobs/new`. `npm run build` PASS. Vì dữ liệu hiện còn đi qua demo adapter, checklist bên dưới chỉ được đánh dấu khi route đã nối API Gateway thật và có test tương ứng.
+
+**Bàn giao baseline theo task:**
+
+- [x] Khóa design context bằng `DESIGN.md`, `UX-CONTRACT.md` và runtime token trong `frontend/app/globals.css`, bám palette xanh, Manrope/Inter, tonal layer, card 16px và responsive layout của Stitch.
+- [x] Tạo shared UI state cho page header, badge, metric, loading và empty state; global scrollbar, focus-visible, reduced-motion và semantic table baseline.
+- [x] Dựng Candidate UI cho job search hai mode, job detail/apply, application state và offer response bằng dữ liệu demo có kiểu TypeScript.
+- [x] Dựng Recruiter UI cho company verification/media handshake, job list/filter/state action và form tạo job có validation phía client.
+- [x] Sửa import, syntax API client và điều kiện dữ liệu demo; production build Next.js PASS.
+- [ ] Nối các màn trên với API Gateway/Auth session thật, hoàn thiện error mapping/409/429/503 và thêm component/E2E test trước khi đóng checkbox endpoint bên dưới.
 >
 > Danh sách bám theo **48 endpoint user-facing có thật**, khảo sát trực tiếp từ code controller và đối chiếu với `infra/nginx/nginx.conf` — không suy đoán từ tài liệu.
 
