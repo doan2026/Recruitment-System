@@ -574,3 +574,14 @@ textarea { resize: none; }
   * { scrollbar-color: auto; }
   .badge, .btn, .panel, .card, .feature-card { border: 1px solid CanvasText; }
 }
+.confirmation-dialog { width: min(520px, calc(100vw - 32px)); max-width: none; padding: 0; border: 0; border-radius: var(--radius-card); background: white; color: var(--text); box-shadow: 0 24px 70px rgba(15, 35, 22, 0.24); }
+.confirmation-dialog::backdrop { background: rgba(14, 31, 20, 0.58); backdrop-filter: blur(2px); }
+.confirmation-dialog-card { padding: 24px; }
+.confirmation-dialog-card h2 { margin: 4px 0 10px; }
+.confirmation-dialog-card > p:not(.eyebrow) { margin: 0 0 16px; color: var(--muted); line-height: 1.6; }
+.confirmation-dialog-card .notice { margin: 0; }
+.confirmation-dialog-actions { justify-content: flex-end; margin-top: 22px; }
+
+@media (max-width: 520px) {
+  .confirmation-dialog-actions .btn { width: 100%; justify-content: center; }
+}

@@ -25,6 +25,7 @@ import {
 import {
   companyVerificationView,
   isInvalidResubmissionTransition,
+  requiresCompanyReverification,
 } from "./companyVerification";
 import { createTransientRecoveryPlan } from "./transientRecovery";
 
@@ -359,4 +360,25 @@ test("resubmission conflict is recognized by exact code and status", () => {
     code: "INVALID_RESUBMISSION_TRANSITION",
     status: 400,
   })), false);
+});
+
+test("verified legal identity changes require explicit reverification warning", () => {
+  const company = {
+    verificationStatus: "VERIFIED" as const,
+    name: "Công ty A",
+    taxCode: "0101",
+  };
+
+  assert.equal(requiresCompanyReverification(company, {
+    name: "Công ty B",
+    taxCode: "0101",
+  }), true);
+  assert.equal(requiresCompanyReverification(company, {
+    name: "  Công ty A ",
+    taxCode: "0101",
+  }), false);
+  assert.equal(requiresCompanyReverification({
+    ...company,
+    verificationStatus: "REJECTED",
+  }, { name: "Công ty B", taxCode: "0202" }), false);
 });

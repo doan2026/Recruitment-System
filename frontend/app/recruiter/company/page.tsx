@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ConflictRecoveryPanel } from "../../../components/ConflictRecoveryPanel";
+import { ConfirmationDialog } from "../../../components/ConfirmationDialog";
 import { EmptyState, ErrorState, LoadingState, Metric, PageHeader, StatusBadge } from "../../../components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import {
@@ -12,6 +13,7 @@ import {
 import {
   companyVerificationView,
   isInvalidResubmissionTransition,
+  requiresCompanyReverification,
 } from "../../../lib/companyVerification";
 import { type Company, getCompany, resubmitCompanyVerification, updateCompany } from "../../../lib/person2Api";
 
@@ -30,6 +32,7 @@ export default function RecruiterCompanyPage() {
   const [verificationError, setVerificationError] = useState("");
   const [resubmitting, setResubmitting] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [confirmationDraft, setConfirmationDraft] = useState<CompanyDraft | null>(null);
   const [conflict, setConflict] = useState<ConflictSnapshot<CompanyDraft, Company> | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -53,12 +56,8 @@ export default function RecruiterCompanyPage() {
     };
   }, [reloadKey]);
 
-  async function saveCompany(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!company || !name.trim() || !taxCode.trim() || saving) return;
-    const draft = { name: name.trim(), taxCode: taxCode.trim() };
-    const needsReview = company.verificationStatus === "VERIFIED" &&
-      (draft.name !== company.name || draft.taxCode !== company.taxCode);
+  async function persistCompany(draft: CompanyDraft, needsReview: boolean) {
+    if (!company || saving) return;
     setSaving(true);
     setSaveError("");
     setStatus("");
@@ -96,6 +95,23 @@ export default function RecruiterCompanyPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function saveCompany(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!company || !name.trim() || !taxCode.trim() || saving) return;
+    const draft = { name: name.trim(), taxCode: taxCode.trim() };
+    if (requiresCompanyReverification(company, draft)) {
+      setConfirmationDraft(draft);
+      return;
+    }
+    void persistCompany(draft, false);
+  }
+
+  async function confirmVerifiedEdit() {
+    if (!confirmationDraft || saving) return;
+    await persistCompany(confirmationDraft, true);
+    setConfirmationDraft(null);
   }
 
   async function resubmitVerification() {
@@ -196,6 +212,16 @@ export default function RecruiterCompanyPage() {
         title="Hồ sơ công ty"
         description="Quản lý danh tính doanh nghiệp, trạng thái xác minh và thư viện hình ảnh."
         action={<button className="btn btn-primary" type="button" onClick={() => setEditing((value) => !value)}>{editing ? "Đóng chỉnh sửa" : "Chỉnh sửa hồ sơ"}</button>}
+      />
+
+      <ConfirmationDialog
+        open={confirmationDraft !== null}
+        title="Thay đổi này cần xác minh lại"
+        description="Bạn đang sửa tên hoặc mã số thuế của công ty đã được xác minh. Khi lưu, trạng thái công ty sẽ chuyển từ VERIFIED về PENDING và lý do từ chối cũ sẽ được xóa."
+        confirmLabel="Xác nhận và lưu"
+        pending={saving}
+        onConfirm={() => { void confirmVerifiedEdit(); }}
+        onCancel={() => setConfirmationDraft(null)}
       />
 
       {status ? <p className="notice notice-success" role="status">{status}</p> : null}

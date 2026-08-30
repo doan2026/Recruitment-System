@@ -59,3 +59,19 @@ export function isInvalidResubmissionTransition(error: unknown): error is ApiCli
     error.status === 409 &&
     error.code === "INVALID_RESUBMISSION_TRANSITION";
 }
+
+export function requiresCompanyReverification(
+  company: {
+    verificationStatus: CompanyVerificationStatus;
+    name: string;
+    taxCode: string;
+  },
+  draft: {
+    name: string;
+    taxCode: string;
+  },
+): boolean {
+  if (company.verificationStatus !== "VERIFIED") return false;
+  return draft.name.trim() !== company.name.trim() ||
+    draft.taxCode.trim() !== company.taxCode.trim();
+}

@@ -39,6 +39,7 @@
 | Scrollbar | `frontend/app/globals.css` | DESIGN.md | stable gutter | computed style |
 | CRUD | Route + `frontend/lib/person2Api.ts` | P16.N2 | explicit demo / gateway | API unit + full-flow E2E pending |
 | Optimistic conflict | `frontend/lib/conflictRecovery.ts` + `ConflictRecoveryPanel` | P16.N2 | Company / Job / Application | API unit + consumer flow |
+| Confirmation dialog | `frontend/components/ConfirmationDialog.tsx` | UX contract | warning / danger | keyboard + focus + build |
 
 ## Component behavior
 
@@ -65,7 +66,7 @@
 |---|---|---|---|---|---|---|---|
 | Create job | Lưu bản nháp | khóa submit | ở form/list | status inline | giữ dữ liệu + lỗi field | field lỗi đầu tiên | P16.N2 Job |
 | Create company | Empty-state CTA | khóa submit | company profile | badge PENDING | giữ form + safe error | field lỗi đầu tiên | P16.N2 Company |
-| Edit company | Lưu thay đổi | khóa submit | ở company | status inline | reload/merge khi 409 | heading/form | P16.N2 Company |
+| Edit company | Lưu thay đổi; legal change ở VERIFIED mở dialog | khóa submit/dialog action | ở company | badge theo response + status inline | hủy giữ draft; 409 reload/merge | dialog/form | P16.N2 Company |
 | Resubmit company verification | Gửi lại để xác minh | khóa nút, giữ trạng thái hiện tại | ở company | badge PENDING + status inline | 409 tải resource đúng một lần, không retry mutation | block trạng thái xác minh | P16.N2 Company |
 | Search | Nhập từ khóa | list loader | cùng route | result count | clear/retry | search/list heading | P16.N2 Search |
 | Upload | Bắt đầu tải | từng bước | ở form owner | step status | xin signature mới/retry | bước lỗi | P16.N2 Media handshake |
@@ -81,7 +82,7 @@
 
 ## Overlays and feedback
 
-- Dialog primitive: chưa cần trong baseline; destructive flow thật phải dùng shared accessible dialog, không dùng browser confirm.
+- Dialog primitive: `ConfirmationDialog` dùng native modal semantics, focus an toàn, Escape/backdrop và pending lock; mọi flow xác nhận dùng shared component, không dùng browser confirm.
 - Confirmation: warning cho đóng/thu hồi có thể phục hồi; danger cho xóa vĩnh viễn.
 - Feedback hiện dùng inline live status; shared toast provider là task integration sau.
 - Unsaved changes: bắt buộc trước khi nối router/API production cho form dài.
