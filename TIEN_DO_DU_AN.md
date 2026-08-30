@@ -914,6 +914,20 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Đây là probe có kiểm soát trên corpus nhỏ tự soạn, **không phải** benchmark relevance production, và **tự nó không đủ** để nâng giới hạn recommendation.
 
 
+## 2.51 Cross-replica Invariant Gate — hoàn thành qua PR #76
+
+> Task chỉ thuộc AI Service của Người 2, được bàn giao từ `feature/ai-service/multi-replica-gate` vào `develop` qua PR #76 ngày 30/08/2026. Đây là bằng chứng **tính đúng đắn giữa các replica**, không phải benchmark capacity.
+
+- Chạy nhiều replica API chỉ an toàn nếu những phần trông có vẻ stateless thật sự là stateless. Ba thứ chưa từng được kiểm giữa các process, và mỗi thứ đều hỏng **im lặng** chứ không hỏng ồn ào: cursor do replica này phát phải được replica kia chấp nhận, cùng một request phải trả cùng một trang từ bất kỳ replica nào, và rate limit phân tán phải là **một** budget dùng chung chứ không phải mỗi replica một budget.
+- Gate dựng **hai replica thật** trên một PostgreSQL dùng chung và một Redis dùng chung, rồi gọi qua HTTP thật.
+- **Kết quả đo với subject budget 10:** trang một từ replica A tiếp tục đúng trên replica B, **không lặp Job nào**; hai replica trả về item và cursor **giống hệt**; probe budget chấp nhận đúng **6** call còn lại sau khi hai check trước đã tiêu 4 — limiter theo process sẽ cấp khoảng gấp đôi trước lần từ chối đầu tiên.
+- Probe cố tình **luân phiên hai replica**, nên limiter theo process lộ ra dưới dạng cấp vượt hạn mức chứ không phải một con số hơi khác. Nó cũng trừ đi số call mà các check trước đã tiêu thay vì giả định còn nguyên budget.
+- Cursor secret là scoped internal key, cấu hình giống nhau giữa các replica — gate xác nhận điều đó bằng thực nghiệm thay vì suy luận.
+- **6 offline test** phủ logic quyết định của gate: phát hiện budget theo replica, budget không bao giờ được enforce, status lạ là fail chứ không bỏ qua, và thứ tự luân phiên replica.
+- Gate cuối PASS **627/627 unit test** cùng `ruff check`/`ruff format --check`; gate hai replica thật PASS.
+- Đây **không phải** benchmark capacity/latency. Deployed load, hành vi gateway và production monitoring vẫn là hạng mục riêng.
+
+
 ---
 
 # 3. Danh sách task CHƯA làm (Pending)
@@ -1111,7 +1125,8 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
   - [x] Recruiter-facing Candidate index/filter/exact-plan synthetic controlled gate đã PASS với 0 lỗi/mismatch/leak, p95 130,089 ms và p99 149,503 ms; không bật ANN production.
   - [x] Candidate-facing Job full-target synthetic HTTP/concurrent-writer gate đã PASS với 0 error/mismatch/timeout/security leak, p95 1.021,163 ms và p99 1.133,728 ms dưới statement timeout 2 giây.
   - [x] Real-model relevance tiếng Việt đã có số liệu đầu tiên qua PR #75: precision@1 và accentless agreement đều **1.0**, clean separation **0.25** — model đã pin không tách sạch trên tiếng Việt, muốn nâng phải đổi model.
-  - [ ] Còn corpus production quy mô thật, deployed E2E/multi-replica load, concurrent-writer rollout observation trên môi trường thật và production monitoring/SLO; distributed limiter cho chatbot v1 và cho hai surface recommendation đều đã có service/integration test với Redis thật, riêng limiter tầng gateway vẫn thuộc Người 3.
+  - [x] Bất biến cross-replica đã được chứng minh qua PR #76 với hai replica thật: cursor portable, trang giống hệt, budget rate limit dùng chung chứ không nhân theo replica.
+  - [ ] Còn corpus production quy mô thật, deployed load/capacity, concurrent-writer rollout observation trên môi trường thật và production monitoring/SLO; distributed limiter cho chatbot v1 và cho hai surface recommendation đều đã có service/integration test với Redis thật, riêng limiter tầng gateway vẫn thuộc Người 3.
   - [x] Filter-aware ANN đã được điều tra dứt điểm qua PR #73 và **kết luận là không áp dụng được** cho surface này với hợp đồng phân trang hiện tại; lý do được giữ dưới dạng test chạy được thay vì ghi chú suông.
 
 ## P12 — Interview & Video Call Service
