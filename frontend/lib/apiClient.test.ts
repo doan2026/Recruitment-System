@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   ApiClientError,
   assertCanonicalUuidV4,
+  clearApiSession,
   buildQuery,
   collectionPath,
   getApiSessionRevision,
@@ -10,6 +11,8 @@ import {
   requestApi,
   selectContractFields,
   setApiAccessToken,
+  setApiSession,
+  subscribeToApiSession,
 } from "./apiClientCore";
 import {
   isOptimisticConflict,
@@ -106,6 +109,64 @@ test("private requests stay no-store and 401 clears the in-memory session", asyn
   assert.equal(headers.get("authorization"), "Bearer access-token");
   assert.equal(headers.get("cache-control"), "no-store");
   assert.ok(getApiSessionRevision() > revisionBeforeRequest);
+});
+
+test("cookie-only private session still uses credentials and no-store", async () => {
+  setApiSession({ accountId: "cookie-candidate" });
+  let captured: RequestInit | undefined;
+  await requestApi("/jobs/recommended", {
+    privateData: true,
+    maxRetries: 0,
+    fetcher: async (_input, init) => {
+      captured = init;
+      return new Response(JSON.stringify({ data: [], meta: null }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  const headers = new Headers(captured?.headers);
+  assert.equal(captured?.credentials, "include");
+  assert.equal(captured?.cache, "no-store");
+  assert.equal(headers.get("authorization"), null);
+  assert.equal(headers.get("cache-control"), "no-store");
+  clearApiSession();
+});
+
+test("session boundary changes on account switch and logout, not same-account refresh", () => {
+  clearApiSession();
+  const revisions: number[] = [];
+  const unsubscribe = subscribeToApiSession((revision) => revisions.push(revision));
+  const before = getApiSessionRevision();
+
+  setApiSession({ token: "candidate-token-1", accountId: "candidate-1" });
+  const afterLogin = getApiSessionRevision();
+  assert.equal(afterLogin, before + 1);
+
+  setApiSession({ token: "candidate-token-2", accountId: "candidate-1" });
+  assert.equal(getApiSessionRevision(), afterLogin);
+
+  setApiSession({ token: "recruiter-token", accountId: "recruiter-1" });
+  assert.equal(getApiSessionRevision(), afterLogin + 1);
+
+  clearApiSession();
+  assert.equal(getApiSessionRevision(), afterLogin + 2);
+  assert.deepEqual(revisions, [afterLogin, afterLogin + 1, afterLogin + 2]);
+
+  unsubscribe();
+  setApiSession({ token: "detached-listener-token", accountId: "candidate-2" });
+  assert.equal(revisions.length, 3);
+  clearApiSession();
+});
+
+test("identified session rejects missing account data", () => {
+  assert.throws(
+    () => setApiSession({ token: "token", accountId: "" }),
+    (error: unknown) => error instanceof ApiClientError &&
+      error.code === "SESSION_ACCOUNT_REQUIRED" &&
+      !/token/i.test(error.message),
+  );
 });
 
 test("409 optimistic conflict is never retried blindly", async () => {

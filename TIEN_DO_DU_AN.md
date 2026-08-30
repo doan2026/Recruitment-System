@@ -186,7 +186,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - **Công nghệ:** Next.js 14, React 18, TypeScript.
 - **Chức năng chính:** auth UI; hồ sơ/CV; công ty; job search/detail; apply/bookmark; recruiter pipeline/offer/dashboard; interview/video/chat/notification; admin console.
 - **Phụ thuộc:** API Gateway và hợp đồng API của toàn bộ backend.
-- **Trạng thái:** 🟡 Baseline React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter hai chế độ `demo|gateway` đã nối các read flow Company, Job Search/Recommendation, Application và mutation cập nhật Company qua Gateway; envelope, safe error, timeout/abort, trailing slash, UUID v4, allowlist, conflict recovery và bounded `429/503` recovery có unit test. Auth session thật, các mutation còn lại và E2E vẫn pending; P16.N2 hiện 6/52.
+- **Trạng thái:** 🟡 Baseline React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter hai chế độ `demo|gateway` đã nối các read flow Company, Job Search/Recommendation, Application và mutation cập nhật Company qua Gateway; envelope, safe error, timeout/abort, trailing slash, UUID v4, allowlist, conflict recovery, bounded `429/503` recovery và private session boundary có unit test. Auth UI thật, các mutation còn lại và E2E vẫn pending; P16.N2 hiện 7/52.
 
 ## T14 — Tích hợp, kiểm thử và vận hành
 
@@ -1336,11 +1336,11 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [ ] Admin dashboard, company/job approval, user/report management và export.
 - [ ] Loading/error/empty state, responsive UI, accessibility và E2E test.
 
-### P16.N2 — FE tiêu thụ bốn service của Người 2 (6/52 tích hợp API thật; baseline UI đã có)
+### P16.N2 — FE tiêu thụ bốn service của Người 2 (7/52 tích hợp API thật; baseline UI đã có)
 
 > Bổ sung ngày 30/08/2026 theo yêu cầu. Đây là danh sách chi tiết task FE **chưa làm**, nhưng **chỉ giới hạn ở phần tiêu thụ bốn service của Người 2** (Company, Job & Search, Application, AI chatbot). FE của Auth, Profile, Media, Interview, Notification, Admin và Chat **không** nằm trong danh sách này. Bản thân việc code FE vẫn **thuộc Người 3** — mục này ghi ra để thấy backend của Người 2 đang chờ FE làm những gì, không phải chuyển việc sang Người 2.
 >
-> **Hiện trạng FE cập nhật 30/08/2026:** baseline React/Next.js theo Stitch đã có 8 route chính. Task `feature/frontend/person2-api-client-foundation` thêm adapter `demo|gateway` và các read flow thật; task `feature/frontend/person2-conflict-recovery` nối cập nhật Company cùng recovery `409`; task `feature/frontend/person2-transient-recovery` thêm shared countdown cho `429/503`, auto-retry đúng một lần theo `Retry-After` và local backoff có khóa nút khi thiếu header. Riêng offer hiển thị rõ API chưa có endpoint đọc. Production phải đặt `NEXT_PUBLIC_API_MODE=gateway` và cấp session từ Auth. Chỉ checkbox có implementation + test trực tiếp mới được đánh dấu.
+> **Hiện trạng FE cập nhật 30/08/2026:** baseline React/Next.js theo Stitch đã có 8 route chính. Các task nền tảng đã thêm adapter `demo|gateway`, read flow thật, cập nhật Company với recovery `409`, shared recovery `429/503` và root session boundary cho private state. Access token chỉ ở memory; request private luôn `credentials: include` + `cache: no-store`; đổi account/logout/401 remount page state ngay, còn refresh token cùng account không làm mất state. Riêng offer hiển thị rõ API chưa có endpoint đọc. Production phải đặt `NEXT_PUBLIC_API_MODE=gateway` và Auth phải gọi `setApiSession`. Chỉ checkbox có implementation + test trực tiếp mới được đánh dấu.
 
 **Bàn giao baseline theo task:**
 
@@ -1354,6 +1354,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [x] Thêm 7 unit test API contract, lệnh `npm test`/`npm run typecheck` và cấu hình `premium-ui.json` tương ứng.
 - [x] Nối cập nhật Company với API thật và thêm shared conflict snapshot/panel: giữ draft, tải server đúng một lần, so sánh phiên bản/trường và chỉ gửi lại khi người dùng chủ động bấm lưu; 10/10 API/conflict unit test, typecheck, build và strict UI audit PASS.
 - [x] Thêm shared transient recovery cho `429/503` và nối vào `/jobs/mine`: phân biệt server `Retry-After` với local backoff 2–30 giây, auto-retry tối đa một lần, khóa duplicate retry; 13/13 unit test PASS.
+- [x] Thêm `ApiSessionBoundary` ở root và `setApiSession({ token?, accountId })`: xóa toàn bộ React page state khi đổi tài khoản/logout/401, giữ state khi refresh token cùng account, hỗ trợ cookie HttpOnly; 16/16 unit test PASS.
 - [ ] Nối các màn trên với API Gateway/Auth session thật, hoàn thiện error mapping/409/429/503 và thêm component/E2E test trước khi đóng checkbox endpoint bên dưới.
 >
 > Danh sách bám theo **48 endpoint user-facing có thật**, khảo sát trực tiếp từ code controller và đối chiếu với `infra/nginx/nginx.conf` — không suy đoán từ tài liệu.
@@ -1365,7 +1366,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [ ] Bộ xử lý `409` dùng chung cho optimistic locking: tải lại resource, so sánh, cho người dùng quyết định gửi lại — **không retry mù**. Áp cho `APPLICATION_CHANGED_CONCURRENTLY`, `JOB_STATE_CHANGED`, `COMPANY_UPDATE_CONFLICT`.
   - Shared primitive và Company consumer đã hoàn thành; Job/Application consumer sẽ đóng cùng mutation flow tương ứng.
 - [x] Bộ xử lý `429`/`503` phân biệt hai nhóm: nhóm **có** `Retry-After` đếm ngược và tự thử lại đúng một lần; nhóm **không có** như `MEDIA_UPLOAD_RATE_LIMITED` của Company hay AI rate-limit quy về `503` ở Application dùng local backoff 2–30 giây và khóa nút đến khi được phép thử lại.
-- [ ] Tôn trọng `Cache-Control: private, no-store` + `Vary: Authorization` trên gợi ý việc làm, gợi ý ứng viên, danh sách hồ sơ, metadata/link tải CV và chat: không service worker, không `localStorage`, và **xoá sạch state khi đăng xuất hoặc đổi tài khoản**.
+- [x] Tôn trọng `Cache-Control: private, no-store` + `Vary: Authorization` trên dữ liệu riêng: mọi request private dùng `credentials: include`, `cache: no-store` và header no-cache; không có service worker/Web Storage; root session boundary xóa sạch React state khi logout, 401 hoặc đổi tài khoản.
 - [x] Kiểm định dạng UUID v4 trước khi điều hướng vào trang chi tiết, vì id sai định dạng bị chặn bằng `400 INVALID_JOB_ID` trước khi tới service.
 - [x] Không gửi field lạ trong body/query: `ValidationPipe` của Company và Job bật `forbidNonWhitelisted`, còn `/ai/chat` bật `extra=forbid` — thừa một field là `400`/`422`.
 
