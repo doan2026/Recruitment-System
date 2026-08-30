@@ -982,6 +982,18 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Việc này làm SLO **đo được**. Nó **không phải** triển khai monitoring.
 
 
+## 2.56 Company SLO Metrics Surface — hoàn thành qua PR #81
+
+> Task chỉ thuộc Company Service của Người 2, được bàn giao từ `feature/company-service/slo-instrumentation` vào `develop` qua PR #81 ngày 30/08/2026. Đây là service **thứ tư và cuối cùng** của Người 2 được trang bị instrumentation.
+
+- Sau AI (PR #77), Application (PR #79) và Job & Search (PR #80), cả **bốn service của Người 2 nay đều đo được**. SLO cho hệ thống trước đây không đóng được vì không service nào có gì để đo.
+- `GET /metrics` phát Prometheus exposition, bảo vệ bằng credential riêng. Scrape không mang user nên guard kiểm key thay vì token, so sánh constant-time, và từ chối header bị nhân đôi.
+- **Không identifier nào chạm tới label.** Path Company được template hoá nên `/{id}/members` và `/{id}/media/confirm` vẫn là series hữu ích mà không gắn nhãn theo Company id — và path mang **hai** identifier như `/{id}/members/{id}` thì **mất cả hai**. Mọi path lạ gom về `other`.
+- Request ghi bằng middleware nên một trận 404 hiện ra như sự kiện availability thay vì biến mất trước khi tới handler. Không thêm dependency nào.
+- Gate cuối PASS **324/324 unit test + 19/19 integration test** (từ 306, thêm 18 test metrics).
+- Việc này làm SLO **đo được** cho toàn bộ bốn service. Nó **không phải** triển khai monitoring: scrape, dashboard, alert rule và error budget vẫn là việc hạ tầng.
+
+
 ---
 
 # 3. Danh sách task CHƯA làm (Pending)

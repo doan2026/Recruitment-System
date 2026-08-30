@@ -7,6 +7,11 @@ import { ApiResponseInterceptor } from './common/http/api-response.interceptor';
 import { RequestIdMiddleware } from './common/http/request-id.middleware';
 import { CompanyModule } from './company/company.module';
 import { HealthController } from './health/health.controller';
+import {
+  MetricsController,
+  MetricsMiddleware,
+  MetricsRegistry,
+} from './metrics';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
@@ -16,8 +21,10 @@ import { PrismaModule } from './prisma/prisma.module';
     AuthModule,
     CompanyModule,
   ],
-  controllers: [HealthController],
+  controllers: [HealthController, MetricsController],
   providers: [
+    MetricsRegistry,
+    MetricsMiddleware,
     {
       provide: APP_INTERCEPTOR,
       useClass: ApiResponseInterceptor,
@@ -30,6 +37,6 @@ import { PrismaModule } from './prisma/prisma.module';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(RequestIdMiddleware).forRoutes('*');
+    consumer.apply(RequestIdMiddleware, MetricsMiddleware).forRoutes('*');
   }
 }
