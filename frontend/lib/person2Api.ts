@@ -340,6 +340,7 @@ export interface UpdateCompanyInput {
   taxCode?: string;
   logo?: { fileId: string };
   media?: Array<{ fileId: string; type: "IMAGE" | "VIDEO"; sortOrder: number }>;
+  removeLogo?: boolean;
 }
 
 export async function updateCompany(
@@ -352,7 +353,8 @@ export async function updateCompany(
     taxCode: input.taxCode,
     logo: input.logo,
     media: input.media,
-  }, ["name", "taxCode", "logo", "media"]);
+    removeLogo: input.removeLogo,
+  }, ["name", "taxCode", "logo", "media", "removeLogo"]);
   if (isDemoPerson2Api) {
     const current = (await normalizeDemo(demo.getCompany())).data;
     const nameChanged = body.name !== undefined && body.name !== current.name;
@@ -364,7 +366,7 @@ export async function updateCompany(
         name: typeof body.name === "string" ? body.name : current.name,
         taxCode: typeof body.taxCode === "string" ? body.taxCode : current.taxCode,
         media: {
-          logo: body.logo ? {
+          logo: body.removeLogo ? undefined : body.logo ? {
             fileId: body.logo.fileId,
             url: "/placeholder-company.png",
           } : current.media.logo,

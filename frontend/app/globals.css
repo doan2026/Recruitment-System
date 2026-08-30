@@ -585,3 +585,9 @@ textarea { resize: none; }
 @media (max-width: 520px) {
   .confirmation-dialog-actions .btn { width: 100%; justify-content: center; }
 }
+.media-library-logo { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.media-library-logo p { margin-bottom: 0; }
+.media-library-grid { margin-bottom: 16px; }
+.media-library-item { cursor: grab; }
+.media-library-item:active { cursor: grabbing; }
+.media-library-item .help { overflow-wrap: anywhere; }

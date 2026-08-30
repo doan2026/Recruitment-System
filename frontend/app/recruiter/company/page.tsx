@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ConflictRecoveryPanel } from "../../../components/ConflictRecoveryPanel";
 import { ConfirmationDialog } from "../../../components/ConfirmationDialog";
 import { CompanyMediaUploader } from "../../../components/CompanyMediaUploader";
+import { CompanyMediaLibrary } from "../../../components/CompanyMediaLibrary";
 import { EmptyState, ErrorState, LoadingState, Metric, PageHeader, StatusBadge } from "../../../components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import {
@@ -299,13 +300,14 @@ export default function RecruiterCompanyPage() {
         </aside>
       </section>
 
-      <section className="panel">
-        <div className="section-head"><h2>Thư viện công ty</h2><span className="help">2/10 ảnh · 0/1 video</span></div>
-        <div className="grid-3">
-          <div className="card"><strong>Logo chính</strong><p className="help">{company.media.logo?.fileId ?? "Chưa có logo"}</p></div>
-          {company.media.gallery.map((item, index) => <div className="card" key={item.fileId}><strong>Không gian {index + 1}</strong><p className="help">{item.fileId}</p></div>)}
-        </div>
-      </section>
+      <CompanyMediaLibrary
+        company={company}
+        onCompanyChange={(nextCompany) => {
+          setCompany(nextCompany);
+          setName(nextCompany.name);
+          setTaxCode(nextCompany.taxCode);
+        }}
+      />
     </main>
   );
 }
