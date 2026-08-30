@@ -191,7 +191,12 @@ export function parseRetryAfter(value: string | null, now = Date.now()): number 
 
 export function recoveryFor(code: string, status = 0): RecoveryKind {
   if (code === "JOB_SEARCH_CURSOR_STALE" || code === "RECOMMENDATION_CURSOR_STALE") return "restart-list";
-  if (code.includes("CONFLICT") || code.includes("CHANGED_CONCURRENTLY")) return "reload-compare";
+  if (
+    code === "COMPANY_UPDATE_CONFLICT" ||
+    code === "APPLICATION_CHANGED_CONCURRENTLY" ||
+    code === "JOB_STATE_CHANGED" ||
+    code.includes("CHANGED_CONCURRENTLY")
+  ) return "reload-compare";
   if (status === 401) return "reauthenticate";
   if (status === 429) return "retry-after";
   if (status === 503 || code === "TIMEOUT" || code === "NETWORK_ERROR") return "retry";
@@ -217,6 +222,7 @@ export function normalizeError(code: string): string {
     OFFER_ALREADY_RESPONDED: "Offer này đã được phản hồi.",
     OFFER_CHANGED_CONCURRENTLY: "Offer vừa được cập nhật. Hãy tải lại trước khi phản hồi.",
     APPLICATION_CHANGED_CONCURRENTLY: "Hồ sơ vừa thay đổi. Hãy tải lại trước khi tiếp tục.",
+    JOB_STATE_CHANGED: "Trạng thái tin tuyển dụng vừa thay đổi. Hãy tải lại và so sánh trước khi tiếp tục.",
     JOB_SEARCH_PAGE_TOO_DEEP: "Kết quả quá sâu. Hãy lọc hẹp hơn hoặc chuyển sang tải thêm.",
     MEDIA_UPLOAD_RATE_LIMITED: "Bạn tải file quá nhiều lần. Hãy chờ rồi thử lại.",
     OFFER_READ_UNAVAILABLE: "Offer chỉ được mở từ thông báo vì Application API chưa có endpoint đọc offer.",

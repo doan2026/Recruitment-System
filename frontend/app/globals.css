@@ -506,6 +506,15 @@ textarea { resize: none; }
 .notice-danger { border-left-color: var(--danger); background: var(--danger-soft); color: #8e231d; }
 .status-line { line-height: 1.45; }
 
+.conflict-panel { margin: 18px 0; padding: 18px; border: 1px solid #e8bd58; border-left: 4px solid var(--warning); border-radius: 12px; background: var(--warning-soft); color: #4f3b0a; }
+.conflict-panel h3 { margin: 0; color: var(--text); }
+.conflict-panel > p { margin: 12px 0; }
+.conflict-heading-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.conflict-heading-row .eyebrow { margin-bottom: 4px; color: #765000; }
+.conflict-table { min-width: 620px; }
+.conflict-table th[scope="row"] { color: var(--text); text-transform: none; letter-spacing: 0; }
+.conflict-table td { max-width: 260px; overflow-wrap: anywhere; }
+
 .chat-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; }
 .chat-box { min-height: 420px; max-height: 560px; padding: 20px; background: linear-gradient(180deg, #fbfffc, #f6f9ff); }
 .message { border: 1px solid var(--line); line-height: 1.55; }

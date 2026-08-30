@@ -1,11 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ConflictRecoveryPanel } from "../../../components/ConflictRecoveryPanel";
 import { ErrorState, Metric, PageHeader, StatusBadge } from "../../../components/ui";
 import { toUserMessage } from "../../../lib/apiClient";
-import { type Company, getCompany } from "../../../lib/person2Api";
+import {
+  type ConflictSnapshot,
+  isOptimisticConflict,
+  prepareConflictSnapshot,
+} from "../../../lib/conflictRecovery";
+import { type Company, getCompany, updateCompany } from "../../../lib/person2Api";
 
 type UploadStep = "idle" | "signed" | "uploaded" | "confirmed";
+type CompanyDraft = { name: string; taxCode: string };
 
 export default function RecruiterCompanyPage() {
   const [company, setCompany] = useState<Company | null>(null);
@@ -15,6 +22,9 @@ export default function RecruiterCompanyPage() {
   const [name, setName] = useState("");
   const [taxCode, setTaxCode] = useState("");
   const [loadError, setLoadError] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [conflict, setConflict] = useState<ConflictSnapshot<CompanyDraft, Company> | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -37,21 +47,67 @@ export default function RecruiterCompanyPage() {
     };
   }, [reloadKey]);
 
-  function saveCompany(event: React.FormEvent<HTMLFormElement>) {
+  async function saveCompany(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!company || !name.trim() || !taxCode.trim()) return;
+    if (!company || !name.trim() || !taxCode.trim() || saving) return;
+    const draft = { name: name.trim(), taxCode: taxCode.trim() };
     const needsReview = company.verificationStatus === "VERIFIED" &&
-      (name.trim() !== company.name || taxCode.trim() !== company.taxCode);
-    setCompany({
-      ...company,
-      name: name.trim(),
-      taxCode: taxCode.trim(),
-      aggregateVersion: company.aggregateVersion + 1,
-      verificationStatus: needsReview ? "PENDING" : company.verificationStatus,
-      rejectReason: needsReview ? undefined : company.rejectReason,
-    });
-    setEditing(false);
-    setStatus(needsReview ? "Thông tin pháp lý đã đổi. Hồ sơ được chuyển về chờ xác minh." : "Đã lưu thông tin công ty.");
+      (draft.name !== company.name || draft.taxCode !== company.taxCode);
+    setSaving(true);
+    setSaveError("");
+    setStatus("");
+    setConflict(null);
+    try {
+      const response = await updateCompany(company.id, draft);
+      setCompany(response.data);
+      setName(response.data.name);
+      setTaxCode(response.data.taxCode);
+      setEditing(false);
+      setStatus(needsReview
+        ? "Thông tin pháp lý đã đổi. Hồ sơ được chuyển về chờ xác minh."
+        : "Đã lưu thông tin công ty.");
+    } catch (reason: unknown) {
+      if (isOptimisticConflict(reason)) {
+        try {
+          const snapshot = await prepareConflictSnapshot({
+            error: reason,
+            localDraft: draft,
+            localVersion: company.aggregateVersion,
+            reload: async () => (await getCompany()).data,
+            serverVersion: (server) => server.aggregateVersion,
+            fields: [
+              { key: "name", label: "Tên công ty", localValue: (value) => value.name, serverValue: (value) => value.name },
+              { key: "taxCode", label: "Mã số thuế", localValue: (value) => value.taxCode, serverValue: (value) => value.taxCode },
+            ],
+          });
+          setConflict(snapshot);
+        } catch (reloadReason: unknown) {
+          setSaveError(toUserMessage(reloadReason));
+        }
+      } else {
+        setSaveError(toUserMessage(reason));
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function useServerCompany() {
+    if (!conflict) return;
+    setCompany(conflict.server);
+    setName(conflict.server.name);
+    setTaxCode(conflict.server.taxCode);
+    setConflict(null);
+    setStatus("Đã dùng dữ liệu mới nhất từ hệ thống. Bạn có thể tiếp tục chỉnh sửa.");
+  }
+
+  function keepCompanyDraft() {
+    if (!conflict) return;
+    setCompany(conflict.server);
+    setName(conflict.localDraft.name);
+    setTaxCode(conflict.localDraft.taxCode);
+    setConflict(null);
+    setStatus("Đã làm mới dữ liệu nền và giữ nguyên phần bạn nhập. Kiểm tra rồi bấm Lưu thay đổi để gửi lại.");
   }
 
   function nextUploadStep() {
@@ -86,6 +142,7 @@ export default function RecruiterCompanyPage() {
       />
 
       {status ? <p className="notice notice-success" role="status">{status}</p> : null}
+      {saveError ? <p className="notice notice-danger" role="alert"><strong>Chưa lưu được hồ sơ.</strong> {saveError}</p> : null}
 
       <section className="metric-grid" aria-label="Tóm tắt công ty">
         <Metric label="Trạng thái" value={company.verificationStatus} detail="Xác minh doanh nghiệp" />
@@ -109,6 +166,15 @@ export default function RecruiterCompanyPage() {
           </div>
           {company.rejectReason ? <p className="notice notice-danger"><strong>Lý do từ chối:</strong> {company.rejectReason}</p> : null}
 
+          {conflict ? (
+            <ConflictRecoveryPanel
+              resourceName="Hồ sơ công ty"
+              snapshot={conflict}
+              onKeepDraft={keepCompanyDraft}
+              onUseServer={useServerCompany}
+            />
+          ) : null}
+
           {editing ? (
             <form className="form-grid" noValidate onSubmit={saveCompany}>
               <div className="field">
@@ -122,8 +188,10 @@ export default function RecruiterCompanyPage() {
                 {!taxCode.trim() ? <span id="tax-code-error" className="form-error">Nhập mã số thuế.</span> : null}
               </div>
               <div className="span-2 btn-group">
-                <button className="btn btn-primary" type="submit" disabled={!name.trim() || !taxCode.trim()}>Lưu thay đổi</button>
-                <button className="btn" type="button" onClick={() => { setEditing(false); setName(company.name); setTaxCode(company.taxCode); }}>Hủy</button>
+                <button className="btn btn-primary" type="submit" disabled={!name.trim() || !taxCode.trim() || saving} aria-busy={saving}>
+                  {saving ? "Đang lưu…" : "Lưu thay đổi"}
+                </button>
+                <button className="btn" type="button" disabled={saving} onClick={() => { setEditing(false); setConflict(null); setSaveError(""); setName(company.name); setTaxCode(company.taxCode); }}>Hủy</button>
               </div>
             </form>
           ) : null}
