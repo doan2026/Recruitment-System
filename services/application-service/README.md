@@ -554,6 +554,35 @@ disabled because this gate covers the REST contract, not the outbox. Like the
 AI gate, it requires a full repository checkout and a working Docker daemon.
 
 
+## Metrics and SLO measurement
+
+Availability and latency SLOs need numbers that outlive a single request, and
+the service exposed only `health` and `info`. `GET /actuator/prometheus` now
+serves Micrometer's HTTP server metrics, so request rates, status mix and
+latency percentiles per route are measurable.
+
+```bash
+curl -H "X-Internal-Api-Key: $INTERNAL_API_KEY_METRICS" \
+  http://application-service:8080/actuator/prometheus
+```
+
+The scrape has **its own scoped credential**, distinct from the Profile and
+Interview keys and rejected at startup if it matches either. A service
+authorised to submit CVs has no business reading the request rates and latency
+distribution of the whole deployment, and reusing one key would silently grant
+exactly that. The scrape carries no user, so the filter checks a key rather
+than a token, compares it in constant time, and rejects a duplicated or
+comma-joined header so a proxy and a caller cannot disagree about the
+credential.
+
+Micrometer tags requests with the *templated* URI, so a path like
+`/{applicationId}/offer` stays a single series and no application, CV or user
+identifier reaches a label. Unmatched requests collapse to `NOT_FOUND`, which
+keeps cardinality bounded under path scanning.
+
+This makes SLOs measurable. It is not a monitoring deployment: scraping,
+dashboards, alert rules and error budgets remain infrastructure work.
+
 ## AI Service match contract gate
 
 `AiMatchContractIT` runs the **real** AI Service against a real pgvector

@@ -104,6 +104,55 @@ public class SecurityConfig {
     }
 
     @Bean
+    InternalMetricsAuthenticationFilter internalMetricsAuthenticationFilter(
+        @Value("${internal.metrics-api-key}") String metricsApiKey,
+        @Value("${internal.profile-api-key}") String internalProfileApiKey,
+        @Value("${internal.interview-api-key}")
+            String internalInterviewApiKey
+    ) {
+        if (
+            sameSecret(metricsApiKey, internalProfileApiKey)
+            || sameSecret(metricsApiKey, internalInterviewApiKey)
+        ) {
+            throw new IllegalStateException(
+                "INTERNAL_API_KEY_METRICS must differ from the other "
+                    + "internal keys"
+            );
+        }
+        return new InternalMetricsAuthenticationFilter(metricsApiKey);
+    }
+
+    @Bean
+    FilterRegistrationBean<InternalMetricsAuthenticationFilter>
+        disableMetricsContainerRegistration(
+            InternalMetricsAuthenticationFilter filter
+        ) {
+        FilterRegistrationBean<InternalMetricsAuthenticationFilter>
+            registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
+    @Order(0)
+    SecurityFilterChain metricsSecurityFilterChain(
+        HttpSecurity http,
+        InternalMetricsAuthenticationFilter filter
+    ) throws Exception {
+        return http
+            .securityMatcher("/actuator/prometheus")
+            .csrf(csrf -> csrf.disable())
+            .sessionManagement(session -> session.sessionCreationPolicy(
+                SessionCreationPolicy.STATELESS
+            ))
+            .authorizeHttpRequests(auth -> auth
+                .anyRequest().hasAuthority("ROLE_INTERNAL_METRICS")
+            )
+            .addFilterBefore(filter, BearerTokenAuthenticationFilter.class)
+            .build();
+    }
+
+    @Bean
     FilterRegistrationBean<InternalInterviewAuthenticationFilter>
         disableInterviewContainerRegistration(
             InternalInterviewAuthenticationFilter filter

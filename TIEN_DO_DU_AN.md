@@ -955,6 +955,20 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Đây là bằng chứng có kiểm soát trên một máy — không gateway, không CDN, không độ trễ mạng và không phân bố dữ liệu production. **Không phải** tuyên bố capacity.
 
 
+## 2.54 Application SLO Metrics Surface — hoàn thành qua PR #79
+
+> Task chỉ thuộc Application Service của Người 2, được bàn giao từ `feature/application-service/slo-instrumentation` vào `develop` qua PR #79 ngày 30/08/2026.
+
+- PR #77 mới chỉ trang bị instrumentation cho AI Service, trong khi Người 2 có **bốn** service. SLO cho hệ thống không đóng được khi chỉ 1/4 service đo được. Application trước đó chỉ expose `health` và `info`.
+- `GET /actuator/prometheus` nay phát metric HTTP server của Micrometer, nên tần suất request, phân bố status và latency percentile theo route đều đo được.
+- Scrape có **credential riêng**, khác key Profile và Interview, và **bị từ chối ngay lúc khởi động nếu trùng** một trong hai. Một service được phép nộp CV không có việc gì phải đọc được tần suất request và phân bố latency của cả deployment; dùng chung một key sẽ âm thầm cấp đúng quyền đó.
+- Scrape không mang user nên filter kiểm key thay vì token, so sánh constant-time, và từ chối header bị nhân đôi hoặc nối bằng dấu phẩy để proxy và caller không thể bất đồng về credential.
+- Micrometer gắn nhãn request bằng URI **đã template hoá**, nên path như `/{applicationId}/offer` vẫn là một series và **không identifier nào của Application, CV hay user chạm tới label**. Request không khớp route gom về `NOT_FOUND`, giữ cardinality có chặn khi bị quét path.
+- **10 test** phủ: key đúng được cấp quyền, thiếu/sai key bị từ chối mà không lộ key kỳ vọng, header nhân đôi và header nối phẩy đều bị từ chối, key placeholder/quá ngắn/có khoảng trắng thừa bị chặn ngay lúc khởi động.
+- Gate cuối PASS **309/309 unit test + 107/107 integration test**.
+- Việc này làm SLO **đo được**. Nó **không phải** triển khai monitoring: scrape, dashboard, alert rule và error budget vẫn là việc hạ tầng.
+
+
 ---
 
 # 3. Danh sách task CHƯA làm (Pending)
