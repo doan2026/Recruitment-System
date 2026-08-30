@@ -28,6 +28,11 @@ import {
   validateCompanyMediaFile,
 } from "./companyMediaUpload";
 import {
+  moveCompanyMediaItem,
+  normalizeCompanyMediaLibrary,
+  validateCompanyMediaLibrary,
+} from "./companyMediaLibrary";
+import {
   companyVerificationView,
   isInvalidResubmissionTransition,
   requiresCompanyReverification,
@@ -419,4 +424,25 @@ test("company media idempotency key is stable, safe and long enough", () => {
   const key = createMediaIdempotencyKey(() => "018f47a2-6f4d-4b7d-8c91-ff02d770a944");
   assert.equal(key, "company-media-018f47a2-6f4d-4b7d-8c91-ff02d770a944");
   assert.match(key, /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/);
+});
+
+test("company media library enforces replace-all quotas and unique file ids", () => {
+  const item = (fileId: string, type: "IMAGE" | "VIDEO") => ({ fileId, type, url: "https://media.test/x", sortOrder: 0 });
+  assert.match(validateCompanyMediaLibrary(undefined, Array.from({ length: 11 }, (_, index) => item(`i-${index}`, "IMAGE"))) ?? "", /10 ảnh/);
+  assert.match(validateCompanyMediaLibrary(undefined, [item("v1", "VIDEO"), item("v2", "VIDEO")]) ?? "", /1 video/);
+  assert.match(validateCompanyMediaLibrary("same", [item("same", "IMAGE")]) ?? "", /một lần/);
+  assert.equal(validateCompanyMediaLibrary("logo", [item("image", "IMAGE"), item("video", "VIDEO")]), null);
+});
+
+test("company media library reorder always rewrites contiguous sortOrder", () => {
+  const original = [
+    { fileId: "a", type: "IMAGE" as const, url: "a", sortOrder: 7 },
+    { fileId: "b", type: "IMAGE" as const, url: "b", sortOrder: 9 },
+    { fileId: "c", type: "VIDEO" as const, url: "c", sortOrder: 12 },
+  ];
+  assert.deepEqual(
+    moveCompanyMediaItem(original, "c", 0).map(({ fileId, sortOrder }) => ({ fileId, sortOrder })),
+    [{ fileId: "c", sortOrder: 0 }, { fileId: "a", sortOrder: 1 }, { fileId: "b", sortOrder: 2 }],
+  );
+  assert.deepEqual(normalizeCompanyMediaLibrary(original).map((item) => item.sortOrder), [0, 1, 2]);
 });
