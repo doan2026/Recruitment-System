@@ -52,6 +52,7 @@ clients:
   internal-api-key: ${INTERNAL_API_KEY}
 
 internal:
+  metrics-api-key: ${INTERNAL_API_KEY_METRICS}
   profile-api-key: ${INTERNAL_API_KEY_PROFILE}
   interview-api-key: ${INTERNAL_API_KEY_INTERVIEW}
 
@@ -70,7 +71,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
 
 springdoc:
   swagger-ui:
