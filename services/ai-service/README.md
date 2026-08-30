@@ -469,6 +469,37 @@ vector-store work happens. Scoped authorization and payload validation both run
 before the charge, so an unauthenticated or malformed caller can never drain
 another subject's budget.
 
+## Multi-replica load gate
+
+The cross-replica gate proves the invariants hold when two replicas share a
+database and a Redis. This one asks the other question: what does the pair
+actually deliver under concurrent load.
+
+```bash
+python scripts/multi_replica_load_gate.py \
+  --replica http://127.0.0.1:18201 --replica http://127.0.0.1:18202 \
+  --api-key <scoped key> --cv-id <seeded cv uuid> \
+  --warmup 100 --measured 1000 --concurrency 8
+```
+
+Measured on two replicas over 5,000 Jobs, 1,000 calls at concurrency 8: every
+call succeeded, p50 42.7 ms, p95 59.4 ms, p99 71.3 ms, max 81.5 ms, 182.3
+requests per second, and the traffic split exactly 500/500.
+
+The gate fails a run whose load was not balanced, because an unbalanced split
+means the numbers say nothing about running two replicas. It reports the
+per-replica counts so that is visible rather than averaged away.
+
+Building this found a real defect. The runtime image runs `alembic upgrade
+head` before starting Uvicorn, so every replica migrates at startup. Starting
+two at once raced: one created the version table while the other was doing the
+same, and the loser exited non-zero and would crash-loop through a rolling
+deploy. Migrations now take a PostgreSQL session advisory lock, so concurrent
+replicas queue and the second simply finds the work already done.
+
+This is controlled evidence on one host — no gateway, no CDN, no network
+latency and no production data distribution. It is not a capacity claim.
+
 ## Metrics and SLO measurement
 
 Availability and latency SLOs need numbers that outlive a single request, and

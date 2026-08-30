@@ -942,6 +942,19 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 - Việc này làm SLO **đo được**. Nó **không phải** một triển khai monitoring: scrape, dashboard, alert rule và error budget vẫn là việc hạ tầng.
 
 
+## 2.53 Multi-replica Load Gate & Migration Race Fix — hoàn thành qua PR #78
+
+> Task chỉ thuộc AI Service của Người 2, được bàn giao từ `feature/ai-service/multi-replica-load-gate` vào `develop` qua PR #78 ngày 30/08/2026. Đây là bằng chứng có kiểm soát trên một máy, **không phải** tuyên bố capacity production.
+
+- Gate cross-replica ở mục 2.51 chứng minh bất biến đúng khi hai replica dùng chung database và Redis. Gate này hỏi câu còn lại: **cặp replica thực sự phục vụ được gì dưới tải đồng thời**.
+- **Kết quả đo trên hai replica với 5.000 Job, 1.000 call ở concurrency 8:** mọi call thành công, p50 **42,7 ms**, p95 **59,4 ms**, p99 **71,3 ms**, max **81,5 ms**, **182,3 request/giây**, tải chia đúng **500/500**.
+- Gate **fail một lần chạy có tải lệch**, vì tải lệch nghĩa là các con số không nói lên điều gì về việc chạy hai replica. Nó báo count theo từng replica để chuyện đó lộ ra thay vì bị trung bình hoá.
+- **Việc dựng gate này phát hiện một lỗi thật.** Runtime image chạy `alembic upgrade head` trước khi khởi động Uvicorn, nên **mọi replica đều migrate lúc khởi động**. Khởi động hai replica cùng lúc thì chúng **đua nhau**: một cái tạo version table trong khi cái kia đang làm đúng việc đó, cái thua exit non-zero và sẽ **crash-loop suốt một lần rolling deploy**. Migration nay lấy PostgreSQL session advisory lock nên replica đồng thời **xếp hàng**, cái thứ hai đơn giản là thấy việc đã xong.
+- **11 offline test** phủ logic gate: request lỗi làm fail gate, vượt ngân sách p95, throughput dưới sàn, và **tải lệch bị bắt thay vì trung bình hoá** (lệch 1 call vẫn chấp nhận).
+- Gate cuối PASS **743/743 test** cùng `ruff check`/`ruff format --check`; gate tải hai replica thật PASS.
+- Đây là bằng chứng có kiểm soát trên một máy — không gateway, không CDN, không độ trễ mạng và không phân bố dữ liệu production. **Không phải** tuyên bố capacity.
+
+
 ---
 
 # 3. Danh sách task CHƯA làm (Pending)
