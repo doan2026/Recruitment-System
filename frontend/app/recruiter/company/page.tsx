@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ConflictRecoveryPanel } from "../../../components/ConflictRecoveryPanel";
 import { ConfirmationDialog } from "../../../components/ConfirmationDialog";
+import { CompanyMediaUploader } from "../../../components/CompanyMediaUploader";
 import { EmptyState, ErrorState, LoadingState, Metric, PageHeader, StatusBadge } from "../../../components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import {
@@ -17,13 +18,11 @@ import {
 } from "../../../lib/companyVerification";
 import { type Company, getCompany, resubmitCompanyVerification, updateCompany } from "../../../lib/person2Api";
 
-type UploadStep = "idle" | "signed" | "uploaded" | "confirmed";
 type CompanyDraft = { name: string; taxCode: string };
 
 export default function RecruiterCompanyPage() {
   const [company, setCompany] = useState<Company | null>(null);
   const [editing, setEditing] = useState(false);
-  const [uploadStep, setUploadStep] = useState<UploadStep>("idle");
   const [status, setStatus] = useState("");
   const [name, setName] = useState("");
   const [taxCode, setTaxCode] = useState("");
@@ -162,18 +161,6 @@ export default function RecruiterCompanyPage() {
     setStatus("Đã làm mới dữ liệu nền và giữ nguyên phần bạn nhập. Kiểm tra rồi bấm Lưu thay đổi để gửi lại.");
   }
 
-  function nextUploadStep() {
-    const sequence: Record<UploadStep, UploadStep> = {
-      idle: "signed",
-      signed: "uploaded",
-      uploaded: "confirmed",
-      confirmed: "idle",
-    };
-    const next = sequence[uploadStep];
-    setUploadStep(next);
-    setStatus(next === "confirmed" ? "Media đã xác nhận. Hãy gắn file vào hồ sơ khi lưu." : "");
-  }
-
   const needsOnboarding = loadError instanceof ApiClientError && loadError.code === "COMPANY_NOT_FOUND";
 
   if (!company) {
@@ -300,15 +287,15 @@ export default function RecruiterCompanyPage() {
 
         <aside className="panel">
           <h2>Luồng tải media</h2>
-          <p className="help">Chữ ký → tải trực tiếp → xác nhận → gắn vào hồ sơ.</p>
-          <ol className="stack">
-            <li className={uploadStep !== "idle" ? "notice notice-success" : "card"}>1. Xin chữ ký có Idempotency-Key</li>
-            <li className={["uploaded", "confirmed"].includes(uploadStep) ? "notice notice-success" : "card"}>2. Tải file lên uploadUrl</li>
-            <li className={uploadStep === "confirmed" ? "notice notice-success" : "card"}>3. Xác nhận fileId</li>
-          </ol>
-          <button className="btn btn-secondary" type="button" onClick={nextUploadStep}>
-            {uploadStep === "idle" ? "Bắt đầu tải logo" : uploadStep === "signed" ? "Mô phỏng tải file" : uploadStep === "uploaded" ? "Xác nhận media" : "Tải file khác"}
-          </button>
+          <p className="help">Xin chữ ký → tải trực tiếp → xác nhận canonical → gắn fileId vào hồ sơ.</p>
+          <CompanyMediaUploader
+            company={company}
+            onCompanyChange={(nextCompany) => {
+              setCompany(nextCompany);
+              setName(nextCompany.name);
+              setTaxCode(nextCompany.taxCode);
+            }}
+          />
         </aside>
       </section>
 

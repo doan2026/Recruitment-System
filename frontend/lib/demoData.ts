@@ -66,7 +66,7 @@ export interface Company {
   rejectReason?: string;
   media: {
     logo?: { fileId: string; url: string };
-    gallery: { fileId: string; url: string }[];
+    gallery: { fileId: string; url: string; type: "IMAGE" | "VIDEO"; sortOrder: number }[];
   };
   createdAt: string;
   updatedAt: string;
@@ -174,8 +174,8 @@ export const companies: Company[] = [
     media: {
       logo: { fileId: "f-logo-001", url: "/placeholder-company.png" },
       gallery: [
-        { fileId: "f-gal-001", url: "/placeholder-office-1.png" },
-        { fileId: "f-gal-002", url: "/placeholder-office-2.png" },
+        { fileId: "f-gal-001", url: "/placeholder-office-1.png", type: "IMAGE", sortOrder: 0 },
+        { fileId: "f-gal-002", url: "/placeholder-office-2.png", type: "IMAGE", sortOrder: 1 },
       ],
     },
     createdAt: baseAt(-120),

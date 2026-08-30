@@ -69,7 +69,7 @@
 | Edit company | Lưu thay đổi; legal change ở VERIFIED mở dialog | khóa submit/dialog action | ở company | badge theo response + status inline | hủy giữ draft; 409 reload/merge | dialog/form | P16.N2 Company |
 | Resubmit company verification | Gửi lại để xác minh | khóa nút, giữ trạng thái hiện tại | ở company | badge PENDING + status inline | 409 tải resource đúng một lần, không retry mutation | block trạng thái xác minh | P16.N2 Company |
 | Search | Nhập từ khóa | list loader | cùng route | result count | clear/retry | search/list heading | P16.N2 Search |
-| Upload | Bắt đầu tải | từng bước | ở form owner | step status | xin signature mới/retry | bước lỗi | P16.N2 Media handshake |
+| Upload | Chọn file / xin chữ ký | khóa action theo step | ở company | confirm rồi attach fileId | kiểm policy, xin signature mới, giữ confirmed file để retry attach | bước hiện tại | P16.N2 Media handshake |
 | Cancel/back | Hủy / Quay lại | none | owning list | none | dirty guard pending | originating context | P16.N2 |
 
 ## Navigation and responsive behavior
@@ -96,6 +96,7 @@
 - 429/503 dùng `Retry-After` khi có; không có header thì backoff có giới hạn và nút thử lại.
 - `transientRecovery.ts` chỉ auto-retry một lần khi server cấp lịch; sau đó hoặc khi thiếu header, khóa nút theo backoff 2–30 giây rồi chờ người dùng chủ động thử lại.
 - Private/no-store data không ghi Web Storage/service worker; `ApiSessionBoundary` remount toàn bộ page state khi account revision đổi hoặc logout/401.
+- Upload trực tiếp provider dùng multipart với `credentials: omit`; chỉ capability public được đưa vào form, private Company signature/confirm/attach vẫn no-store qua API client.
 - `apiClientCore.ts` là owner của envelope, error-code mapping, timeout/abort, retry policy, UUID v4 và allowlist field.
 - `NEXT_PUBLIC_API_MODE=demo|gateway` là lựa chọn tường minh; lỗi gateway không tự rơi về dữ liệu demo.
 - Access token chỉ giữ trong memory; Auth gọi `setApiSession({ token?, accountId })` để refresh cùng account không xóa state, còn đổi account phát revision. `clearApiSession` luôn phát revision kể cả cookie-only.

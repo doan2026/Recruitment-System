@@ -7,6 +7,11 @@ import {
   selectContractFields,
 } from "./apiClient";
 import type { CompanyCreateValues } from "./companyForm";
+import type {
+  CompanyMediaAssetType,
+  CompanyMediaUploadCapability,
+  CompanyMediaUploadResult,
+} from "./companyMediaUpload";
 import * as demo from "./demoData";
 
 export type {
@@ -47,7 +52,7 @@ interface BackendCompany {
   slug?: string;
   taxCode: string;
   logo?: { fileId: string; url: string } | null;
-  media?: Array<{ fileId: string; url: string; type?: string }>;
+  media?: Array<{ fileId: string; url: string; type: "IMAGE" | "VIDEO"; sortOrder: number }>;
   verifiedStatus: Company["verificationStatus"];
   rejectReason?: string | null;
   aggregateVersion: number;
@@ -144,7 +149,12 @@ function toCompany(value: BackendCompany): Company {
     rejectReason: value.rejectReason || undefined,
     media: {
       logo: value.logo || undefined,
-      gallery: (value.media ?? []).filter((item) => item.type !== "VIDEO"),
+      gallery: (value.media ?? []).map((item, index) => ({
+        fileId: item.fileId,
+        url: item.url,
+        type: item.type,
+        sortOrder: item.sortOrder ?? index,
+      })),
     },
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
@@ -269,9 +279,67 @@ export async function createCompany(
   return { ...response, data: toCompany(response.data) };
 }
 
+export async function createCompanyMediaUploadIntent(
+  companyId: string,
+  type: CompanyMediaAssetType,
+  originalFilename: string,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<CompanyMediaUploadCapability>> {
+  if (isDemoPerson2Api) {
+    return {
+      data: {
+        fileId: crypto.randomUUID().toLowerCase(),
+        uploadUrl: "https://api.cloudinary.example/upload",
+        cloudName: "demo",
+        apiKey: "demo-public-key",
+        resourceType: type === "COMPANY_VIDEO" ? "video" : "image",
+        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+        maxBytes: type === "COMPANY_LOGO" ? 2 * 1024 * 1024 : type === "COMPANY_IMAGE" ? 5 * 1024 * 1024 : 50 * 1024 * 1024,
+        allowedFormats: type === "COMPANY_VIDEO" ? ["mp4"] : ["jpg", "png", "webp"],
+        params: {},
+        signature: "demo-signature",
+      },
+      meta: null,
+    };
+  }
+  assertCanonicalUuidV4(companyId, "companyId");
+  return requestApi<CompanyMediaUploadCapability>(`${API_PATHS.companies}${companyId}/media/signature`, {
+    method: "POST",
+    privateData: true,
+    signal,
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: selectContractFields({ type, originalFilename }, ["type", "originalFilename"]),
+    maxRetries: 0,
+  });
+}
+
+export async function confirmCompanyMediaUpload(
+  companyId: string,
+  fileId: string,
+  type: CompanyMediaAssetType,
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<CompanyMediaUploadResult>> {
+  if (isDemoPerson2Api) return {
+    data: { fileId, type, url: "/placeholder-company.png" },
+    meta: null,
+  };
+  assertCanonicalUuidV4(companyId, "companyId");
+  assertCanonicalUuidV4(fileId, "fileId");
+  return requestApi<CompanyMediaUploadResult>(`${API_PATHS.companies}${companyId}/media/confirm`, {
+    method: "POST",
+    privateData: true,
+    signal,
+    body: selectContractFields({ fileId, type }, ["fileId", "type"]),
+    maxRetries: 0,
+  });
+}
+
 export interface UpdateCompanyInput {
   name?: string;
   taxCode?: string;
+  logo?: { fileId: string };
+  media?: Array<{ fileId: string; type: "IMAGE" | "VIDEO"; sortOrder: number }>;
 }
 
 export async function updateCompany(
@@ -282,7 +350,9 @@ export async function updateCompany(
   const body = selectContractFields({
     name: input.name,
     taxCode: input.taxCode,
-  }, ["name", "taxCode"]);
+    logo: input.logo,
+    media: input.media,
+  }, ["name", "taxCode", "logo", "media"]);
   if (isDemoPerson2Api) {
     const current = (await normalizeDemo(demo.getCompany())).data;
     const nameChanged = body.name !== undefined && body.name !== current.name;
@@ -291,7 +361,18 @@ export async function updateCompany(
     return {
       data: {
         ...current,
-        ...body,
+        name: typeof body.name === "string" ? body.name : current.name,
+        taxCode: typeof body.taxCode === "string" ? body.taxCode : current.taxCode,
+        media: {
+          logo: body.logo ? {
+            fileId: body.logo.fileId,
+            url: "/placeholder-company.png",
+          } : current.media.logo,
+          gallery: body.media ? body.media.map((item) => ({
+            ...item,
+            url: item.type === "VIDEO" ? "/placeholder-company-video.mp4" : "/placeholder-office-1.png",
+          })) : current.media.gallery,
+        },
         aggregateVersion: current.aggregateVersion + 1,
         verificationStatus: needsReview ? "PENDING" : current.verificationStatus,
         rejectReason: needsReview ? undefined : current.rejectReason,

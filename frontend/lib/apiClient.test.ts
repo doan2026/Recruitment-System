@@ -23,6 +23,11 @@ import {
   validateCompanyCreate,
 } from "./companyForm";
 import {
+  createMediaIdempotencyKey,
+  secondsUntilExpiry,
+  validateCompanyMediaFile,
+} from "./companyMediaUpload";
+import {
   companyVerificationView,
   isInvalidResubmissionTransition,
   requiresCompanyReverification,
@@ -381,4 +386,37 @@ test("verified legal identity changes require explicit reverification warning", 
     ...company,
     verificationStatus: "REJECTED",
   }, { name: "Công ty B", taxCode: "0202" }), false);
+});
+
+test("company media validates format and size before consuming an upload intent", () => {
+  assert.equal(validateCompanyMediaFile({ name: "logo.png", size: 1024 }, "COMPANY_LOGO"), null);
+  assert.match(
+    validateCompanyMediaFile({ name: "logo.svg", size: 1024 }, "COMPANY_LOGO") ?? "",
+    /jpg, jpeg, png, webp/,
+  );
+  assert.match(
+    validateCompanyMediaFile({ name: "clip.mp4", size: 51 * 1024 * 1024 }, "COMPANY_VIDEO") ?? "",
+    /50 MB/,
+  );
+});
+
+test("company media enforces the signed capability and expiry countdown", () => {
+  const now = Date.UTC(2026, 7, 30, 10, 0, 0);
+  const capability = {
+    allowedFormats: ["png"],
+    maxBytes: 2_000,
+    expiresAt: new Date(now + 5_500).toISOString(),
+  };
+  assert.equal(secondsUntilExpiry(capability.expiresAt, now), 6);
+  assert.equal(validateCompanyMediaFile({ name: "logo.png", size: 1_000 }, "COMPANY_LOGO", capability, now), null);
+  assert.match(
+    validateCompanyMediaFile({ name: "logo.png", size: 1_000 }, "COMPANY_LOGO", capability, now + 6_000) ?? "",
+    /hết hạn/,
+  );
+});
+
+test("company media idempotency key is stable, safe and long enough", () => {
+  const key = createMediaIdempotencyKey(() => "018f47a2-6f4d-4b7d-8c91-ff02d770a944");
+  assert.equal(key, "company-media-018f47a2-6f4d-4b7d-8c91-ff02d770a944");
+  assert.match(key, /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/);
 });
