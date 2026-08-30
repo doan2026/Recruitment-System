@@ -8,5 +8,5 @@
     "moduleResolution": "node",
     "outDir": ".test-dist"
   },
-  "include": ["lib/apiClientCore.ts", "lib/apiClient.test.ts"]
+  "include": ["lib/apiClientCore.ts", "lib/conflictRecovery.ts", "lib/apiClient.test.ts"]
 }

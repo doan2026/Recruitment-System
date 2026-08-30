@@ -4,6 +4,7 @@ import {
   type ApiEnvelope,
   assertCanonicalUuidV4,
   requestApi,
+  selectContractFields,
 } from "./apiClient";
 import * as demo from "./demoData";
 
@@ -196,6 +197,48 @@ function toApplication(value: BackendApplicationListItem): CandidateApplication 
 export async function getCompany(signal?: AbortSignal): Promise<ApiEnvelope<Company>> {
   if (isDemoPerson2Api) return normalizeDemo(demo.getCompany());
   const response = await requestApi<BackendCompany>(API_PATHS.companyMine, { privateData: true, signal });
+  return { ...response, data: toCompany(response.data) };
+}
+
+export interface UpdateCompanyInput {
+  name?: string;
+  taxCode?: string;
+}
+
+export async function updateCompany(
+  id: string,
+  input: UpdateCompanyInput,
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<Company>> {
+  const body = selectContractFields({
+    name: input.name,
+    taxCode: input.taxCode,
+  }, ["name", "taxCode"]);
+  if (isDemoPerson2Api) {
+    const current = (await normalizeDemo(demo.getCompany())).data;
+    const nameChanged = body.name !== undefined && body.name !== current.name;
+    const taxCodeChanged = body.taxCode !== undefined && body.taxCode !== current.taxCode;
+    const needsReview = current.verificationStatus === "VERIFIED" && (nameChanged || taxCodeChanged);
+    return {
+      data: {
+        ...current,
+        ...body,
+        aggregateVersion: current.aggregateVersion + 1,
+        verificationStatus: needsReview ? "PENDING" : current.verificationStatus,
+        rejectReason: needsReview ? undefined : current.rejectReason,
+        updatedAt: new Date().toISOString(),
+      },
+      meta: null,
+    };
+  }
+  assertCanonicalUuidV4(id, "companyId");
+  const response = await requestApi<BackendCompany>(`${API_PATHS.companies}${id}`, {
+    method: "PUT",
+    privateData: true,
+    signal,
+    body,
+    maxRetries: 0,
+  });
   return { ...response, data: toCompany(response.data) };
 }
 

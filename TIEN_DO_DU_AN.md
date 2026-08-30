@@ -186,7 +186,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - **Công nghệ:** Next.js 14, React 18, TypeScript.
 - **Chức năng chính:** auth UI; hồ sơ/CV; công ty; job search/detail; apply/bookmark; recruiter pipeline/offer/dashboard; interview/video/chat/notification; admin console.
 - **Phụ thuộc:** API Gateway và hợp đồng API của toàn bộ backend.
-- **Trạng thái:** 🟡 Baseline React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter hai chế độ `demo|gateway` đã nối các read flow Company, Job Search/Recommendation và Application qua Gateway; envelope, safe error, timeout/abort, trailing slash, UUID v4 và allowlist có unit test. Auth session thật, mutation flow và E2E vẫn pending; P16.N2 hiện 4/52.
+- **Trạng thái:** 🟡 Baseline React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter hai chế độ `demo|gateway` đã nối các read flow Company, Job Search/Recommendation, Application và mutation cập nhật Company qua Gateway; envelope, safe error, timeout/abort, trailing slash, UUID v4, allowlist và recovery `COMPANY_UPDATE_CONFLICT` có unit test. Auth session thật, các mutation còn lại và E2E vẫn pending; P16.N2 hiện 5/52.
 
 ## T14 — Tích hợp, kiểm thử và vận hành
 
@@ -1336,11 +1336,11 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [ ] Admin dashboard, company/job approval, user/report management và export.
 - [ ] Loading/error/empty state, responsive UI, accessibility và E2E test.
 
-### P16.N2 — FE tiêu thụ bốn service của Người 2 (4/52 tích hợp API thật; baseline UI đã có)
+### P16.N2 — FE tiêu thụ bốn service của Người 2 (5/52 tích hợp API thật; baseline UI đã có)
 
 > Bổ sung ngày 30/08/2026 theo yêu cầu. Đây là danh sách chi tiết task FE **chưa làm**, nhưng **chỉ giới hạn ở phần tiêu thụ bốn service của Người 2** (Company, Job & Search, Application, AI chatbot). FE của Auth, Profile, Media, Interview, Notification, Admin và Chat **không** nằm trong danh sách này. Bản thân việc code FE vẫn **thuộc Người 3** — mục này ghi ra để thấy backend của Người 2 đang chờ FE làm những gì, không phải chuyển việc sang Người 2.
 >
-> **Hiện trạng FE cập nhật 30/08/2026:** baseline React/Next.js theo Stitch đã có 8 route chính. Task `feature/frontend/person2-api-client-foundation` đã thêm adapter hai chế độ tường minh `demo|gateway`, nối các read flow có endpoint thật; riêng offer hiển thị rõ API chưa có endpoint đọc, chuẩn hóa envelope/error/no-store/abort và có unit test. Demo vẫn là mặc định phát triển độc lập; production phải đặt `NEXT_PUBLIC_API_MODE=gateway` và cấp session từ Auth. Chỉ checkbox có implementation + test trực tiếp mới được đánh dấu.
+> **Hiện trạng FE cập nhật 30/08/2026:** baseline React/Next.js theo Stitch đã có 8 route chính. Task `feature/frontend/person2-api-client-foundation` đã thêm adapter hai chế độ tường minh `demo|gateway`, nối các read flow có endpoint thật; task `feature/frontend/person2-conflict-recovery` nối `PUT /companies/:id` và recovery `COMPANY_UPDATE_CONFLICT` giữ draft, tải lại, so sánh rồi chờ người dùng quyết định, không retry mutation. Riêng offer hiển thị rõ API chưa có endpoint đọc. Demo vẫn là mặc định phát triển độc lập; production phải đặt `NEXT_PUBLIC_API_MODE=gateway` và cấp session từ Auth. Chỉ checkbox có implementation + test trực tiếp mới được đánh dấu.
 
 **Bàn giao baseline theo task:**
 
@@ -1352,6 +1352,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [x] Thêm `apiClientCore.ts` + `person2Api.ts`: nối Company/Job Search/Recommendation/Application read flow với Gateway, không fallback demo khi production lỗi.
 - [x] Thêm timeout/abort, debounce search 300 ms, safe error mapping, Retry-After/backoff, memory-only access token và shared error/retry state.
 - [x] Thêm 7 unit test API contract, lệnh `npm test`/`npm run typecheck` và cấu hình `premium-ui.json` tương ứng.
+- [x] Nối cập nhật Company với API thật và thêm shared conflict snapshot/panel: giữ draft, tải server đúng một lần, so sánh phiên bản/trường và chỉ gửi lại khi người dùng chủ động bấm lưu; 10/10 API/conflict unit test, typecheck, build và strict UI audit PASS.
 - [ ] Nối các màn trên với API Gateway/Auth session thật, hoàn thiện error mapping/409/429/503 và thêm component/E2E test trước khi đóng checkbox endpoint bên dưới.
 >
 > Danh sách bám theo **48 endpoint user-facing có thật**, khảo sát trực tiếp từ code controller và đối chiếu với `infra/nginx/nginx.conf` — không suy đoán từ tài liệu.
@@ -1361,6 +1362,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [x] API client bóc envelope thống nhất: thành công là `{data, meta}`, lỗi là `{code, message, details}`. Hiển thị theo `code` chứ không hiển thị `message` thô; `details` mới là chỗ mang thông tin điều hướng (`currentStatus`, `reason`, `eligibleAt`, `retryAfterSeconds`).
 - [x] Gọi đúng đường dẫn có **dấu `/` cuối** cho ba route collection — `POST /companies/`, `POST /jobs/`, `POST|GET /applications/`. Gateway chỉ khai báo `location /companies/`, `/jobs/`, `/applications/`, nên bỏ dấu `/` là nhận 404 **từ nginx**, không phải từ service; lỗi này không có mã nghiệp vụ để bắt.
 - [ ] Bộ xử lý `409` dùng chung cho optimistic locking: tải lại resource, so sánh, cho người dùng quyết định gửi lại — **không retry mù**. Áp cho `APPLICATION_CHANGED_CONCURRENTLY`, `JOB_STATE_CHANGED`, `COMPANY_UPDATE_CONFLICT`.
+  - Shared primitive và Company consumer đã hoàn thành; Job/Application consumer sẽ đóng cùng mutation flow tương ứng.
 - [ ] Bộ xử lý `429`/`503` phân biệt hai nhóm: nhóm **có** `Retry-After` (đếm ngược, tự thử lại) và nhóm **không có** như `MEDIA_UPLOAD_RATE_LIMITED` của Company hay AI rate-limit quy về `503` ở Application (phải tự cài backoff và khoá nút).
 - [ ] Tôn trọng `Cache-Control: private, no-store` + `Vary: Authorization` trên gợi ý việc làm, gợi ý ứng viên, danh sách hồ sơ, metadata/link tải CV và chat: không service worker, không `localStorage`, và **xoá sạch state khi đăng xuất hoặc đổi tài khoản**.
 - [x] Kiểm định dạng UUID v4 trước khi điều hướng vào trang chi tiết, vì id sai định dạng bị chặn bằng `400 INVALID_JOB_ID` trước khi tới service.
@@ -1373,7 +1375,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [ ] Dialog cảnh báo chuyển trạng thái ngầm: sửa `name` hoặc `taxCode` của công ty đang `VERIFIED` qua `PUT /companies/:id` sẽ **tự đưa công ty về `PENDING`** và xoá `rejectReason`. Backend không hỏi xác nhận — FE phải tự hỏi và cập nhật lại badge.
 - [ ] Handshake tải media ba bước: `POST /media/signature` (kèm `Idempotency-Key` tự sinh) → upload thẳng lên `uploadUrl` → `POST /media/confirm` → rồi mới `PUT /companies/:id` với `fileId`. FE tự kiểm `maxBytes`/`allowedFormats`, đếm ngược `expiresAt`, xin chữ ký mới khi hết hạn và dọn `fileId` đã confirm nhưng chưa gắn.
 - [ ] Ngữ nghĩa **replace-all** của trường media trong `PUT`: mỗi lần lưu phải gửi lại toàn bộ thư viện kèm `sortOrder` (kéo thả để sắp xếp, xoá ảnh = bỏ khỏi mảng); tự kiểm tối đa 10 IMAGE + 1 VIDEO, không trùng `fileId` kể cả trùng logo, không gửi đồng thời `logo` với `removeLogo=true`.
-- [ ] Xử lý `409 COMPANY_UPDATE_CONFLICT`: API **không** có `If-Match` hay `version` trong body, nên phải `GET /companies/me` lại, so `aggregateVersion`, merge thay đổi rồi gửi lại kèm thông báo "dữ liệu vừa bị người khác sửa".
+- [x] Xử lý `409 COMPANY_UPDATE_CONFLICT`: API **không** có `If-Match` hay `version` trong body; form đã `GET /companies/me` lại, so `aggregateVersion` và từng field, giữ draft trong memory, cho chọn bản rồi yêu cầu người dùng bấm lưu lại kèm thông báo "dữ liệu vừa bị người khác sửa".
 - [ ] Trang tìm kiếm công ty công khai với cursor pagination: giữ `nextCursor` mờ, **khoá không cho đổi `q`/`limit`** giữa các lần tải thêm (cursor ký HMAC kèm `q`+`limit`, sai là `400`), infinite scroll dựa trên `hasMore` vì **không có `total`** nên không làm được thanh số trang.
 - [ ] Trang công ty công khai: chịu được `logo`/`logoUrl` `null` và phần tử media thiếu `mediaReferenceId` bị lọc khỏi response — cần placeholder, không giả định ảnh vừa confirm đã hiện ngay.
 - [ ] Luồng mời thành viên phía OWNER: hiện `invitationToken` **đúng một lần** để copy/gửi thủ công (backend không tự gửi mail và không trả lại token lần hai; mời lại cùng email sẽ vô hiệu token cũ).

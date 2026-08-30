@@ -38,6 +38,7 @@
 | Form | Shared `.field`/form policy | UX contract | create / edit | validation + build |
 | Scrollbar | `frontend/app/globals.css` | DESIGN.md | stable gutter | computed style |
 | CRUD | Route + `frontend/lib/person2Api.ts` | P16.N2 | explicit demo / gateway | API unit + full-flow E2E pending |
+| Optimistic conflict | `frontend/lib/conflictRecovery.ts` + `ConflictRecoveryPanel` | P16.N2 | Company / Job / Application | API unit + consumer flow |
 
 ## Component behavior
 
@@ -88,6 +89,7 @@
 - Mutation mặc định pessimistic; optimistic chỉ cho state demo có rollback rõ.
 - Chặn duplicate submit/request theo từng resource/session.
 - 409 phải reload + so sánh + quyết định gửi lại, không retry mù.
+- Shared conflict owner giữ draft trong memory, chỉ reload resource đúng một lần và không gọi lại mutation; consumer phải yêu cầu người dùng chọn bản rồi tự submit lại.
 - 429/503 dùng `Retry-After` khi có; không có header thì backoff có giới hạn và nút thử lại.
 - Private/no-store data không ghi localStorage và phải xóa khi logout/đổi account.
 - `apiClientCore.ts` là owner của envelope, error-code mapping, timeout/abort, retry policy, UUID v4 và allowlist field.
