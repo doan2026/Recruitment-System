@@ -469,6 +469,46 @@ vector-store work happens. Scoped authorization and payload validation both run
 before the charge, so an unauthenticated or malformed caller can never drain
 another subject's budget.
 
+## Metrics and SLO measurement
+
+Availability and latency SLOs need numbers that outlive a single request, and
+the service had none: no counters, no histogram, nothing to point a monitor at.
+`GET /metrics` now serves Prometheus exposition for every request the service
+handles.
+
+```bash
+curl -H "X-Internal-Api-Key: $INTERNAL_API_KEY" http://ai-service:8000/metrics
+```
+
+It is guarded by the same internal credential as the other internal surfaces,
+because request rates and latency distributions are operational detail rather
+than public information, and it is served `no-store`.
+
+Two properties matter more than completeness:
+
+- **No identifiers in labels.** A series carries a route name and a status
+  class and nothing else. Labelling by `cv_id`, `job_id` or user would turn a
+  scrape into a record of who asked for what, which is what the rest of the
+  service is built to avoid.
+- **Bounded cardinality.** Only known routes are labelled; every other path
+  collapses to `other`, so a scanner walking random paths cannot grow the
+  registry. Five hundred distinct unknown paths still produce one series.
+
+Exposed series:
+
+| Metric | Type | Labels |
+| --- | --- | --- |
+| `ai_http_requests_total` | counter | `route`, `status` (`2xx`/`4xx`/`5xx`) |
+| `ai_http_request_duration_seconds` | histogram | `route` |
+
+Requests are recorded whatever the outcome, including rejections and
+unhandled errors, because a 401 flood and a crash are both availability
+events. The implementation is dependency-free so the runtime image stays as
+light as the project intends.
+
+This makes SLOs *measurable*. It is not a monitoring deployment: scraping,
+dashboards, alert rules and error budgets remain infrastructure work.
+
 ## Cross-replica invariant gate
 
 Running more than one API replica is only safe if the parts of the service that

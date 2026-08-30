@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -29,6 +30,7 @@ from app.database import (
 )
 from app.errors import ServiceError, register_exception_handlers
 from app.matching import MatchService, get_match_service
+from app.metrics import MetricsRegistry
 from app.models import (
     CandidateRecommendationItem,
     ChatData,
@@ -321,7 +323,29 @@ def create_app(
     application.state.chat_executor = None
     application.state.chat_admission = None
     application.state.recommendation_limiter = recommendation_limiter
+    application.state.metrics = MetricsRegistry()
     register_exception_handlers(application)
+
+    @application.middleware("http")
+    async def record_request_metrics(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        registry = cast(MetricsRegistry, request.app.state.metrics)
+        started = time.perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            # A crash is still an availability event; record it before it is
+            # translated into a 500 further up.
+            registry.observe(request.url.path, 500, time.perf_counter() - started)
+            raise
+        registry.observe(
+            request.url.path,
+            response.status_code,
+            time.perf_counter() - started,
+        )
+        return response
 
     @application.middleware("http")
     async def protect_chat_response(
@@ -334,6 +358,23 @@ def create_app(
             response.headers["Pragma"] = "no-cache"
             response.headers["Vary"] = "Authorization"
         return response
+
+    @application.get(
+        "/metrics",
+        responses={401: {"model": ErrorResponse}},
+    )
+    def metrics(
+        request: Request,
+        _: Annotated[None, Depends(require_internal_api_key)],
+    ) -> Response:
+        # Operational detail is not public: the scrape uses the same internal
+        # credential as the other internal surfaces.
+        registry = cast(MetricsRegistry, request.app.state.metrics)
+        return Response(
+            content=registry.render(),
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @application.get("/health")
     def health() -> dict[str, str]:
