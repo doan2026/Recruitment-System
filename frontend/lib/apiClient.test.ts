@@ -31,6 +31,7 @@ import {
 import { offerResponseRecoveryView } from "./offerResponseRecovery";
 import { candidateApplicationActions, recruiterApplicationActions, validateRecruiterApplicationStatus } from "./applicationStateMachine";
 import { applicationCooldownView } from "./applicationCooldown";
+import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, validateRecruiterApplicationFilters, type RecruiterApplicationFilterDraft } from "./recruiterApplicationTable";
 import {
   normalizeInvitationEmail,
   validateInvitationEmail,
@@ -396,6 +397,30 @@ test("reapplication cooldown renders the backend eligibleAt as a concrete Vietna
   assert.match(view?.description ?? "", /30 ngày/);
   assert.equal(applicationCooldownView(new ApiClientError({ code: "REAPPLICATION_COOLDOWN", status: 409 })), null);
   assert.equal(applicationCooldownView(new ApiClientError({ code: "APPLICATION_CHANGED_CONCURRENTLY", status: 409, details: { eligibleAt: "2026-10-01T02:30:00Z" } })), null);
+});
+
+test("recruiter Application filters validate date order and normalize the exact query", () => {
+  const draft: RecruiterApplicationFilterDraft = { status: "REVIEWING", appliedFrom: "2026-08-01", appliedTo: "2026-08-31", skills: "React, Java, React", sort: "MATCH_SCORE_DESC", size: 100 };
+  assert.equal(validateRecruiterApplicationFilters(draft), null);
+  assert.deepEqual(normalizeRecruiterApplicationQuery("job-id", draft, 2), {
+    jobId: "job-id",
+    status: "REVIEWING",
+    appliedFrom: "2026-08-01T00:00:00.000Z",
+    appliedTo: "2026-08-31T23:59:59.999Z",
+    skills: ["React", "Java"],
+    sort: "MATCH_SCORE_DESC",
+    page: 2,
+    size: 100,
+  });
+  assert.match(validateRecruiterApplicationFilters({ ...draft, appliedFrom: "2026-09-01" }) ?? "", /trước hoặc bằng/);
+  assert.match(validateRecruiterApplicationFilters({ ...draft, size: 101 }) ?? "", /1 đến 100/);
+});
+
+test("offset Application pages restart when totals move or records overlap", () => {
+  assert.equal(shouldRestartOffsetApplications({ page: 1, expectedTotal: 40, actualTotal: 41, seenIds: new Set(), currentIds: ["c"] }), true);
+  assert.equal(shouldRestartOffsetApplications({ page: 1, expectedTotal: 40, actualTotal: 40, seenIds: new Set(["a", "b"]), currentIds: ["b", "c"] }), true);
+  assert.equal(shouldRestartOffsetApplications({ page: 1, expectedTotal: 40, actualTotal: 40, seenIds: new Set(["a", "b"]), currentIds: ["c", "d"] }), false);
+  assert.equal(shouldRestartOffsetApplications({ page: 0, expectedTotal: 40, actualTotal: 41, seenIds: new Set(["a"]), currentIds: ["a"] }), false);
 });
 
 test("Retry-After drives one bounded automatic retry before manual recovery", () => {
