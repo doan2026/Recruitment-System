@@ -137,6 +137,7 @@ interface BackendJob {
   skills: string[];
   deadline: string;
   status?: Job["status"];
+  rejectionReason?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -244,6 +245,7 @@ function toJob(value: BackendJob, source: JobDataSource = "POSTGRESQL"): Job {
     source,
     ownerName: value.createdBy || value.companyName || "Nhà tuyển dụng",
     aggregateVersion: 0,
+    rejectionReason: value.rejectionReason ?? undefined,
     createdAt: value.createdAt ?? value.updatedAt ?? new Date(0).toISOString(),
     updatedAt: value.updatedAt ?? value.createdAt ?? new Date(0).toISOString(),
   };
@@ -689,6 +691,38 @@ export async function getRecruiterJobs(signal?: AbortSignal): Promise<ApiEnvelop
   if (isDemoPerson2Api) return normalizeDemo(demo.getRecruiterJobs());
   const response = await requestApi<BackendJob[]>(API_PATHS.jobMine, { privateData: true, signal });
   return { ...response, data: response.data.map((item) => toJob(item)) };
+}
+
+export async function submitJobForApproval(jobId: string, signal?: AbortSignal): Promise<ApiEnvelope<Job>> {
+  if (isDemoPerson2Api) {
+    const job = demo.jobs.find((item) => item.id === jobId);
+    if (!job) throw new ApiClientError({ code: "JOB_NOT_FOUND", status: 404 });
+    return { data: { ...job, status: "PENDING_APPROVAL", rejectionReason: undefined }, meta: null };
+  }
+  assertCanonicalUuidV4(jobId, "jobId");
+  const response = await requestApi<BackendJob>(`${API_PATHS.jobs}${jobId}/publish`, {
+    method: "PATCH",
+    privateData: true,
+    signal,
+    maxRetries: 0,
+  });
+  return { ...response, data: toJob(response.data) };
+}
+
+export async function closeRecruiterJob(jobId: string, signal?: AbortSignal): Promise<ApiEnvelope<Job>> {
+  if (isDemoPerson2Api) {
+    const job = demo.jobs.find((item) => item.id === jobId);
+    if (!job) throw new ApiClientError({ code: "JOB_NOT_FOUND", status: 404 });
+    return { data: { ...job, status: "CLOSED" }, meta: null };
+  }
+  assertCanonicalUuidV4(jobId, "jobId");
+  const response = await requestApi<BackendJob>(`${API_PATHS.jobs}${jobId}/close`, {
+    method: "PATCH",
+    privateData: true,
+    signal,
+    maxRetries: 0,
+  });
+  return { ...response, data: toJob(response.data) };
 }
 
 export async function getApplications(candidateId?: string, signal?: AbortSignal): Promise<ApiEnvelope<CandidateApplication[]>> {

@@ -32,6 +32,7 @@ import {
   roleAfterOwnershipTransfer,
   withoutRemovedMember,
 } from "./companyMembership";
+import { nextRecruiterJobStatus, recruiterJobActionLabel, recruiterJobActions } from "./jobLifecycle";
 import {
   normalizeCompanyCreate,
   validateCompanyCreate,
@@ -580,4 +581,20 @@ test("removed members are deleted from the local authoritative list", () => {
   const members = [{ userId: "owner" }, { userId: "member" }];
   assert.deepEqual(withoutRemovedMember(members, "member"), [{ userId: "owner" }]);
   assert.deepEqual(withoutRemovedMember(members, "unknown"), members);
+});
+
+
+test("recruiter Job actions are derived only from the backend status", () => {
+  assert.deepEqual(recruiterJobActions("DRAFT"), ["SUBMIT_FOR_APPROVAL"]);
+  assert.deepEqual(recruiterJobActions("PENDING_APPROVAL"), []);
+  assert.deepEqual(recruiterJobActions("PUBLISHED"), ["CLOSE"]);
+  assert.deepEqual(recruiterJobActions("CLOSED"), []);
+  assert.deepEqual(recruiterJobActions("EXPIRED"), []);
+});
+
+test("recruiter Job action copy and target status match backend semantics", () => {
+  assert.equal(recruiterJobActionLabel("SUBMIT_FOR_APPROVAL"), "Gửi admin duyệt");
+  assert.equal(nextRecruiterJobStatus("SUBMIT_FOR_APPROVAL"), "PENDING_APPROVAL");
+  assert.equal(recruiterJobActionLabel("CLOSE"), "Đóng tin");
+  assert.equal(nextRecruiterJobStatus("CLOSE"), "CLOSED");
 });
