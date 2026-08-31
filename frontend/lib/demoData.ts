@@ -456,6 +456,13 @@ export async function getCompany() {
 
 export async function getPublicJobs(search: {
   q?: string;
+  location?: string;
+  salaryMin?: number;
+  salaryMax?: number;
+  skills?: string[];
+  experienceYears?: number;
+  jobType?: "FULL_TIME" | "PART_TIME" | "CONTRACT";
+  sort?: "RELEVANCE" | "NEWEST" | "SALARY_DESC";
   mode: SearchMode;
   page?: number;
   limit?: number;
@@ -473,9 +480,18 @@ export async function getPublicJobs(search: {
         item.location.toLowerCase().includes(keyword) ||
         item.department.toLowerCase().includes(keyword);
       const matchSource = allowedSource ? item.source === allowedSource : true;
-      return matchKeyword && matchSource;
+      const matchLocation = search.location ? item.location.toLocaleLowerCase("vi").includes(search.location.toLocaleLowerCase("vi")) : true;
+      const matchSalaryMin = search.salaryMin === undefined || item.isNegotiable || (item.salaryMax ?? item.salaryMin) >= search.salaryMin;
+      const matchSalaryMax = search.salaryMax === undefined || item.isNegotiable || item.salaryMin <= search.salaryMax;
+      const matchSkills = !search.skills?.length || search.skills.every((skill) => item.skills.some((value) => value.toLocaleLowerCase("vi") === skill.toLocaleLowerCase("vi")));
+      const matchExperience = search.experienceYears === undefined || (item.experienceYears ?? 0) <= search.experienceYears;
+      const expectedType = search.jobType === "FULL_TIME" ? "FULLTIME" : search.jobType === "PART_TIME" ? "PARTTIME" : search.jobType;
+      const matchType = !expectedType || item.type === expectedType;
+      return matchKeyword && matchSource && matchLocation && matchSalaryMin && matchSalaryMax && matchSkills && matchExperience && matchType;
     })
-    .sort((a, b) => (a.updatedAt > b.updatedAt ? -1 : 1));
+    .sort((a, b) => search.sort === "SALARY_DESC"
+      ? (b.salaryMax ?? b.salaryMin) - (a.salaryMax ?? a.salaryMin)
+      : (a.updatedAt > b.updatedAt ? -1 : 1));
 
   if (search.mode === "OFFSET") {
     const page = Math.max(search.page || 1, 1);
@@ -487,6 +503,7 @@ export async function getPublicJobs(search: {
       limit,
       total: list.length,
       hasMore: start + limit < list.length,
+      source: "ELASTICSEARCH",
     });
   }
 
@@ -501,7 +518,7 @@ export async function getPublicJobs(search: {
     nextCursor: next < list.length ? String(next) : null,
     hasMore: next < list.length,
     limit,
-    source: "CURSOR",
+    source: "ELASTICSEARCH",
   });
 }
 

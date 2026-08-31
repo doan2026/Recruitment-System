@@ -9,6 +9,7 @@ import {
 } from "./apiClient";
 import type { CompanyCreateValues } from "./companyForm";
 import type { RecruiterJobPayload } from "./jobForm";
+import type { PublicJobSearchFilters } from "./publicJobSearch";
 import type {
   CompanyMediaAssetType,
   CompanyMediaUploadCapability,
@@ -653,25 +654,33 @@ export async function removeCompanyMember(
   });
 }
 
-export async function getPublicJobs(search: {
-  q?: string;
+export interface PublicJobSearchRequest extends PublicJobSearchFilters {
   mode: SearchMode;
   page?: number;
   limit?: number;
   cursor?: string | null;
   source?: JobDataSource | "";
-}, signal?: AbortSignal): Promise<ApiEnvelope<Job[]>> {
+}
+
+export async function getPublicJobs(search: PublicJobSearchRequest, signal?: AbortSignal): Promise<ApiEnvelope<Job[]>> {
   if (isDemoPerson2Api) return normalizeDemo(demo.getPublicJobs(search));
   const response = await requestApi<JobSearchResult>(API_PATHS.jobSearch, {
     signal,
     query: {
       q: search.q,
+      location: search.location,
+      salaryMin: search.salaryMin,
+      salaryMax: search.salaryMax,
+      skills: search.skills,
+      experienceYears: search.experienceYears,
+      jobType: search.jobType,
+      sort: search.sort,
       pagination: search.mode,
       page: search.mode === "OFFSET" ? search.page : undefined,
       limit: search.limit,
       cursor: search.mode === "CURSOR" ? search.cursor : undefined,
     },
-    allowedQueryKeys: ["q", "pagination", "page", "limit", "cursor"],
+    allowedQueryKeys: ["q", "location", "salaryMin", "salaryMax", "skills", "experienceYears", "jobType", "sort", "pagination", "page", "limit", "cursor"],
   });
   return {
     data: response.data.items.map((item) => toJob(item, response.data.source)),

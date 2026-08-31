@@ -54,7 +54,7 @@
 ## Dataset navigation
 
 - Recruiter-owned `/jobs/mine`: client filter/page because API trả toàn bộ mảng.
-- Candidate search: offset hoặc cursor đúng hợp đồng backend; đổi filter xóa cursor.
+- Candidate search: form chỉ áp criteria sau submit; giữ `q/location/salary/skills/experience/jobType/sort/limit` xuyên suốt cursor chain, append khử trùng theo id; đổi criteria/mode/limit xóa cursor. OFFSET dừng trước cửa sổ 10.000 và cho chuyển CURSOR hoặc focus về filter.
 - Public Company search: giữ signed cursor trong memory, khóa `q`/`limit` khi đang tải chuỗi và kết thúc theo `hasMore`; không hiển thị `total`/số trang.
 - Public Company detail: `logoUrl=null` dùng initials placeholder; media chỉ lấy từ public response, giữ `sortOrder`, có empty state và không optimistic-insert media vừa confirm.
 - Recommendation: load-more chỉ khi source AI có `nextCursor`.
@@ -73,6 +73,7 @@
 | Edit company | Lưu thay đổi; legal change ở VERIFIED mở dialog | khóa submit/dialog action | ở company | badge theo response + status inline | hủy giữ draft; 409 reload/merge | dialog/form | P16.N2 Company |
 | Resubmit company verification | Gửi lại để xác minh | khóa nút, giữ trạng thái hiện tại | ở company | badge PENDING + status inline | 409 tải resource đúng một lần, không retry mutation | block trạng thái xác minh | P16.N2 Company |
 | Search | Nhập từ khóa | list loader | cùng route | result count | clear/retry | search/list heading | P16.N2 Search |
+| Public Job pagination | Áp dụng filter / đổi mode / tải thêm | giữ list cũ khi continuation | cùng route | tổng OFFSET hoặc số đã tải CURSOR | lỗi quá sâu có CTA đổi mode/lọc hẹp | filter lỗi đầu tiên hoặc list | P16.N2 Job Search |
 | Public company cursor search | Nhập từ khóa / tải thêm | khóa `q`/`limit` trong cursor chain | `/companies` | append theo `hasMore` | retry hoặc tìm kiếm mới | ô tìm kiếm / list heading | P16.N2 Company Search |
 | Invite company member | OWNER nhập email | khóa submit | ở hồ sơ công ty | hiện token một lần để copy | giữ email + safe error; clipboard fallback | token rồi email input | P16.N2 Company Member |
 | Accept company invitation | Recruiter dán token | khóa submit | route nhận lời mời | membership + CTA mở công ty | CTA riêng theo 404/410/409/403/401 | error action hoặc success heading | P16.N2 Company Member |
