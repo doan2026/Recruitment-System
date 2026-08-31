@@ -74,6 +74,7 @@
 | Resubmit company verification | Gửi lại để xác minh | khóa nút, giữ trạng thái hiện tại | ở company | badge PENDING + status inline | 409 tải resource đúng một lần, không retry mutation | block trạng thái xác minh | P16.N2 Company |
 | Search | Nhập từ khóa | list loader | cùng route | result count | clear/retry | search/list heading | P16.N2 Search |
 | Public Job pagination | Áp dụng filter / đổi mode / tải thêm | giữ list cũ khi continuation | cùng route | tổng OFFSET hoặc số đã tải CURSOR | lỗi quá sâu có CTA đổi mode/lọc hẹp | filter lỗi đầu tiên hoặc list | P16.N2 Job Search |
+| Cursor stale recovery | Backend báo stale search/recommendation | giữ list cũ, restart tối đa một lần | cùng route | thông báo mềm + snapshot mới | stale lặp lại mới thành error state | đầu vùng kết quả | P16.N2 Job Search |
 | Public company cursor search | Nhập từ khóa / tải thêm | khóa `q`/`limit` trong cursor chain | `/companies` | append theo `hasMore` | retry hoặc tìm kiếm mới | ô tìm kiếm / list heading | P16.N2 Company Search |
 | Invite company member | OWNER nhập email | khóa submit | ở hồ sơ công ty | hiện token một lần để copy | giữ email + safe error; clipboard fallback | token rồi email input | P16.N2 Company Member |
 | Accept company invitation | Recruiter dán token | khóa submit | route nhận lời mời | membership + CTA mở công ty | CTA riêng theo 404/410/409/403/401 | error action hoặc success heading | P16.N2 Company Member |
@@ -106,6 +107,7 @@
 - Shared conflict owner giữ draft trong memory, chỉ reload resource đúng một lần và không gọi lại mutation; consumer phải yêu cầu người dùng chọn bản rồi tự submit lại.
 - 429/503 dùng `Retry-After` khi có; không có header thì backoff có giới hạn và nút thử lại.
 - `transientRecovery.ts` chỉ auto-retry một lần khi server cấp lịch; sau đó hoặc khi thiếu header, khóa nút theo backoff 2–30 giây rồi chờ người dùng chủ động thử lại.
+- `cursorRecovery.ts` chỉ nhận hai exact stale code; consumer bỏ cursor, giữ list cũ trong lúc tải trang đầu và restart đúng một lần. Scope mismatch/page-too-deep không được ngụy trang thành stale.
 - Private/no-store data không ghi Web Storage/service worker; `ApiSessionBoundary` remount toàn bộ page state khi account revision đổi hoặc logout/401. Vì vậy token invitation đang dán cũng bị xóa ở 401 và người dùng phải dán lại sau khi đăng nhập.
 - Upload trực tiếp provider dùng multipart với `credentials: omit`; chỉ capability public được đưa vào form, private Company signature/confirm/attach vẫn no-store qua API client.
 - `apiClientCore.ts` là owner của envelope, error-code mapping, timeout/abort, retry policy, UUID v4 và allowlist field.
