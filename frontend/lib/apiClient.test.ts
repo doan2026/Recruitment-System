@@ -34,6 +34,7 @@ import { candidateApplicationActions, recruiterApplicationActions, validateRecru
 import { applicationCooldownView } from "./applicationCooldown";
 import { activeJobsMetricView, bookmarkCardView, dashboardWarningView } from "./applicationDegradedStates";
 import { AI_MATCH_POLL_DELAY_MS, aiMatchNotReadyView } from "./aiMatchRecovery";
+import { isCvDownloadFresh, resolveFreshCvDownload } from "./recruiterCvAccess";
 import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, validateRecruiterApplicationFilters, type RecruiterApplicationFilterDraft } from "./recruiterApplicationTable";
 import {
   normalizeInvitationEmail,
@@ -483,6 +484,35 @@ test("AI match not-ready is pollable business readiness, never an optimistic con
   assert.equal(new Set(views.map((view) => view?.message)).size, reasons.length);
   assert.equal(aiMatchNotReadyView(new ApiClientError({ code: "APPLICATION_CHANGED_CONCURRENTLY", status: 409 })), null);
   assert.equal(aiMatchNotReadyView(new ApiClientError({ code: "AI_MATCH_NOT_READY", status: 503 })), null);
+});
+
+test("recruiter CV links must be HTTPS and remain fresh beyond the navigation guard", () => {
+  const now = Date.parse("2026-08-31T00:00:00Z");
+  const base = { cvId: "cv-1", url: "https://media.test/cv.pdf", expiresAt: "2026-08-31T00:00:02Z" };
+  assert.equal(isCvDownloadFresh(base, now), true);
+  assert.equal(isCvDownloadFresh({ ...base, expiresAt: "2026-08-31T00:00:01Z" }, now), false);
+  assert.equal(isCvDownloadFresh({ ...base, url: "http://media.test/cv.pdf" }, now), false);
+  assert.equal(isCvDownloadFresh({ ...base, expiresAt: "invalid" }, now), false);
+});
+
+test("expired recruiter CV links are refreshed exactly once and never cached", async () => {
+  const now = Date.parse("2026-08-31T00:00:00Z");
+  let calls = 0;
+  const download = await resolveFreshCvDownload(async () => {
+    calls += 1;
+    return {
+      cvId: "cv-1",
+      url: "https://media.test/cv.pdf",
+      expiresAt: calls === 1 ? "2026-08-31T00:00:00Z" : "2026-08-31T00:05:00Z",
+    };
+  }, () => now);
+  assert.equal(calls, 2);
+  assert.equal(download.expiresAt, "2026-08-31T00:05:00Z");
+
+  await assert.rejects(
+    resolveFreshCvDownload(async () => ({ cvId: "cv-1", url: "https://media.test/cv.pdf", expiresAt: "2026-08-31T00:00:00Z" }), () => now),
+    (error: unknown) => error instanceof ApiClientError && error.code === "CV_DOWNLOAD_EXPIRED",
+  );
 });
 
 test("Retry-After drives one bounded automatic retry before manual recovery", () => {
