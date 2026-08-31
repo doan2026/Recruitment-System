@@ -102,6 +102,13 @@ export interface CreatedCompanyInvitation {
   invitationToken: string;
 }
 
+export interface RecruiterCompanyMembership {
+  companyId: string;
+  name: string;
+  verifiedStatus: Company["verificationStatus"];
+  memberRole: "OWNER" | "MEMBER";
+}
+
 interface BackendJob {
   id: string;
   companyId: string;
@@ -515,6 +522,31 @@ export async function inviteCompanyMember(
   assertCanonicalUuidV4(companyId, "companyId");
   const body = selectContractFields({ email }, ["email"] as const);
   return requestApi<CreatedCompanyInvitation>(`${API_PATHS.companies}${companyId}/members`, {
+    method: "POST",
+    privateData: true,
+    signal,
+    body,
+    maxRetries: 0,
+  });
+}
+
+export async function acceptCompanyInvitation(
+  token: string,
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<RecruiterCompanyMembership>> {
+  if (isDemoPerson2Api) {
+    return {
+      data: {
+        companyId: demo.companies[0]?.id ?? "demo-company",
+        name: demo.companies[0]?.name ?? "Doanh nghiệp demo",
+        verifiedStatus: demo.companies[0]?.verificationStatus ?? "PENDING",
+        memberRole: "MEMBER",
+      },
+      meta: null,
+    };
+  }
+  const body = selectContractFields({ token }, ["token"] as const);
+  return requestApi<RecruiterCompanyMembership>(`${API_PATHS.companies}invitations/accept`, {
     method: "POST",
     privateData: true,
     signal,

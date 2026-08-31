@@ -16,6 +16,7 @@ const navItems = [
   { label: "Ứng tuyển của tôi", href: "/candidate/applications" },
   { label: "Tuyển dụng", href: "/recruiter/jobs" },
   { label: "Hồ sơ công ty", href: "/recruiter/company" },
+  { label: "Nhận lời mời", href: "/recruiter/invitations/accept" },
   { label: "AI Assistant", href: "/ai" },
 ];
 
