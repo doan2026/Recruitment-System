@@ -1397,8 +1397,9 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [x] Khóa public API boundary cho AI FE Người 2: chatbot chỉ `/ai/chat`, gợi ý việc/ứng viên chỉ qua `/jobs/recommended` và `/jobs/:id/recommended-candidates`; mọi biến thể internal AI bị fail-closed; 97/97 unit test PASS.
 - [x] Hoàn tất shared optimistic `409` cho cả ba consumer: Company, Job edit/submit và Application status/match đều reload authoritative đúng một lần, giữ draft/intent, mở bảng so sánh và chỉ gửi lại sau quyết định chủ động; 99/99 unit test PASS.
 - [x] Thêm Playwright Gateway-contract E2E cho đủ bốn service Người 2: Company success/error và chống lộ raw message; Job Search/Recommendation giữ đúng hai contract; Application lấy detail version trước withdraw; AI Chat gửi exact private body/no-store/cookie và render text-only. Chrome desktop 1440px + mobile 390px đều không tràn document; 10/10 E2E PASS.
+- [x] Mở rộng recovery E2E: Job edit gặp exact `409 JOB_STATE_CHANGED` giữ local draft, reload authoritative đúng một lần, không gọi lại PUT/PATCH rồi cho chọn bản server; AI Chat gặp `429 CHAT_RATE_LIMITED` khóa composer theo `Retry-After` và không replay POST. Full browser suite 14/14 PASS.
 - [ ] Nối các màn trên với API Gateway/Auth session thật, hoàn thiện error mapping/409/429/503 và thêm component/E2E test trước khi đóng checkbox endpoint bên dưới.
-  - [x] Browser E2E với Gateway contract đã có cho Company, Job & Search, Application và AI; chạy bằng `NEXT_PUBLIC_API_MODE=gateway`, không fallback demo.
+  - [x] Browser E2E với Gateway contract đã có cho Company, Job & Search, Application và AI, gồm success, safe error, optimistic conflict và rate-limit; chạy bằng `NEXT_PUBLIC_API_MODE=gateway`, không fallback demo.
   - [ ] Live Auth bootstrap, môi trường Gateway triển khai thật và cross-service E2E vẫn chờ phần Auth/vận hành dùng chung; test intercept không được dùng để tuyên bố deployed PASS.
 >
 > Danh sách bám theo **48 endpoint user-facing có thật**, khảo sát trực tiếp từ code controller và đối chiếu với `infra/nginx/nginx.conf` — không suy đoán từ tài liệu.

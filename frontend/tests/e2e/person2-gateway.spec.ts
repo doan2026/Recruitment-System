@@ -147,6 +147,74 @@ test("Job search and recommendations preserve their distinct Gateway contracts",
   await expectNoDocumentOverflow(page);
 });
 
+test("Job edit keeps the local draft after one authoritative 409 reload and never retries the mutation", async ({ page }) => {
+  const jobId = "2795c0de-7908-4ab5-9bed-4c4f1cf9c211";
+  const baseJob = {
+    id: jobId,
+    companyId: "3795c0de-7908-4ab5-9bed-4c4f1cf9c212",
+    companyName: "Công ty Sản phẩm Việt",
+    title: "Backend ban đầu",
+    description: "Xây dựng nền tảng tuyển dụng.",
+    requirements: ["Java", "Kafka"],
+    benefits: ["Bảo hiểm"],
+    salaryMin: 25_000_000,
+    salaryMax: 40_000_000,
+    isNegotiable: false,
+    location: "Hà Nội",
+    jobType: "FULL_TIME",
+    experienceYears: 3,
+    quantity: 2,
+    skills: ["Java", "Kafka"],
+    deadline: "2026-12-31T00:00:00.000Z",
+    status: "DRAFT",
+    createdAt: "2026-08-01T00:00:00.000Z",
+    updatedAt: "2026-08-20T00:00:00.000Z",
+  };
+  let conflictTriggered = false;
+  let authoritativeReloads = 0;
+  let updateCalls = 0;
+  let publishCalls = 0;
+
+  await page.route(`${gatewayOrigin}/jobs/mine`, async (route) => {
+    if (conflictTriggered) authoritativeReloads += 1;
+    await json(route, {
+      data: [{
+        ...baseJob,
+        title: conflictTriggered ? "Backend phía server" : baseJob.title,
+        updatedAt: conflictTriggered ? "2026-08-31T00:00:00.000Z" : baseJob.updatedAt,
+      }],
+      meta: null,
+    });
+  });
+  await page.route(`${gatewayOrigin}/jobs/${jobId}`, async (route) => {
+    updateCalls += 1;
+    conflictTriggered = true;
+    await json(route, { code: "JOB_STATE_CHANGED", details: { currentStatus: "DRAFT" } }, 409);
+  });
+  await page.route(`${gatewayOrigin}/jobs/${jobId}/publish`, async (route) => {
+    publishCalls += 1;
+    await json(route, { data: { ...baseJob, status: "PENDING_APPROVAL" }, meta: null });
+  });
+
+  await page.goto(`/recruiter/jobs/${jobId}/edit`);
+  const titleInput = page.getByRole("textbox", { name: "Tên vị trí" });
+  await expect(titleInput).toHaveValue("Backend ban đầu");
+  await titleInput.fill("Backend do tôi sửa");
+  await page.getByRole("button", { name: "Lưu và gửi admin duyệt" }).click();
+
+  await expect(page.getByRole("heading", { name: "Tin tuyển dụng vừa được người khác sửa" })).toBeVisible();
+  await expect(page.getByRole("row", { name: /Tên vị trí Backend do tôi sửa Backend phía server Khác nhau/ })).toBeVisible();
+  await expect(titleInput).toHaveValue("Backend do tôi sửa");
+  expect(updateCalls).toBe(1);
+  expect(authoritativeReloads).toBe(1);
+  expect(publishCalls).toBe(0);
+
+  await page.getByRole("button", { name: "Dùng dữ liệu mới nhất" }).click();
+  await expect(titleInput).toHaveValue("Backend phía server");
+  await expect(page.getByText("Đã dùng bản mới nhất từ server.")).toBeVisible();
+  await expectNoDocumentOverflow(page);
+});
+
 test("Application tracking reloads authoritative version before withdraw", async ({ context, page }) => {
   await context.addCookies([{
     name: "careerhub_session",
@@ -247,4 +315,27 @@ test("AI chat sends the exact private Gateway contract and renders the answer as
   expect(privateHeaders.pragma).toBe("no-cache");
   expect(privateHeaders.cookie).toContain("careerhub_session=http-only-session-fixture");
   await expectNoDocumentOverflow(page);
+});
+
+test("AI chat honors 429 Retry-After without replaying the message", async ({ page }) => {
+  let attempts = 0;
+  await page.route(`${gatewayOrigin}/ai/chat`, async (route) => {
+    attempts += 1;
+    await route.fulfill({
+      status: 429,
+      headers: { ...corsHeaders, "retry-after": "2" },
+      body: JSON.stringify({ code: "CHAT_RATE_LIMITED", details: { retryAfterSeconds: 2 } }),
+    });
+  });
+
+  await page.goto("/ai");
+  await expect(page.getByText("Session sẵn sàng")).toBeVisible();
+  const composer = page.getByLabel("Tin nhắn cho trợ lý nghề nghiệp");
+  await composer.fill("Gợi ý việc phù hợp cho tôi");
+  await page.getByRole("button", { name: "Gửi tin nhắn" }).click();
+
+  await expect(page.getByText(/Bạn đã gửi quá nhanh. Có thể gửi lại sau/)).toBeVisible();
+  await expect(composer).toBeDisabled();
+  await expect(page.getByRole("button", { name: /Chờ [12]s/ })).toBeDisabled();
+  expect(attempts).toBe(1);
 });
