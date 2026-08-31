@@ -5,6 +5,7 @@ import { ConflictRecoveryPanel } from "../../../components/ConflictRecoveryPanel
 import { ConfirmationDialog } from "../../../components/ConfirmationDialog";
 import { CompanyMediaUploader } from "../../../components/CompanyMediaUploader";
 import { CompanyMediaLibrary } from "../../../components/CompanyMediaLibrary";
+import { CompanyMemberInvitation } from "../../../components/CompanyMemberInvitation";
 import { EmptyState, ErrorState, LoadingState, Metric, PageHeader, StatusBadge } from "../../../components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import {
@@ -308,6 +309,8 @@ export default function RecruiterCompanyPage() {
           setTaxCode(nextCompany.taxCode);
         }}
       />
+
+      <CompanyMemberInvitation companyId={company.id} />
     </main>
   );
 }

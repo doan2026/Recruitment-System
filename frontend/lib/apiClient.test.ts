@@ -19,6 +19,10 @@ import {
   prepareConflictSnapshot,
 } from "./conflictRecovery";
 import {
+  normalizeInvitationEmail,
+  validateInvitationEmail,
+} from "./companyInvitation";
+import {
   normalizeCompanyCreate,
   validateCompanyCreate,
 } from "./companyForm";
@@ -487,4 +491,19 @@ test("public company detail renders only usable media in backend order", () => {
       ["IMAGE", 2],
     ],
   );
+});
+
+test("company invitation normalizes the exact email sent to the backend", () => {
+  assert.equal(normalizeInvitationEmail("  MEMBER@Example.COM  "), "member@example.com");
+  assert.equal(normalizeInvitationEmail(" me\u0301mber@example.com "), "mémber@example.com");
+});
+
+test("company invitation blocks missing, malformed and oversized emails", () => {
+  assert.equal(validateInvitationEmail(""), "Nhập email người được mời.");
+  assert.equal(validateInvitationEmail("member-at-example.com"), "Email chưa đúng định dạng.");
+  assert.equal(
+    validateInvitationEmail(`${"a".repeat(310)}@example.com`),
+    "Email không được vượt quá 320 ký tự.",
+  );
+  assert.equal(validateInvitationEmail("member@example.com"), null);
 });
