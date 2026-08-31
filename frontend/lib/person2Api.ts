@@ -27,6 +27,7 @@ import type {
   CompanyMediaUploadCapability,
   CompanyMediaUploadResult,
 } from "./companyMediaUpload";
+import { assertChatResponseSession } from "./aiChatSession";
 import * as demo from "./demoData";
 
 export type {
@@ -316,11 +317,55 @@ export interface RecruiterDashboard {
   warnings: Array<{ code: string; message: string }>;
 }
 
+interface BackendAiChatReply {
+  session_id: string;
+  answer: string;
+}
+
+export interface AiChatReply {
+  sessionId: string;
+  answer: string;
+}
+
 async function normalizeDemo<T>(
   response: Promise<{ data: T; meta?: ApiEnvelope<T>["meta"] }>,
 ): Promise<ApiEnvelope<T>> {
   const envelope = await response;
   return { data: envelope.data, meta: envelope.meta ?? null };
+}
+
+export async function sendAiChatMessage(
+  sessionId: string,
+  message: string,
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<AiChatReply>> {
+  const canonicalSessionId = assertCanonicalUuidV4(sessionId, "session_id");
+  const body = selectContractFields({ session_id: canonicalSessionId, message }, ["session_id", "message"]);
+
+  if (isDemoPerson2Api) {
+    return {
+      data: {
+        sessionId: canonicalSessionId,
+        answer: "Mình đã nhận câu hỏi. Khi dùng Gateway, câu trả lời này sẽ đến từ AI Service và chỉ thuộc phiên hiện tại.",
+      },
+      meta: null,
+    };
+  }
+
+  const response = await requestApi<BackendAiChatReply>(API_PATHS.aiChat, {
+    method: "POST",
+    privateData: true,
+    signal,
+    body,
+    maxRetries: 0,
+  });
+  return {
+    ...response,
+    data: {
+      sessionId: assertChatResponseSession(canonicalSessionId, response.data.session_id),
+      answer: response.data.answer,
+    },
+  };
 }
 
 let demoMembershipRole: CompanyMemberRole = "OWNER";
