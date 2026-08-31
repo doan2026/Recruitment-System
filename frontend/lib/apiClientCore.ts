@@ -244,6 +244,7 @@ export function normalizeError(code: string): string {
     INVALID_API_PATH: "Đường dẫn API không hợp lệ.",
     API_BASE_URL_REQUIRED: "Thiếu cấu hình địa chỉ API Gateway cho server.",
     INVALID_UUID_V4: "Mã định danh không đúng định dạng UUID v4.",
+    INVALID_EXPECTED_VERSION: "Phiên bản dữ liệu không hợp lệ. Hãy tải lại trước khi tiếp tục.",
     UUID_GENERATION_UNAVAILABLE: "Không thể tạo phiên trò chuyện an toàn trên trình duyệt này.",
     SESSION_ACCOUNT_REQUIRED: "Không thể thiết lập phiên vì thiếu định danh tài khoản.",
     UNKNOWN_REQUEST_FIELD: "Dữ liệu gửi đi chứa trường không được API hỗ trợ.",

@@ -11,6 +11,15 @@ import type { CompanyCreateValues } from "./companyForm";
 import type { RecruiterJobPayload } from "./jobForm";
 import type { PublicJobSearchFilters } from "./publicJobSearch";
 import type { CandidateRecommendationEmptyReason } from "./candidateRecommendation";
+import {
+  buildApplicationStatusCommand,
+  buildApplicationWithdrawCommand,
+  buildMatchRefreshCommand,
+  buildOfferResponseCommand,
+  buildSendOfferCommand,
+  type OfferDecision,
+  type SendOfferValues,
+} from "./applicationVersioning";
 import type {
   CompanyMediaAssetType,
   CompanyMediaUploadCapability,
@@ -191,6 +200,39 @@ interface BackendApplicationListItem {
   appliedAt: string;
   updatedAt: string;
   version?: number;
+}
+
+export interface ApplicationTransitionResult {
+  applicationId: string;
+  fromStatus: CandidateApplication["status"];
+  toStatus: CandidateApplication["status"];
+  updatedAt: string;
+  version: number;
+}
+
+export interface ApplicationMatchScoreResult {
+  applicationId: string;
+  matchScore: number;
+  version: number;
+}
+
+export interface ApplicationOfferMutationResult {
+  id: string;
+  applicationId: string;
+  salary: string | number;
+  startDate: string;
+  position: string;
+  note: string | null;
+  fileId: string | null;
+  fileUrl: string | null;
+  status: "SENT" | "ACCEPTED" | "DECLINED" | "EXPIRED";
+  sentAt: string;
+  expiresAt: string;
+  respondedAt: string | null;
+  responseNote: string | null;
+  version: number;
+  applicationStatus: CandidateApplication["status"];
+  applicationVersion: number;
 }
 
 async function normalizeDemo<T>(
@@ -876,6 +918,125 @@ export async function getApplicationsByJob(jobId: string, signal?: AbortSignal):
     allowedQueryKeys: ["job_id", "page", "size"],
   });
   return { ...response, data: response.data.items.map(toApplication) };
+}
+
+export async function getApplicationDetail(
+  applicationId: string,
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<CandidateApplication>> {
+  if (isDemoPerson2Api) {
+    const application = demo.applications.find((item) => item.id === applicationId);
+    if (!application) throw new ApiClientError({ code: "APPLICATION_NOT_FOUND", status: 404 });
+    return { data: application, meta: null };
+  }
+  assertCanonicalUuidV4(applicationId, "applicationId");
+  const response = await requestApi<BackendApplicationListItem>(
+    `${API_PATHS.applications}${applicationId}`,
+    { privateData: true, signal },
+  );
+  return { ...response, data: toApplication(response.data) };
+}
+
+export async function changeApplicationStatus(
+  applicationId: string,
+  input: { status: CandidateApplication["status"]; note?: string; applicationVersion: number },
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<ApplicationTransitionResult>> {
+  const body = buildApplicationStatusCommand(input);
+  if (isDemoPerson2Api) {
+    const application = demo.applications.find((item) => item.id === applicationId);
+    if (!application) throw new ApiClientError({ code: "APPLICATION_NOT_FOUND", status: 404 });
+    return { data: { applicationId, fromStatus: application.status, toStatus: input.status, updatedAt: new Date().toISOString(), version: body.expectedVersion + 1 }, meta: null };
+  }
+  assertCanonicalUuidV4(applicationId, "applicationId");
+  return requestApi<ApplicationTransitionResult>(`${API_PATHS.applications}${applicationId}/status`, {
+    method: "PATCH",
+    body,
+    privateData: true,
+    signal,
+    maxRetries: 0,
+  });
+}
+
+export async function withdrawCandidateApplication(
+  applicationId: string,
+  input: { note?: string; applicationVersion: number },
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<ApplicationTransitionResult>> {
+  const body = buildApplicationWithdrawCommand(input);
+  if (isDemoPerson2Api) {
+    const application = demo.applications.find((item) => item.id === applicationId);
+    if (!application) throw new ApiClientError({ code: "APPLICATION_NOT_FOUND", status: 404 });
+    return { data: { applicationId, fromStatus: application.status, toStatus: "WITHDRAWN", updatedAt: new Date().toISOString(), version: body.expectedVersion + 1 }, meta: null };
+  }
+  assertCanonicalUuidV4(applicationId, "applicationId");
+  return requestApi<ApplicationTransitionResult>(`${API_PATHS.applications}${applicationId}/withdraw`, {
+    method: "PATCH",
+    body,
+    privateData: true,
+    signal,
+    maxRetries: 0,
+  });
+}
+
+export async function refreshApplicationMatchScore(
+  applicationId: string,
+  applicationVersion: number,
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<ApplicationMatchScoreResult>> {
+  const body = buildMatchRefreshCommand(applicationVersion);
+  if (isDemoPerson2Api) {
+    return { data: { applicationId, matchScore: 0.91, version: body.expectedVersion + 1 }, meta: null };
+  }
+  assertCanonicalUuidV4(applicationId, "applicationId");
+  return requestApi<ApplicationMatchScoreResult>(`${API_PATHS.applications}${applicationId}/match-score/refresh`, {
+    method: "POST",
+    body,
+    privateData: true,
+    signal,
+    maxRetries: 0,
+  });
+}
+
+export async function sendApplicationOffer(
+  applicationId: string,
+  values: SendOfferValues,
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<ApplicationOfferMutationResult>> {
+  const body = buildSendOfferCommand(values);
+  if (isDemoPerson2Api) {
+    return { data: { id: `offer-${Date.now()}`, applicationId, salary: values.salary, startDate: values.startDate, position: values.position, note: values.note ?? null, fileId: values.fileId ?? null, fileUrl: values.fileUrl ?? null, status: "SENT", sentAt: new Date().toISOString(), expiresAt: values.expiresAt, respondedAt: null, responseNote: null, version: 0, applicationStatus: "OFFER", applicationVersion: body.expectedApplicationVersion + 1 }, meta: null };
+  }
+  assertCanonicalUuidV4(applicationId, "applicationId");
+  return requestApi<ApplicationOfferMutationResult>(`${API_PATHS.applications}${applicationId}/offer`, {
+    method: "POST",
+    body,
+    privateData: true,
+    signal,
+    maxRetries: 0,
+  });
+}
+
+export async function respondToApplicationOffer(
+  offerId: string,
+  input: { decision: OfferDecision; declineReason?: string; offerVersion: number; applicationVersion: number },
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<ApplicationOfferMutationResult>> {
+  const body = buildOfferResponseCommand(input);
+  if (isDemoPerson2Api) {
+    const offer = demo.offers.find((item) => item.id === offerId);
+    if (!offer) throw new ApiClientError({ code: "OFFER_NOT_FOUND", status: 404 });
+    const now = new Date().toISOString();
+    return { data: { id: offer.id, applicationId: offer.applicationId, salary: offer.salary, startDate: now.slice(0, 10), position: offer.jobTitle, note: null, fileId: offer.fileId ?? null, fileUrl: offer.fileUrl ?? null, status: input.decision, sentAt: now, expiresAt: offer.expiresAt, respondedAt: now, responseNote: input.declineReason ?? null, version: body.expectedOfferVersion + 1, applicationStatus: input.decision === "ACCEPTED" ? "HIRED" : "REJECTED", applicationVersion: body.expectedApplicationVersion + 1 }, meta: null };
+  }
+  assertCanonicalUuidV4(offerId, "offerId");
+  return requestApi<ApplicationOfferMutationResult>(`${API_PATHS.offers}${offerId}/respond`, {
+    method: "PATCH",
+    body,
+    privateData: true,
+    signal,
+    maxRetries: 0,
+  });
 }
 
 export async function getRecommendationsForCandidate(
