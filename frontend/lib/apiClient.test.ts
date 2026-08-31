@@ -20,6 +20,15 @@ import {
   prepareConflictSnapshot,
 } from "./conflictRecovery";
 import {
+  buildApplicationStatusCommand,
+  buildApplicationWithdrawCommand,
+  buildMatchRefreshCommand,
+  buildOfferResponseCommand,
+  buildSendOfferCommand,
+  nextApplicationVersion,
+  nextOfferVersions,
+} from "./applicationVersioning";
+import {
   normalizeInvitationEmail,
   validateInvitationEmail,
 } from "./companyInvitation";
@@ -304,6 +313,32 @@ test("non-optimistic 409 errors are not routed through reload and compare", asyn
     (reason: unknown) => reason === error,
   );
   assert.equal(reloaded, false);
+});
+
+test("every Application write command carries its latest expected version", () => {
+  assert.equal(buildApplicationStatusCommand({ status: "REVIEWING", applicationVersion: 4 }).expectedVersion, 4);
+  assert.equal(buildApplicationWithdrawCommand({ applicationVersion: 5 }).expectedVersion, 5);
+  assert.equal(buildMatchRefreshCommand(6).expectedVersion, 6);
+  assert.equal(buildSendOfferCommand({ salary: 25_000_000, startDate: "2026-10-01", position: "Engineer", expiresAt: "2026-09-30T00:00:00Z", applicationVersion: 7 }).expectedApplicationVersion, 7);
+  assert.deepEqual(buildOfferResponseCommand({ decision: "ACCEPTED", offerVersion: 2, applicationVersion: 8 }), {
+    decision: "ACCEPTED",
+    declineReason: undefined,
+    expectedOfferVersion: 2,
+    expectedApplicationVersion: 8,
+  });
+});
+
+test("mutation responses become the only source for the next command versions", () => {
+  assert.equal(nextApplicationVersion({ version: 9 }), 9);
+  assert.deepEqual(nextOfferVersions({ version: 3, applicationVersion: 10 }), { offerVersion: 3, applicationVersion: 10 });
+  assert.throws(
+    () => buildMatchRefreshCommand(-1),
+    (error: unknown) => error instanceof ApiClientError && error.code === "INVALID_EXPECTED_VERSION",
+  );
+  assert.throws(
+    () => nextApplicationVersion({ version: Number.NaN }),
+    (error: unknown) => error instanceof ApiClientError && error.code === "INVALID_EXPECTED_VERSION",
+  );
 });
 
 test("Retry-After drives one bounded automatic retry before manual recovery", () => {
