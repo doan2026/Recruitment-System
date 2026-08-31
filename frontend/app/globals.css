@@ -484,6 +484,7 @@ textarea { resize: none; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius-card); background: white; }
 .toolbar .field { flex: 1 1 160px; }
 .filter-note { margin: 12px 0 0; color: var(--muted); font-size: 0.78rem; }
+.pagination-actions { margin-top: 16px; }
 .list-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; scrollbar-gutter: stable; }
 .data-table { width: 100%; min-width: 760px; border-collapse: collapse; background: white; }

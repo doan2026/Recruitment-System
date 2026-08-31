@@ -34,6 +34,7 @@ import {
 } from "./companyMembership";
 import { isRejectedRecruiterJob, nextRecruiterJobStatus, recruiterJobActionLabel, recruiterJobActions, recruiterJobEditLabel } from "./jobLifecycle";
 import { normalizeJobSkills, normalizeRecruiterJobForm, validateRecruiterJobForm, type RecruiterJobFormValues } from "./jobForm";
+import { isOffsetWindowTooDeep, mergePublicJobPage, normalizePublicJobSearch, publicJobSearchScope, validatePublicJobSearch } from "./publicJobSearch";
 import {
   normalizeCompanyCreate,
   validateCompanyCreate,
@@ -646,4 +647,40 @@ test("negotiable Job payload omits salaries and normalizes unique skills", () =>
   assert.equal("salaryMax" in payload, false);
   assert.deepEqual(payload.skills, ["React", "TypeScript"]);
   assert.deepEqual(normalizeJobSkills("Vue, vue, React"), ["Vue", "React"]);
+});
+
+test("public Job search validates and normalizes all cursor-bound filters", () => {
+  const values = {
+    q: "  React　Developer ",
+    location: " Hà Nội ",
+    salaryMin: "18000000",
+    salaryMax: "25000000",
+    skills: "React, TypeScript",
+    experienceYears: "2",
+    jobType: "FULL_TIME" as const,
+    sort: "NEWEST" as const,
+  };
+  assert.deepEqual(validatePublicJobSearch(values), {});
+  assert.deepEqual(normalizePublicJobSearch(values), {
+    q: "React Developer",
+    location: "Hà Nội",
+    salaryMin: 18000000,
+    salaryMax: 25000000,
+    skills: ["React", "TypeScript"],
+    experienceYears: 2,
+    jobType: "FULL_TIME",
+    sort: "NEWEST",
+  });
+  assert.ok(validatePublicJobSearch({ ...values, salaryMin: "30", salaryMax: "20" }).salary);
+});
+
+test("public Job pagination enforces the offset window and appends cursor pages without duplicates", () => {
+  assert.equal(isOffsetWindowTooDeep(500, 20), false);
+  assert.equal(isOffsetWindowTooDeep(501, 20), true);
+  assert.deepEqual(mergePublicJobPage([{ id: "a" }, { id: "b" }], [{ id: "b" }, { id: "c" }], true), [{ id: "a" }, { id: "b" }, { id: "c" }]);
+  assert.deepEqual(mergePublicJobPage([{ id: "a" }], [{ id: "b" }], false), [{ id: "b" }]);
+  assert.notEqual(
+    publicJobSearchScope({ q: "React", sort: "RELEVANCE" }, 20),
+    publicJobSearchScope({ q: "React", sort: "NEWEST" }, 20),
+  );
 });
