@@ -12,6 +12,7 @@ import type { RecruiterJobPayload } from "./jobForm";
 import type { PublicJobSearchFilters } from "./publicJobSearch";
 import type { CandidateRecommendationEmptyReason } from "./candidateRecommendation";
 import type { RecruiterApplicationQuery } from "./recruiterApplicationTable";
+import { APPLICATION_API_ROUTES, applicationResourceRoute, offerResponseRoute, recruiterDashboardRoute } from "./applicationApiRoutes";
 import {
   buildApplicationStatusCommand,
   buildApplicationWithdrawCommand,
@@ -1023,7 +1024,7 @@ export async function getCandidateBookmarks(signal?: AbortSignal): Promise<ApiEn
       meta: null,
     };
   }
-  return requestApi<CandidateBookmark[]>(API_PATHS.bookmarks, {
+  return requestApi<CandidateBookmark[]>(APPLICATION_API_ROUTES.bookmarks, {
     privateData: true,
     signal,
   });
@@ -1079,7 +1080,7 @@ export async function getRecruiterDashboard(
     };
   }
   assertCanonicalUuidV4(companyId, "company_id");
-  return requestApi<RecruiterDashboard>(`${API_PATHS.applications}stats`, {
+  return requestApi<RecruiterDashboard>(recruiterDashboardRoute(), {
     query: { company_id: companyId },
     allowedQueryKeys: ["company_id"],
     privateData: true,
@@ -1131,7 +1132,7 @@ export async function submitCandidateApplication(
     coverLetter: values.coverLetter?.trim() || undefined,
     source: values.source,
   }, ["jobId", "cvId", "coverLetter", "source"] as const);
-  const response = await requestApi<BackendApplicationListItem>(API_PATHS.applications, {
+  const response = await requestApi<BackendApplicationListItem>(APPLICATION_API_ROUTES.collection, {
     method: "POST",
     body,
     privateData: true,
@@ -1161,7 +1162,7 @@ export async function getRecruiterApplications(
     return { data: pageItems, meta: { page: query.page, size: query.size, total: items.length, totalPages: Math.ceil(items.length / query.size) } };
   }
   if (query.jobId) assertCanonicalUuidV4(query.jobId, "jobId");
-  const response = await requestApi<BackendRecruiterApplicationPage>(API_PATHS.applications, {
+  const response = await requestApi<BackendRecruiterApplicationPage>(APPLICATION_API_ROUTES.collection, {
     privateData: true,
     signal,
     query: {
@@ -1197,7 +1198,7 @@ export async function getApplicationDetail(
   }
   assertCanonicalUuidV4(applicationId, "applicationId");
   const response = await requestApi<BackendApplicationListItem>(
-    `${API_PATHS.applications}${applicationId}`,
+    applicationResourceRoute(applicationId),
     { privateData: true, signal },
   );
   return { ...response, data: toApplication(response.data) };
@@ -1220,7 +1221,7 @@ export async function getRecruiterApplicationCv(
     };
   }
   assertCanonicalUuidV4(applicationId, "applicationId");
-  return requestApi<RecruiterApplicationCv>(`${API_PATHS.applications}${applicationId}/cv`, {
+  return requestApi<RecruiterApplicationCv>(applicationResourceRoute(applicationId, "cv"), {
     privateData: true,
     signal,
   });
@@ -1241,7 +1242,7 @@ export async function createRecruiterCvDownload(
     };
   }
   assertCanonicalUuidV4(applicationId, "applicationId");
-  return requestApi<RecruiterApplicationCvDownload>(`${API_PATHS.applications}${applicationId}/cv/download-url`, {
+  return requestApi<RecruiterApplicationCvDownload>(applicationResourceRoute(applicationId, "cv/download-url"), {
     method: "POST",
     privateData: true,
     signal,
@@ -1274,7 +1275,7 @@ export async function createApplicationEvaluation(
     };
   }
   assertCanonicalUuidV4(applicationId, "applicationId");
-  return requestApi<ApplicationEvaluationResult>(`${API_PATHS.applications}${applicationId}/evaluation`, {
+  return requestApi<ApplicationEvaluationResult>(applicationResourceRoute(applicationId, "evaluation"), {
     method: "POST",
     body,
     privateData: true,
@@ -1295,7 +1296,7 @@ export async function changeApplicationStatus(
     return { data: { applicationId, fromStatus: application.status, toStatus: input.status, updatedAt: new Date().toISOString(), version: body.expectedVersion + 1 }, meta: null };
   }
   assertCanonicalUuidV4(applicationId, "applicationId");
-  return requestApi<ApplicationTransitionResult>(`${API_PATHS.applications}${applicationId}/status`, {
+  return requestApi<ApplicationTransitionResult>(applicationResourceRoute(applicationId, "status"), {
     method: "PATCH",
     body,
     privateData: true,
@@ -1316,7 +1317,7 @@ export async function withdrawCandidateApplication(
     return { data: { applicationId, fromStatus: application.status, toStatus: "WITHDRAWN", updatedAt: new Date().toISOString(), version: body.expectedVersion + 1 }, meta: null };
   }
   assertCanonicalUuidV4(applicationId, "applicationId");
-  return requestApi<ApplicationTransitionResult>(`${API_PATHS.applications}${applicationId}/withdraw`, {
+  return requestApi<ApplicationTransitionResult>(applicationResourceRoute(applicationId, "withdraw"), {
     method: "PATCH",
     body,
     privateData: true,
@@ -1335,7 +1336,7 @@ export async function refreshApplicationMatchScore(
     return { data: { applicationId, matchScore: 91, version: body.expectedVersion + 1 }, meta: null };
   }
   assertCanonicalUuidV4(applicationId, "applicationId");
-  return requestApi<ApplicationMatchScoreResult>(`${API_PATHS.applications}${applicationId}/match-score/refresh`, {
+  return requestApi<ApplicationMatchScoreResult>(applicationResourceRoute(applicationId, "match-score/refresh"), {
     method: "POST",
     body,
     privateData: true,
@@ -1354,7 +1355,7 @@ export async function sendApplicationOffer(
     return { data: { id: `offer-${Date.now()}`, applicationId, salary: values.salary, startDate: values.startDate, position: values.position, note: values.note ?? null, fileId: values.fileId ?? null, fileUrl: values.fileUrl ?? null, status: "SENT", sentAt: new Date().toISOString(), expiresAt: values.expiresAt, respondedAt: null, responseNote: null, version: 0, applicationStatus: "OFFER", applicationVersion: body.expectedApplicationVersion + 1 }, meta: null };
   }
   assertCanonicalUuidV4(applicationId, "applicationId");
-  return requestApi<ApplicationOfferMutationResult>(`${API_PATHS.applications}${applicationId}/offer`, {
+  return requestApi<ApplicationOfferMutationResult>(applicationResourceRoute(applicationId, "offer"), {
     method: "POST",
     body,
     privateData: true,
@@ -1376,7 +1377,7 @@ export async function respondToApplicationOffer(
     return { data: { id: offer.id, applicationId: offer.applicationId, salary: offer.salary, startDate: now.slice(0, 10), position: offer.jobTitle, note: null, fileId: offer.fileId ?? null, fileUrl: offer.fileUrl ?? null, status: input.decision, sentAt: now, expiresAt: offer.expiresAt, respondedAt: now, responseNote: input.declineReason ?? null, version: body.expectedOfferVersion + 1, applicationStatus: input.decision === "ACCEPTED" ? "HIRED" : "REJECTED", applicationVersion: body.expectedApplicationVersion + 1 }, meta: null };
   }
   assertCanonicalUuidV4(offerId, "offerId");
-  return requestApi<ApplicationOfferMutationResult>(`${API_PATHS.offers}${offerId}/respond`, {
+  return requestApi<ApplicationOfferMutationResult>(offerResponseRoute(offerId), {
     method: "PATCH",
     body,
     privateData: true,
