@@ -908,6 +908,54 @@ export async function getApplications(candidateId?: string, signal?: AbortSignal
   return { ...response, data: response.data.map(toApplication) };
 }
 
+export async function submitCandidateApplication(
+  values: {
+    jobId: string;
+    cvId: string;
+    coverLetter?: string;
+    source: "SEARCH" | "AI_RECOMMENDATION" | "COMPANY_PAGE" | "SHARED_LINK" | "OTHER";
+  },
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<CandidateApplication>> {
+  if (isDemoPerson2Api) {
+    const job = demo.jobs.find((item) => item.id === values.jobId);
+    if (!job) throw new ApiClientError({ code: "JOB_NOT_FOUND", status: 404 });
+    const now = new Date().toISOString();
+    return {
+      data: {
+        id: `application-${Date.now()}`,
+        candidateId: "demo-candidate",
+        candidateName: "Ứng viên demo",
+        email: "",
+        jobId: values.jobId,
+        jobTitle: job.title,
+        companyName: "Doanh nghiệp tuyển dụng",
+        status: "APPLIED",
+        version: 0,
+        createdAt: now,
+        hasCv: true,
+      },
+      meta: null,
+    };
+  }
+  assertCanonicalUuidV4(values.jobId, "jobId");
+  assertCanonicalUuidV4(values.cvId, "cvId");
+  const body = selectContractFields({
+    jobId: values.jobId,
+    cvId: values.cvId,
+    coverLetter: values.coverLetter?.trim() || undefined,
+    source: values.source,
+  }, ["jobId", "cvId", "coverLetter", "source"] as const);
+  const response = await requestApi<BackendApplicationListItem>(API_PATHS.applications, {
+    method: "POST",
+    body,
+    privateData: true,
+    signal,
+    maxRetries: 0,
+  });
+  return { ...response, data: toApplication(response.data) };
+}
+
 export async function getApplicationsByJob(jobId: string, signal?: AbortSignal): Promise<ApiEnvelope<CandidateApplication[]>> {
   if (isDemoPerson2Api) return normalizeDemo(demo.getApplicationsByJob(jobId));
   assertCanonicalUuidV4(jobId, "jobId");

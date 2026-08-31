@@ -30,6 +30,7 @@ import {
 } from "./applicationVersioning";
 import { offerResponseRecoveryView } from "./offerResponseRecovery";
 import { candidateApplicationActions, recruiterApplicationActions, validateRecruiterApplicationStatus } from "./applicationStateMachine";
+import { applicationCooldownView } from "./applicationCooldown";
 import {
   normalizeInvitationEmail,
   validateInvitationEmail,
@@ -381,6 +382,20 @@ test("Application rejection requires a reason and invalid transitions fail befor
   assert.match(validateRecruiterApplicationStatus("APPLIED", "REJECTED", "") ?? "", /lý do/);
   assert.equal(validateRecruiterApplicationStatus("APPLIED", "REJECTED", "Không phù hợp"), null);
   assert.match(validateRecruiterApplicationStatus("APPLIED", "INTERVIEW") ?? "", /không hợp lệ/);
+});
+
+test("reapplication cooldown renders the backend eligibleAt as a concrete Vietnamese time", () => {
+  const view = applicationCooldownView(new ApiClientError({
+    code: "REAPPLICATION_COOLDOWN",
+    status: 409,
+    details: { eligibleAt: "2026-10-01T02:30:00Z" },
+  }));
+
+  assert.equal(view?.eligibleAt, "2026-10-01T02:30:00Z");
+  assert.match(view?.eligibleAtLabel ?? "", /2026/);
+  assert.match(view?.description ?? "", /30 ngày/);
+  assert.equal(applicationCooldownView(new ApiClientError({ code: "REAPPLICATION_COOLDOWN", status: 409 })), null);
+  assert.equal(applicationCooldownView(new ApiClientError({ code: "APPLICATION_CHANGED_CONCURRENTLY", status: 409, details: { eligibleAt: "2026-10-01T02:30:00Z" } })), null);
 });
 
 test("Retry-After drives one bounded automatic retry before manual recovery", () => {
