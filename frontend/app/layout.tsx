@@ -12,9 +12,10 @@ export const metadata: Metadata = {
 const navItems = [
   { label: "Trang chủ", href: "/" },
   { label: "Việc làm", href: "/candidate/jobs" },
+  { label: "Doanh nghiệp", href: "/companies" },
   { label: "Ứng tuyển của tôi", href: "/candidate/applications" },
   { label: "Tuyển dụng", href: "/recruiter/jobs" },
-  { label: "Công ty", href: "/recruiter/company" },
+  { label: "Hồ sơ công ty", href: "/recruiter/company" },
   { label: "AI Assistant", href: "/ai" },
 ];
 
