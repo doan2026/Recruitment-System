@@ -142,6 +142,21 @@ interface BackendJob {
   updatedAt?: string;
 }
 
+export interface RecruiterJobUpdateInput {
+  title: string;
+  description: string;
+  requirements: string;
+  benefits: string;
+  salaryMin?: number;
+  salaryMax?: number;
+  isNegotiable: boolean;
+  currency: "VND";
+  location: string;
+  jobType: "FULL_TIME" | "PART_TIME" | "CONTRACT";
+  skills: string[];
+  deadline: string;
+}
+
 interface JobSearchResult {
   items: BackendJob[];
   total: number;
@@ -691,6 +706,56 @@ export async function getRecruiterJobs(signal?: AbortSignal): Promise<ApiEnvelop
   if (isDemoPerson2Api) return normalizeDemo(demo.getRecruiterJobs());
   const response = await requestApi<BackendJob[]>(API_PATHS.jobMine, { privateData: true, signal });
   return { ...response, data: response.data.map((item) => toJob(item)) };
+}
+
+export async function getRecruiterJob(jobId: string, signal?: AbortSignal): Promise<ApiEnvelope<Job>> {
+  if (!isDemoPerson2Api) assertCanonicalUuidV4(jobId, "jobId");
+  const response = await getRecruiterJobs(signal);
+  const job = response.data.find((item) => item.id === jobId);
+  if (!job) throw new ApiClientError({ code: "JOB_NOT_FOUND", status: 404 });
+  return { ...response, data: job };
+}
+
+export async function updateRecruiterJob(
+  jobId: string,
+  values: RecruiterJobUpdateInput,
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<Job>> {
+  if (isDemoPerson2Api) {
+    const job = demo.jobs.find((item) => item.id === jobId);
+    if (!job) throw new ApiClientError({ code: "JOB_NOT_FOUND", status: 404 });
+    return {
+      data: {
+        ...job,
+        title: values.title,
+        description: values.description,
+        requirements: toList(values.requirements),
+        benefits: toList(values.benefits),
+        salaryMin: values.salaryMin ?? 0,
+        salaryMax: values.salaryMax ?? null,
+        isNegotiable: values.isNegotiable,
+        location: values.location,
+        type: values.jobType === "FULL_TIME" ? "FULLTIME" : values.jobType === "PART_TIME" ? "PARTTIME" : "CONTRACT",
+        skills: values.skills,
+        deadline: values.deadline,
+        updatedAt: new Date().toISOString(),
+      },
+      meta: null,
+    };
+  }
+  assertCanonicalUuidV4(jobId, "jobId");
+  const body = selectContractFields(values as unknown as Record<string, unknown>, [
+    "title", "description", "requirements", "benefits", "salaryMin", "salaryMax",
+    "isNegotiable", "currency", "location", "jobType", "skills", "deadline",
+  ]);
+  const response = await requestApi<BackendJob>(`${API_PATHS.jobs}${jobId}`, {
+    method: "PUT",
+    body,
+    privateData: true,
+    signal,
+    maxRetries: 0,
+  });
+  return { ...response, data: toJob(response.data) };
 }
 
 export async function submitJobForApproval(jobId: string, signal?: AbortSignal): Promise<ApiEnvelope<Job>> {

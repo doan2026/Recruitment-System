@@ -256,6 +256,7 @@ export const jobs: Job[] = [
     benefits: ["Bonus theo mục tiêu", "Bonus linh hoạt"],
     skills: ["Scrum", "Stakeholder management", "Data"],
     status: "DRAFT",
+    rejectionReason: "Mô tả trách nhiệm còn chung chung. Vui lòng bổ sung phạm vi sản phẩm và tiêu chí đánh giá trong 90 ngày đầu.",
     deadline: baseAt(21),
     source: "ELASTICSEARCH",
     ownerName: "Nguyen Van A",

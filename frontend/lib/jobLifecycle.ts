@@ -15,3 +15,11 @@ export function recruiterJobActionLabel(action: RecruiterJobAction): string {
 export function nextRecruiterJobStatus(action: RecruiterJobAction): JobStatus {
   return action === "SUBMIT_FOR_APPROVAL" ? "PENDING_APPROVAL" : "CLOSED";
 }
+
+export function isRejectedRecruiterJob(status: JobStatus, rejectionReason?: string): boolean {
+  return status === "DRAFT" && Boolean(rejectionReason?.trim());
+}
+
+export function recruiterJobEditLabel(status: JobStatus, rejectionReason?: string): string {
+  return isRejectedRecruiterJob(status, rejectionReason) ? "Sửa theo góp ý" : "Sửa tin";
+}
