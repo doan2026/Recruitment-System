@@ -37,6 +37,7 @@ import { normalizeJobSkills, normalizeRecruiterJobForm, validateRecruiterJobForm
 import { isOffsetWindowTooDeep, mergePublicJobPage, normalizePublicJobSearch, publicJobSearchScope, validatePublicJobSearch } from "./publicJobSearch";
 import { cursorRestartView } from "./cursorRecovery";
 import { canLoadMoreRecommendations, jobDataSourceView, mergeRecommendationPage, recommendationFallbackView, recommendationSourceView } from "./recommendationPresentation";
+import { candidateRecommendationEmptyView, type CandidateRecommendationEmptyReason } from "./candidateRecommendation";
 import {
   normalizeCompanyCreate,
   validateCompanyCreate,
@@ -719,4 +720,20 @@ test("recommendation pagination is enabled only for AI with an opaque next curso
     mergeRecommendationPage([{ id: "a" }, { id: "b" }], [{ id: "b" }, { id: "c" }], true),
     [{ id: "a" }, { id: "b" }, { id: "c" }],
   );
+});
+
+test("every recruiter candidate empty reason is a normal 200-state with contextual recovery", () => {
+  const reasons: CandidateRecommendationEmptyReason[] = [
+    "NO_DISCOVERABLE_CANDIDATES",
+    "JOB_EMBEDDING_NOT_FOUND",
+    "JOB_EMBEDDING_INACTIVE",
+    "NO_ACTIVE_CV_EMBEDDINGS",
+    "EMBEDDING_MODEL_MISMATCH",
+    "NO_MATCHING_CV_EMBEDDINGS",
+  ];
+  const views = reasons.map(candidateRecommendationEmptyView);
+  assert.equal(views.length, 6);
+  assert.ok(views.every((view) => view.title && view.description && view.actionLabel));
+  assert.match(candidateRecommendationEmptyView("NO_DISCOVERABLE_CANDIDATES").description, /consent|Profile Service/i);
+  assert.equal(candidateRecommendationEmptyView("NO_MATCHING_CV_EMBEDDINGS").action, "EDIT_JOB");
 });
