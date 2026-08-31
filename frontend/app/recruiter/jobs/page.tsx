@@ -7,12 +7,16 @@ import { EmptyState, LoadingState, Metric, PageHeader, StatusBadge } from "../..
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import { isRejectedRecruiterJob, recruiterJobActionLabel, recruiterJobActions, recruiterJobEditLabel, type RecruiterJobAction } from "../../../lib/jobLifecycle";
 import { closeRecruiterJob, getRecruiterJobs, submitJobForApproval, type Job, type JobStatus } from "../../../lib/person2Api";
+import { buildRecruiterJobTable, type RecruiterJobSort } from "../../../lib/recruiterJobTable";
 
 export default function RecruiterJobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | JobStatus>("ALL");
+  const [sort, setSort] = useState<RecruiterJobSort>("UPDATED_DESC");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [failureCount, setFailureCount] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
@@ -48,10 +52,13 @@ export default function RecruiterJobsPage() {
     };
   }, [reloadKey]);
 
-  const visibleJobs = useMemo(() => jobs.filter((job) => {
-    const matchesQuery = `${job.title} ${job.location} ${job.department}`.toLocaleLowerCase("vi").includes(query.toLocaleLowerCase("vi"));
-    return matchesQuery && (statusFilter === "ALL" || job.status === statusFilter);
-  }), [jobs, query, statusFilter]);
+  const jobTable = useMemo(() => buildRecruiterJobTable(jobs, {
+    query,
+    status: statusFilter,
+    sort,
+    page,
+    pageSize,
+  }), [jobs, page, pageSize, query, sort, statusFilter]);
 
   async function runJobAction(job: Job, action: RecruiterJobAction) {
     if (pendingJobId) return;
@@ -82,12 +89,12 @@ export default function RecruiterJobsPage() {
       <section className="toolbar" aria-label="Bộ lọc tin tuyển dụng">
         <div className="field search-field">
           <label className="label" htmlFor="recruiter-job-search">Tìm tin tuyển dụng</label>
-          <input ref={searchRef} id="recruiter-job-search" className="input" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tên vị trí, phòng ban, địa điểm" />
-          {query ? <button className="clear-search" type="button" aria-label="Xóa từ khóa tìm kiếm" onClick={() => { setQuery(""); searchRef.current?.focus(); }}>×</button> : null}
+          <input ref={searchRef} id="recruiter-job-search" className="input" type="search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="Tên vị trí, phòng ban, địa điểm, phụ trách" />
+          {query ? <button className="clear-search" type="button" aria-label="Xóa từ khóa tìm kiếm" onClick={() => { setQuery(""); setPage(1); searchRef.current?.focus(); }}>×</button> : null}
         </div>
         <div className="field">
           <label className="label" htmlFor="job-status-filter">Trạng thái</label>
-          <select id="job-status-filter" className="select" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "ALL" | JobStatus)}>
+          <select id="job-status-filter" className="select" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as "ALL" | JobStatus); setPage(1); }}>
             <option value="ALL">Tất cả trạng thái</option>
             <option value="DRAFT">Bản nháp</option>
             <option value="PENDING_APPROVAL">Chờ duyệt</option>
@@ -96,13 +103,29 @@ export default function RecruiterJobsPage() {
             <option value="EXPIRED">Hết hạn</option>
           </select>
         </div>
+        <div className="field">
+          <label className="label" htmlFor="job-sort">Sắp xếp</label>
+          <select id="job-sort" className="select" value={sort} onChange={(event) => { setSort(event.target.value as RecruiterJobSort); setPage(1); }}>
+            <option value="UPDATED_DESC">Mới cập nhật</option>
+            <option value="DEADLINE_ASC">Hạn nộp gần nhất</option>
+            <option value="TITLE_ASC">Tên vị trí A–Z</option>
+          </select>
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="job-page-size">Số dòng</label>
+          <select id="job-page-size" className="select" value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}>
+            <option value="5">5 dòng</option>
+            <option value="10">10 dòng</option>
+            <option value="20">20 dòng</option>
+          </select>
+        </div>
       </section>
 
       {actionStatus ? <p className="notice notice-success" role="status">{actionStatus}</p> : null}
       {actionError ? <p className="notice notice-danger" role="alert"><strong>Chưa đổi được trạng thái tin.</strong> {actionError}</p> : null}
 
       <section className="panel">
-        <div className="list-meta"><strong>{visibleJobs.length} tin phù hợp</strong><span className="help">Dữ liệu được phân trang phía client theo hợp đồng /jobs/mine</span></div>
+        <div className="list-meta"><strong>{jobTable.filteredCount} / {jobs.length} tin phù hợp</strong><span className="help">Chỉ tải `/jobs/mine` một lần; lọc, sắp xếp và phân trang tại trình duyệt</span></div>
         {loadError ? (
           <TransientRecoveryState
             error={loadError}
@@ -111,13 +134,14 @@ export default function RecruiterJobsPage() {
           />
         ) : null}
         {loading ? <LoadingState /> : null}
-        {!loading && !loadError && visibleJobs.length === 0 ? <EmptyState title="Không có tin phù hợp" description="Thử xóa từ khóa hoặc đổi trạng thái lọc." /> : null}
-        {!loading && !loadError && visibleJobs.length ? (
+        {!loading && !loadError && jobTable.filteredCount === 0 ? <EmptyState title="Không có tin phù hợp" description="Thử xóa từ khóa hoặc đổi trạng thái lọc." /> : null}
+        {!loading && !loadError && jobTable.filteredCount > 0 ? (
+          <>
           <div className="table-wrap">
             <table className="data-table">
-              <caption>Danh sách tin tuyển dụng của TechVision</caption>
+              <caption>Hiển thị tin {jobTable.from}–{jobTable.to} trong {jobTable.filteredCount} kết quả</caption>
               <thead><tr><th scope="col">Vị trí</th><th scope="col">Trạng thái</th><th scope="col">Hạn nộp</th><th scope="col">Phụ trách</th><th scope="col">Thao tác</th></tr></thead>
-              <tbody>{visibleJobs.map((job) => (
+              <tbody>{jobTable.items.map((job) => (
                 <tr key={job.id}>
                   <td>
                     <strong>{job.title}</strong><div className="help">{job.location} · {job.department}</div>
@@ -140,6 +164,12 @@ export default function RecruiterJobsPage() {
               ))}</tbody>
             </table>
           </div>
+          <nav className="btn-group pagination-actions" aria-label="Phân trang tin tuyển dụng">
+            <button className="btn" type="button" disabled={jobTable.page <= 1} onClick={() => setPage(Math.max(1, jobTable.page - 1))}>Trang trước</button>
+            <span className="badge badge-muted" role="status">Trang {jobTable.page}/{jobTable.totalPages}</span>
+            <button className="btn" type="button" disabled={jobTable.page >= jobTable.totalPages} onClick={() => setPage(Math.min(jobTable.totalPages, jobTable.page + 1))}>Trang sau</button>
+          </nav>
+          </>
         ) : null}
       </section>
     </main>

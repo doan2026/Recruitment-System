@@ -34,6 +34,7 @@ import {
 } from "./companyMembership";
 import { isRejectedRecruiterJob, nextRecruiterJobStatus, recruiterJobActionLabel, recruiterJobActions, recruiterJobEditLabel } from "./jobLifecycle";
 import { normalizeJobSkills, normalizeRecruiterJobForm, validateRecruiterJobForm, type RecruiterJobFormValues } from "./jobForm";
+import { buildRecruiterJobTable, type RecruiterJobTableRow } from "./recruiterJobTable";
 import { isOffsetWindowTooDeep, mergePublicJobPage, normalizePublicJobSearch, publicJobSearchScope, validatePublicJobSearch } from "./publicJobSearch";
 import { cursorRestartView } from "./cursorRecovery";
 import { canLoadMoreRecommendations, jobDataSourceView, mergeRecommendationPage, recommendationFallbackView, recommendationSourceView } from "./recommendationPresentation";
@@ -639,6 +640,33 @@ test("rejected recruiter Jobs expose review feedback and a specific edit action"
   assert.equal(isRejectedRecruiterJob("PENDING_APPROVAL", "Góp ý cũ"), false);
   assert.equal(recruiterJobEditLabel("DRAFT", "Bổ sung mô tả"), "Sửa theo góp ý");
   assert.equal(recruiterJobEditLabel("DRAFT"), "Sửa tin");
+});
+
+test("recruiter Job table filters, sorts and paginates without mutating the full response", () => {
+  const rows: RecruiterJobTableRow[] = [
+    { id: "3", title: "Backend Engineer", status: "PUBLISHED", location: "Hà Nội", department: "Engineering", ownerName: "An", deadline: "2026-10-20", updatedAt: "2026-08-01" },
+    { id: "1", title: "Account Executive", status: "DRAFT", location: "Đà Nẵng", department: "Sales", ownerName: "Bình", deadline: "2026-09-10", updatedAt: "2026-08-20" },
+    { id: "2", title: "Frontend Engineer", status: "PUBLISHED", location: "Hồ Chí Minh", department: "Engineering", ownerName: "Chi", deadline: "2026-09-30", updatedAt: "2026-08-15" },
+  ];
+  const originalIds = rows.map((row) => row.id);
+  const result = buildRecruiterJobTable(rows, { query: "engineer", status: "PUBLISHED", sort: "DEADLINE_ASC", page: 1, pageSize: 1 });
+
+  assert.deepEqual(result.items.map((row) => row.id), ["2"]);
+  assert.equal(result.filteredCount, 2);
+  assert.equal(result.totalPages, 2);
+  assert.deepEqual(rows.map((row) => row.id), originalIds);
+});
+
+test("recruiter Job table clamps an outdated page after client filters change", () => {
+  const rows: RecruiterJobTableRow[] = [
+    { id: "1", title: "A", status: "DRAFT", location: "HN", department: "IT", ownerName: "An", deadline: "2026-09-10", updatedAt: "2026-08-20" },
+    { id: "2", title: "B", status: "PUBLISHED", location: "HN", department: "IT", ownerName: "An", deadline: "2026-09-11", updatedAt: "2026-08-21" },
+  ];
+  const result = buildRecruiterJobTable(rows, { query: "", status: "DRAFT", sort: "UPDATED_DESC", page: 9, pageSize: 5 });
+
+  assert.equal(result.page, 1);
+  assert.equal(result.from, 1);
+  assert.equal(result.to, 1);
 });
 
 const validJobForm: RecruiterJobFormValues = {
