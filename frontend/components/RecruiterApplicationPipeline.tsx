@@ -9,6 +9,7 @@ import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, va
 import { changeApplicationStatus, getRecruiterApplications, refreshApplicationMatchScore, type CandidateApplication } from "../lib/person2Api";
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./ui";
 import { RecruiterCvAccess } from "./RecruiterCvAccess";
+import { RecruiterEvaluation } from "./RecruiterEvaluation";
 
 const DEFAULT_FILTERS: RecruiterApplicationFilterDraft = {
   status: "ALL",
@@ -253,6 +254,7 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
               </div>
               <p className="help">Match score: {application.matchScore ?? "chưa sẵn sàng"}</p>
               <RecruiterCvAccess applicationId={application.id} />
+              <RecruiterEvaluation applicationId={application.id} />
               {matchState ? (
                 <p className="notice notice-warning" role="status">
                   <strong>AI chưa sẵn sàng.</strong> {matchState.message} {matchState.polling ? "CareerHub sẽ tự thử lại một lần sau 5 giây." : "Bạn có thể thử lại khi dữ liệu đã đồng bộ."}
