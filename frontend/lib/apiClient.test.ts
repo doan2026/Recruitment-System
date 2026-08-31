@@ -39,6 +39,7 @@ import { isCvDownloadFresh, resolveFreshCvDownload } from "./recruiterCvAccess";
 import { isEvaluationAlreadyExists, normalizeEvaluationDraft } from "./applicationEvaluation";
 import { APPLICATION_API_ROUTES, applicationResourceRoute, offerResponseRoute, recruiterDashboardRoute } from "./applicationApiRoutes";
 import { assertChatResponseSession } from "./aiChatSession";
+import { appendAiChatExchange, createAiChatConversation } from "./aiChatConversation";
 import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, validateRecruiterApplicationFilters, type RecruiterApplicationFilterDraft } from "./recruiterApplicationTable";
 import {
   normalizeInvitationEmail,
@@ -125,6 +126,25 @@ test("AI chat rejects a response belonging to another in-memory session", () => 
     () => assertChatResponseSession(expected, "118f47a2-6f4d-4b7d-8c91-ff02d770a944"),
     (error: unknown) => error instanceof ApiClientError && error.code === "CHAT_SESSION_MISMATCH",
   );
+});
+
+test("AI chat conversation starts locally and appends exactly one request-response exchange", () => {
+  const initial = createAiChatConversation();
+  const next = appendAiChatExchange(initial, "Tìm việc Java", "Bạn có thể mở danh sách việc phù hợp.", "turn-1");
+  assert.equal(initial.length, 1);
+  assert.deepEqual(next.slice(1).map(({ role, content }) => ({ role, content })), [
+    { role: "user", content: "Tìm việc Java" },
+    { role: "assistant", content: "Bạn có thể mở danh sách việc phù hợp." },
+  ]);
+});
+
+test("AI chat reset rebuilds display state because the backend exposes no history read endpoint", () => {
+  const first = createAiChatConversation();
+  const changed = appendAiChatExchange(first, "Một câu hỏi", "Một câu trả lời", "turn-1");
+  const reset = createAiChatConversation();
+  assert.equal(changed.length, 3);
+  assert.deepEqual(reset, first);
+  assert.notEqual(reset, first);
 });
 
 test("query and body allowlists reject unknown fields", () => {
