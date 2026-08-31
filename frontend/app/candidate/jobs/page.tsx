@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { EmptyState, ErrorState, LoadingState, PageHeader } from "../../../components/ui";
+import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import { cursorRestartView } from "../../../lib/cursorRecovery";
 import {
@@ -15,6 +15,7 @@ import {
   type PublicJobSearchFilters,
   type PublicJobSearchForm,
 } from "../../../lib/publicJobSearch";
+import { jobDataSourceView, recommendationFallbackView, recommendationSourceView } from "../../../lib/recommendationPresentation";
 import {
   type JobDataSource,
   type Job,
@@ -26,6 +27,38 @@ import {
 
 function fmtDate(value?: string) {
   return value ? new Date(value).toLocaleDateString("vi-VN") : "-";
+}
+
+function RecommendationCard({
+  item,
+  loading,
+  onRetry,
+}: {
+  item: JobRecommendation;
+  loading: boolean;
+  onRetry: () => void;
+}) {
+  const source = recommendationSourceView(item.source);
+  const fallback = recommendationFallbackView(item.fallbackReason);
+  return (
+    <article className="card recommendation-card">
+      <div className="section-head row-between"><strong>{item.title}</strong><StatusBadge tone={source.tone}>{source.label}</StatusBadge></div>
+      <p className="help">{source.description}</p>
+      <p className="help">Mức phù hợp {item.matchPercent}%</p>
+      <p>{item.reasonText}</p>
+      {fallback ? (
+        <section className="recommendation-fallback" aria-label="Thông tin nguồn gợi ý dự phòng">
+          <strong>{fallback.title}</strong>
+          <p>{fallback.description}</p>
+          {fallback.action === "UPLOAD_CV" ? (
+            <Link className="btn btn-secondary" href="/candidate/profile/cvs">{fallback.actionLabel}</Link>
+          ) : (
+            <button className="btn btn-secondary" type="button" disabled={loading} onClick={onRetry}>{loading ? "Đang làm mới…" : fallback.actionLabel}</button>
+          )}
+        </section>
+      ) : null}
+    </article>
+  );
 }
 
 export default function CandidateJobsPage() {
@@ -49,6 +82,8 @@ export default function CandidateJobsPage() {
   const [recommendationError, setRecommendationError] = useState("");
   const [searchRestartNotice, setSearchRestartNotice] = useState("");
   const [recommendationRestartNotice, setRecommendationRestartNotice] = useState("");
+  const [recommendationReloadKey, setRecommendationReloadKey] = useState(0);
+  const [recommendationLoading, setRecommendationLoading] = useState(true);
   const searchRestartedRef = useRef(false);
   const restoreListFocusRef = useRef(false);
   const jobListRef = useRef<HTMLElement>(null);
@@ -57,6 +92,9 @@ export default function CandidateJobsPage() {
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
+    setRecommendationLoading(true);
+    setRecommendationError("");
+    setRecommendationRestartNotice("");
     const continuation = mode === "CURSOR" && Boolean(cursor);
     setLoading(true);
     setError("");
@@ -119,12 +157,14 @@ export default function CandidateJobsPage() {
         setRecommendationError(toUserMessage(reason));
       }
     }
-    void loadRecommendations();
+    void loadRecommendations().finally(() => {
+      if (active) setRecommendationLoading(false);
+    });
     return () => {
       active = false;
       controller.abort();
     };
-  }, []);
+  }, [recommendationReloadKey]);
 
   function change<K extends keyof PublicJobSearchForm>(field: K, value: PublicJobSearchForm[K]) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -189,6 +229,7 @@ export default function CandidateJobsPage() {
 
   const nextOffsetTooDeep = mode === "OFFSET" && isOffsetWindowTooDeep(page + 1, limit);
   const totalPages = Math.max(1, Math.ceil(total / limit));
+  const searchSource = responseSource ? jobDataSourceView(responseSource) : null;
 
   return (
     <main>
@@ -267,7 +308,7 @@ export default function CandidateJobsPage() {
       <section className="grid-2">
         <section ref={jobListRef} className="panel" tabIndex={-1}>
           <div className="section-head row-between">
-            <div><h2>Danh sách việc làm</h2><p className="help">Nguồn dữ liệu: {responseSource || "đang xác định"}</p></div>
+            <div><h2>Danh sách việc làm</h2><p className="help">Nguồn dữ liệu: {searchSource ? `${searchSource.label} — ${searchSource.description}` : "đang xác định"}</p></div>
             <span className="badge">{mode === "OFFSET" ? `${total} kết quả` : `${jobs.length} đã tải`}</span>
           </div>
           {error ? <ErrorState message={error} onRetry={() => setReloadKey((value) => value + 1)} /> : null}
@@ -281,7 +322,7 @@ export default function CandidateJobsPage() {
                     <strong>{job.title}</strong>
                     <p className="help">{job.location} · {job.department} · {job.isNegotiable ? "Lương thỏa thuận" : `${job.salaryMin.toLocaleString("vi-VN")} – ${job.salaryMax?.toLocaleString("vi-VN")} VNĐ`}</p>
                   </div>
-                  <span className="badge">{job.source}</span>
+                  <StatusBadge tone={jobDataSourceView(job.source).tone}>{jobDataSourceView(job.source).label}</StatusBadge>
                 </div>
                 <p className="help">Hạn nộp: {fmtDate(job.deadline)}</p>
                 <div className="btn-group"><Link className="btn btn-primary" href={`/candidate/jobs/${job.id}`}>Xem chi tiết</Link><Link className="btn" href={`/candidate/applications?job=${job.id}`}>Nộp hồ sơ</Link></div>
@@ -304,18 +345,12 @@ export default function CandidateJobsPage() {
 
         <section className="panel">
           <h2>Gợi ý phù hợp</h2>
-          <p className="help">Danh sách riêng theo hồ sơ ứng viên; không bị thay đổi bởi bộ lọc tìm kiếm.</p>
+          <p className="help">Mỗi thẻ ghi rõ nguồn xếp hạng. Khi dùng dữ liệu dự phòng, lý do và hành động phục hồi được hiển thị riêng.</p>
           {recommendationRestartNotice ? <p className="notice" role="status">{recommendationRestartNotice}</p> : null}
           {recommendationError ? <ErrorState message={recommendationError} /> : null}
+          {recommendationLoading && recs.length === 0 ? <LoadingState label="Đang tải gợi ý việc làm" /> : null}
           <div className="stack">
-            {recs.map((item) => (
-              <div key={item.id} className="card">
-                <div className="section-head row-between"><strong>{item.title}</strong><span className="badge">{item.source}</span></div>
-                <p className="help">Mức phù hợp {item.matchPercent}%</p>
-                <p>{item.reasonText}</p>
-                {item.fallbackReason ? <p className="status-line">Fallback: {item.fallbackReason}</p> : null}
-              </div>
-            ))}
+            {recs.map((item) => <RecommendationCard key={item.id} item={item} loading={recommendationLoading} onRetry={() => setRecommendationReloadKey((value) => value + 1)} />)}
           </div>
         </section>
       </section>

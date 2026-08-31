@@ -485,6 +485,11 @@ textarea { resize: none; }
 .toolbar .field { flex: 1 1 160px; }
 .filter-note { margin: 12px 0 0; color: var(--muted); font-size: 0.78rem; }
 .pagination-actions { margin-top: 16px; }
+.recommendation-card { display: grid; gap: 8px; }
+.recommendation-card > p { margin: 0; }
+.recommendation-fallback { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
+.recommendation-fallback p { margin: 0; color: var(--muted); font-size: 0.84rem; line-height: 1.5; }
+.recommendation-fallback .btn { justify-self: start; }
 .list-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; scrollbar-gutter: stable; }
 .data-table { width: 100%; min-width: 760px; border-collapse: collapse; background: white; }

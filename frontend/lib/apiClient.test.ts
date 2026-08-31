@@ -36,6 +36,7 @@ import { isRejectedRecruiterJob, nextRecruiterJobStatus, recruiterJobActionLabel
 import { normalizeJobSkills, normalizeRecruiterJobForm, validateRecruiterJobForm, type RecruiterJobFormValues } from "./jobForm";
 import { isOffsetWindowTooDeep, mergePublicJobPage, normalizePublicJobSearch, publicJobSearchScope, validatePublicJobSearch } from "./publicJobSearch";
 import { cursorRestartView } from "./cursorRecovery";
+import { jobDataSourceView, recommendationFallbackView, recommendationSourceView } from "./recommendationPresentation";
 import {
   normalizeCompanyCreate,
   validateCompanyCreate,
@@ -691,4 +692,20 @@ test("only stale Job and recommendation cursors restart their owning list", () =
   assert.equal(cursorRestartView("RECOMMENDATION_CURSOR_STALE")?.code, "RECOMMENDATION_CURSOR_STALE");
   assert.equal(cursorRestartView("JOB_SEARCH_CURSOR_SCOPE_MISMATCH"), null);
   assert.equal(cursorRestartView("JOB_SEARCH_PAGE_TOO_DEEP"), null);
+});
+
+test("Job and recommendation sources have transparent user-facing context", () => {
+  assert.match(jobDataSourceView("ELASTICSEARCH").description, /chỉ mục/i);
+  assert.match(jobDataSourceView("POSTGRESQL").description, /PostgreSQL/);
+  assert.match(recommendationSourceView("AI").label, /AI/);
+  assert.notEqual(recommendationSourceView("PREFERENCES").label, recommendationSourceView("LATEST").label);
+});
+
+test("every candidate recommendation fallback has a distinct recovery CTA", () => {
+  const reasons = ["NO_ACTIVE_CV", "PROFILE_UNAVAILABLE", "AI_UNAVAILABLE", "AI_NOT_READY", "AI_RESPONSE_INVALID", "AI_RESULTS_STALE"] as const;
+  const views = reasons.map((reason) => recommendationFallbackView(reason));
+  assert.ok(views.every(Boolean));
+  assert.equal(new Set(views.map((view) => view?.actionLabel)).size, reasons.length);
+  assert.equal(recommendationFallbackView("NO_ACTIVE_CV")?.action, "UPLOAD_CV");
+  assert.equal(recommendationFallbackView("NO_MATCHING_CV_EMBEDDINGS"), null);
 });
