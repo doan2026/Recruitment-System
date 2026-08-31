@@ -10,6 +10,7 @@ import {
 import type { CompanyCreateValues } from "./companyForm";
 import type { RecruiterJobPayload } from "./jobForm";
 import type { PublicJobSearchFilters } from "./publicJobSearch";
+import type { CandidateRecommendationEmptyReason } from "./candidateRecommendation";
 import type {
   CompanyMediaAssetType,
   CompanyMediaUploadCapability,
@@ -162,6 +163,21 @@ interface JobRecommendationResult {
   nextCursor: string | null;
   source: RecommendationSource;
   fallbackReason: JobRecommendation["fallbackReason"] | null;
+}
+
+export interface RecruiterCandidateRecommendation {
+  candidateId: string;
+  fullName: string;
+  headline: string | null;
+  skills: string[];
+  score: number;
+}
+
+export interface RecruiterCandidateRecommendationResult {
+  jobId: string;
+  items: RecruiterCandidateRecommendation[];
+  nextCursor: string | null;
+  reason: CandidateRecommendationEmptyReason | null;
 }
 
 interface BackendApplicationListItem {
@@ -901,6 +917,67 @@ export async function getRecommendationsForCandidate(
       hasMore: response.data.source === "AI" && response.data.nextCursor !== null,
     },
   };
+}
+
+export async function getRecruiterCandidateRecommendations(
+  jobId: string,
+  options: { cursor?: string | null; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<RecruiterCandidateRecommendationResult>> {
+  if (isDemoPerson2Api) {
+    const job = demo.jobs.find((item) => item.id === jobId);
+    if (!job) throw new ApiClientError({ code: "JOB_NOT_FOUND", status: 404 });
+    if (job.id === "job-product-003") {
+      return {
+        data: {
+          jobId,
+          items: [],
+          nextCursor: null,
+          reason: "JOB_EMBEDDING_NOT_FOUND",
+        },
+        meta: null,
+      };
+    }
+    return {
+      data: {
+        jobId,
+        items: [
+          {
+            candidateId: "candidate-discovery-001",
+            fullName: "Trần Minh Anh",
+            headline: "Frontend Engineer · 4 năm kinh nghiệm",
+            skills: ["React", "TypeScript", "Next.js"],
+            score: 0.92,
+          },
+          {
+            candidateId: "candidate-discovery-002",
+            fullName: "Nguyễn Hoàng Nam",
+            headline: "Full-stack Developer",
+            skills: ["TypeScript", "Node.js", "PostgreSQL"],
+            score: 0.84,
+          },
+        ],
+        nextCursor: null,
+        reason: null,
+      },
+      meta: null,
+    };
+  }
+  assertCanonicalUuidV4(jobId, "jobId");
+  const response = await requestApi<RecruiterCandidateRecommendationResult>(
+    `${API_PATHS.jobs}${jobId}/recommended-candidates`,
+    {
+      privateData: true,
+      signal,
+      query: { limit: options.limit ?? 10, cursor: options.cursor },
+      allowedQueryKeys: ["limit", "cursor"],
+      maxRetries: 0,
+    },
+  );
+  if (response.data.items.length === 0 && response.data.reason === null) {
+    throw new ApiClientError({ code: "INVALID_API_RESPONSE" });
+  }
+  return response;
 }
 
 export async function getOffer(id: string, signal?: AbortSignal): Promise<ApiEnvelope<Offer | null>> {
