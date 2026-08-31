@@ -8,5 +8,5 @@
     "moduleResolution": "node",
     "outDir": ".test-dist"
   },
-  "include": ["lib/apiClientCore.ts", "lib/companyForm.ts", "lib/companyInvitation.ts", "lib/companyInvitationAcceptance.ts", "lib/companyMembership.ts", "lib/companyVerification.ts", "lib/companyMediaUpload.ts", "lib/companyMediaLibrary.ts", "lib/companyPublicSearch.ts", "lib/companyPublicProfile.ts", "lib/conflictRecovery.ts", "lib/transientRecovery.ts", "lib/apiClient.test.ts"]
+  "include": ["lib/apiClientCore.ts", "lib/companyForm.ts", "lib/companyInvitation.ts", "lib/companyInvitationAcceptance.ts", "lib/companyMembership.ts", "lib/companyVerification.ts", "lib/companyMediaUpload.ts", "lib/companyMediaLibrary.ts", "lib/companyPublicSearch.ts", "lib/companyPublicProfile.ts", "lib/jobLifecycle.ts", "lib/conflictRecovery.ts", "lib/transientRecovery.ts", "lib/apiClient.test.ts"]
 }

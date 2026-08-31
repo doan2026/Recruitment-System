@@ -103,6 +103,7 @@ export interface Job {
   updatedAt: string;
   memberRole?: "OWNER" | "MEMBER";
   fallbackReason?: FallbackReason;
+  rejectionReason?: string;
 }
 
 export interface JobRecommendation {

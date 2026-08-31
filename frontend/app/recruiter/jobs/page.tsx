@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { TransientRecoveryState } from "../../../components/TransientRecoveryState";
 import { EmptyState, LoadingState, Metric, PageHeader, StatusBadge } from "../../../components/ui";
-import { ApiClientError } from "../../../lib/apiClient";
-import { getRecruiterJobs, type Job, type JobStatus } from "../../../lib/person2Api";
+import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
+import { recruiterJobActionLabel, recruiterJobActions, type RecruiterJobAction } from "../../../lib/jobLifecycle";
+import { closeRecruiterJob, getRecruiterJobs, submitJobForApproval, type Job, type JobStatus } from "../../../lib/person2Api";
 
 export default function RecruiterJobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -15,6 +16,9 @@ export default function RecruiterJobsPage() {
   const [loadError, setLoadError] = useState<unknown>(null);
   const [failureCount, setFailureCount] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
+  const [pendingJobId, setPendingJobId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
+  const [actionStatus, setActionStatus] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -49,8 +53,20 @@ export default function RecruiterJobsPage() {
     return matchesQuery && (statusFilter === "ALL" || job.status === statusFilter);
   }), [jobs, query, statusFilter]);
 
-  function transition(jobId: string, nextStatus: JobStatus) {
-    setJobs((current) => current.map((job) => job.id === jobId ? { ...job, status: nextStatus, aggregateVersion: job.aggregateVersion + 1 } : job));
+  async function runJobAction(job: Job, action: RecruiterJobAction) {
+    if (pendingJobId) return;
+    setPendingJobId(job.id);
+    setActionError("");
+    setActionStatus("");
+    try {
+      const response = action === "SUBMIT_FOR_APPROVAL" ? await submitJobForApproval(job.id) : await closeRecruiterJob(job.id);
+      setJobs((current) => current.map((item) => item.id === job.id ? response.data : item));
+      setActionStatus(action === "SUBMIT_FOR_APPROVAL" ? "Đã gửi tin cho admin duyệt." : "Đã đóng tin tuyển dụng.");
+    } catch (reason: unknown) {
+      setActionError(toUserMessage(reason));
+    } finally {
+      setPendingJobId(null);
+    }
   }
 
   return (
@@ -82,6 +98,9 @@ export default function RecruiterJobsPage() {
         </div>
       </section>
 
+      {actionStatus ? <p className="notice notice-success" role="status">{actionStatus}</p> : null}
+      {actionError ? <p className="notice notice-danger" role="alert"><strong>Chưa đổi được trạng thái tin.</strong> {actionError}</p> : null}
+
       <section className="panel">
         <div className="list-meta"><strong>{visibleJobs.length} tin phù hợp</strong><span className="help">Dữ liệu được phân trang phía client theo hợp đồng /jobs/mine</span></div>
         {loadError ? (
@@ -106,8 +125,7 @@ export default function RecruiterJobsPage() {
                   <td>{job.ownerName}<div className="help">{job.memberRole ?? "MEMBER"}</div></td>
                   <td><div className="btn-group">
                     <Link className="btn btn-ghost" href={`/recruiter/jobs/${job.id}`}>Pipeline</Link>
-                    {job.status === "DRAFT" ? <button className="btn btn-secondary" type="button" onClick={() => transition(job.id, "PENDING_APPROVAL")}>Gửi đi chờ duyệt</button> : null}
-                    {job.status === "PUBLISHED" ? <button className="btn btn-warning" type="button" onClick={() => transition(job.id, "CLOSED")}>Đóng tin</button> : null}
+                    {recruiterJobActions(job.status).map((action) => <button key={action} className={action === "CLOSE" ? "btn btn-warning" : "btn btn-secondary"} type="button" disabled={pendingJobId === job.id} aria-busy={pendingJobId === job.id} onClick={() => { void runJobAction(job, action); }}>{pendingJobId === job.id ? "Đang xử lý…" : recruiterJobActionLabel(action)}</button>)}
                   </div></td>
                 </tr>
               ))}</tbody>
