@@ -625,3 +625,7 @@ textarea { resize: none; }
 .invitation-token-panel { display: grid; gap: 16px; }
 .invitation-token { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; }
 .invitation-token-panel .notice { margin: 0; }
+
+.invitation-accept-panel { display: grid; max-width: 760px; gap: 20px; }
+.invitation-accept-panel .notice { margin: 0; }
+.invitation-accept-success { max-width: 760px; }

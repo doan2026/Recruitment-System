@@ -23,6 +23,10 @@ import {
   validateInvitationEmail,
 } from "./companyInvitation";
 import {
+  invitationFailureView,
+  validateInvitationToken,
+} from "./companyInvitationAcceptance";
+import {
   normalizeCompanyCreate,
   validateCompanyCreate,
 } from "./companyForm";
@@ -506,4 +510,47 @@ test("company invitation blocks missing, malformed and oversized emails", () => 
     "Email không được vượt quá 320 ký tự.",
   );
   assert.equal(validateInvitationEmail("member@example.com"), null);
+});
+
+test("invitation acceptance validates tokens without persisting them", () => {
+  assert.equal(validateInvitationToken(""), "Nhập token lời mời.");
+  assert.equal(validateInvitationToken("short"), "Token phải có ít nhất 32 ký tự.");
+  assert.equal(validateInvitationToken("x".repeat(129)), "Token không được vượt quá 128 ký tự.");
+  assert.equal(validateInvitationToken(`  ${"x".repeat(32)}  `), null);
+});
+
+test("invitation acceptance maps every business failure to a distinct recovery CTA", () => {
+  const view = (code: string, status: number, details: Record<string, unknown> = {}) =>
+    invitationFailureView({ code, status, details });
+
+  assert.deepEqual(
+    [view("INVITATION_NOT_FOUND", 404).title, view("INVITATION_NOT_FOUND", 404).actionLabel],
+    ["Không tìm thấy lời mời", "Kiểm tra token khác"],
+  );
+  assert.equal(view("INVITATION_EXPIRED", 410).actionLabel, "Nhập token được phát lại");
+  assert.equal(view("INVITATION_REISSUE_REQUIRED", 409).actionLabel, "Nhập token mới");
+  assert.match(
+    view("INVITATION_NOT_ACTIVE", 409, { status: "REVOKED" }).description,
+    /REVOKED/,
+  );
+  assert.deepEqual(
+    [view("RECRUITER_ALREADY_HAS_COMPANY", 409).action, view("RECRUITER_ALREADY_HAS_COMPANY", 409).actionLabel],
+    ["OPEN_COMPANY", "Mở hồ sơ công ty"],
+  );
+  assert.equal(view("INVITATION_EMAIL_MISMATCH", 403).actionLabel, "Dùng token cho tài khoản này");
+  assert.equal(view("AUTH_ACCOUNT_INACTIVE", 403).actionLabel, "Kiểm tra bằng tài khoản khác");
+  assert.equal(view("AUTH_ACCOUNT_INVALID", 401).actionLabel, "Thử lại sau khi đăng nhập");
+});
+
+test("invitation acceptance keeps unknown failures retryable", () => {
+  assert.deepEqual(invitationFailureView({
+    code: "NETWORK_ERROR",
+    status: 0,
+    details: {},
+  }), {
+    title: "Chưa nhận được lời mời",
+    description: "Kết nối có thể đang gián đoạn. Token vẫn được giữ trên màn hình này.",
+    action: "RETRY",
+    actionLabel: "Thử lại",
+  });
 });
