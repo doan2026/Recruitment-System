@@ -544,7 +544,8 @@ textarea { resize: none; }
 .message.user { border-color: #b7dec0; background: #e8f7ec; }
 .message.bot { background: white; }
 .chat-composer { display: flex; align-items: flex-end; gap: 10px; margin-top: 14px; }
-.chat-composer .textarea { flex: 1; min-height: 78px; }
+.chat-composer .field { flex: 1; }
+.chat-composer .textarea { width: 100%; min-height: 78px; }
 .character-count { margin: 6px 0 0; color: var(--muted); font-size: 0.72rem; text-align: right; }
 
 .kanban { display: grid; grid-template-columns: repeat(4, minmax(240px, 1fr)); gap: 14px; overflow-x: auto; padding-bottom: 8px; }

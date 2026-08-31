@@ -44,6 +44,7 @@ import { appendAiChatExchange, createAiChatConversation } from "./aiChatConversa
 import { isAiChatSessionBusy, withAiChatSessionLock } from "./aiChatSessionLock";
 import { classifyAiChatBackpressure, runAiChatWithBusyRetry } from "./aiChatBackpressure";
 import { classifyAiChatFeatureState } from "./aiChatFeatureState";
+import { normalizeAiChatMessage, validateAiChatMessage } from "./aiChatMessage";
 import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, validateRecruiterApplicationFilters, type RecruiterApplicationFilterDraft } from "./recruiterApplicationTable";
 import {
   normalizeInvitationEmail,
@@ -275,6 +276,35 @@ test("private API never loops refresh and clears session after a second 401", as
   assert.equal(requests, 2);
   assert.equal(getApiSessionAccountId(), null);
   configureApiSessionRefresh(null);
+});
+
+test("AI chat normalizes NFC and trim while preserving supported tab and newline", () => {
+  const validation = validateAiChatMessage("  To\u0302i\tcần việc\nJava  ");
+  assert.equal(validation.value, "Tôi\tcần việc\nJava");
+  assert.equal(validation.errorCode, null);
+  assert.equal(normalizeAiChatMessage("  To\u0302i\tcần việc\nJava  "), "Tôi\tcần việc\nJava");
+});
+
+test("AI chat rejects blank text and forbidden C0/C1 control characters", () => {
+  assert.equal(validateAiChatMessage(" \t\n ").errorCode, "CHAT_MESSAGE_REQUIRED");
+  assert.equal(validateAiChatMessage("unsafe\u0000message").errorCode, "CHAT_MESSAGE_CONTROL_CHARACTER");
+  assert.equal(validateAiChatMessage("unsafe\u0085message").errorCode, "CHAT_MESSAGE_CONTROL_CHARACTER");
+});
+
+test("AI chat enforces 2000 Unicode code points instead of UTF-16 length", () => {
+  const exact = validateAiChatMessage("😀".repeat(2_000));
+  assert.equal(exact.characterCount, 2_000);
+  assert.equal(exact.byteCount, 8_000);
+  assert.equal(exact.errorCode, null);
+  assert.equal(validateAiChatMessage("a".repeat(2_001)).errorCode, "CHAT_MESSAGE_TOO_LONG");
+});
+
+test("AI chat rejects the UTF-8 byte limit before the character-count constraint", () => {
+  const oversized = validateAiChatMessage("😀".repeat(2_001));
+  assert.equal(oversized.characterCount, 2_001);
+  assert.equal(oversized.byteCount, 8_004);
+  assert.equal(oversized.errorCode, "CHAT_MESSAGE_TOO_MANY_BYTES");
+  assert.throws(() => normalizeAiChatMessage("😀".repeat(2_001)), (error: unknown) => error instanceof ApiClientError && error.status === 422);
 });
 
 test("query and body allowlists reject unknown fields", () => {

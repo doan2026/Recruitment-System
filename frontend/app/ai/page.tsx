@@ -7,6 +7,7 @@ import { appendAiChatExchange, createAiChatConversation, type AiChatMessage } fr
 import { classifyAiChatBackpressure, runAiChatWithBusyRetry } from "../../lib/aiChatBackpressure";
 import { isAiChatSessionBusy } from "../../lib/aiChatSessionLock";
 import { classifyAiChatFeatureState, type AiChatFeatureState } from "../../lib/aiChatFeatureState";
+import { validateAiChatMessage } from "../../lib/aiChatMessage";
 import { sendAiChatMessage } from "../../lib/person2Api";
 
 export default function AiAssistantPage() {
@@ -18,7 +19,9 @@ export default function AiAssistantPage() {
   const [sessionBusy, setSessionBusy] = useState(false);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const [featureState, setFeatureState] = useState<AiChatFeatureState>(null);
+  const [validationAttempted, setValidationAttempted] = useState(false);
   const exchangeSequence = useRef(0);
+  const draftValidation = validateAiChatMessage(draft);
 
   useEffect(() => {
     setSessionId(createChatSessionId());
@@ -38,14 +41,16 @@ export default function AiAssistantPage() {
     setSessionBusy(false);
     setCooldownSeconds(0);
     setFeatureState(null);
+    setValidationAttempted(false);
     exchangeSequence.current = 0;
   }
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const activeSessionId = sessionId;
-    const message = draft.trim();
-    if (!activeSessionId || !message || pending || cooldownSeconds > 0) return;
+    setValidationAttempted(true);
+    if (!activeSessionId || draftValidation.errorCode || pending || cooldownSeconds > 0) return;
+    const message = draftValidation.value;
 
     setPending(true);
     setError("");
@@ -60,6 +65,7 @@ export default function AiAssistantPage() {
         `${activeSessionId}-${exchangeSequence.current}`,
       ));
       setDraft("");
+      setValidationAttempted(false);
     } catch (reason: unknown) {
       const nextFeatureState = classifyAiChatFeatureState(reason);
       if (nextFeatureState) {
@@ -125,8 +131,12 @@ export default function AiAssistantPage() {
           {error ? <p className="notice notice-danger" role="alert">{error}</p> : null}
           <form className="chat-composer" noValidate onSubmit={sendMessage}>
             <label className="sr-only" htmlFor="ai-chat-message">Tin nhắn cho trợ lý nghề nghiệp</label>
-            <textarea id="ai-chat-message" className="textarea resize-none" rows={3} value={draft} disabled={!sessionId || pending || cooldownSeconds > 0} placeholder="Hỏi về tìm việc hoặc quy trình ứng tuyển…" onChange={(event) => setDraft(event.target.value)} />
-            <button className="btn btn-primary" type="submit" disabled={!sessionId || pending || cooldownSeconds > 0 || !draft.trim()}>{pending ? "Đang gửi…" : cooldownSeconds > 0 ? `Chờ ${cooldownSeconds}s` : sessionBusy ? "Thử lại" : "Gửi tin nhắn"}</button>
+            <div className="field">
+              <textarea id="ai-chat-message" className="textarea resize-none" rows={3} value={draft} disabled={!sessionId || pending || cooldownSeconds > 0} placeholder="Hỏi về tìm việc hoặc quy trình ứng tuyển…" aria-invalid={validationAttempted && !!draftValidation.errorCode} aria-describedby="ai-chat-message-count ai-chat-message-error" onChange={(event) => { setDraft(event.target.value); setValidationAttempted(false); }} />
+              <p className="character-count" id="ai-chat-message-count">{draftValidation.characterCount.toLocaleString("vi-VN")}/2.000 ký tự · {draftValidation.byteCount.toLocaleString("vi-VN")}/8.000 byte UTF-8</p>
+              {validationAttempted && draftValidation.errorMessage ? <p className="form-error" id="ai-chat-message-error" role="alert">{draftValidation.errorMessage}</p> : <span id="ai-chat-message-error" />}
+            </div>
+            <button className="btn btn-primary" type="submit" disabled={!sessionId || pending || cooldownSeconds > 0}>{pending ? "Đang gửi…" : cooldownSeconds > 0 ? `Chờ ${cooldownSeconds}s` : sessionBusy ? "Thử lại" : "Gửi tin nhắn"}</button>
           </form>
         </section>
         <aside className="panel">
