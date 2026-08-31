@@ -148,6 +148,10 @@ export function getApiSessionRevision(): number {
   return sessionRevision;
 }
 
+export function getApiSessionAccountId(): string | null {
+  return sessionAccountId;
+}
+
 export function isCanonicalUuidV4(value: string): boolean {
   return UUID_V4_PATTERN.test(value);
 }

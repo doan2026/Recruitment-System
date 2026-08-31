@@ -3,6 +3,7 @@ import {
   ApiClientError,
   type ApiEnvelope,
   assertCanonicalUuidV4,
+  getApiSessionAccountId,
   requestApi,
   selectContractFields,
 } from "./apiClient";
@@ -109,6 +110,14 @@ export interface RecruiterCompanyMembership {
   memberRole: "OWNER" | "MEMBER";
 }
 
+export type CompanyMemberRole = "OWNER" | "MEMBER";
+
+export interface CompanyMember {
+  userId: string;
+  role: CompanyMemberRole;
+  joinedAt: string;
+}
+
 interface BackendJob {
   id: string;
   companyId: string;
@@ -168,6 +177,8 @@ async function normalizeDemo<T>(
   const envelope = await response;
   return { data: envelope.data, meta: envelope.meta ?? null };
 }
+
+let demoMembershipRole: CompanyMemberRole = "OWNER";
 
 function toNumber(value: string | number | null | undefined): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -551,6 +562,85 @@ export async function acceptCompanyInvitation(
     privateData: true,
     signal,
     body,
+    maxRetries: 0,
+  });
+}
+
+export async function getCurrentCompanyMembership(
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<RecruiterCompanyMembership>> {
+  if (isDemoPerson2Api) {
+    const company = demo.companies[0];
+    return {
+      data: {
+        companyId: company?.id ?? "demo-company",
+        name: company?.name ?? "Doanh nghiệp demo",
+        verifiedStatus: company?.verificationStatus ?? "PENDING",
+        memberRole: demoMembershipRole,
+      },
+      meta: null,
+    };
+  }
+  const accountId = getApiSessionAccountId();
+  if (!accountId) throw new ApiClientError({ code: "SESSION_ACCOUNT_REQUIRED", status: 401 });
+  assertCanonicalUuidV4(accountId, "accountId");
+  return requestApi<RecruiterCompanyMembership>(`${API_PATHS.companies}by-user/${accountId}`, {
+    privateData: true,
+    signal,
+  });
+}
+
+export async function getCompanyMembers(
+  companyId: string,
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<CompanyMember[]>> {
+  if (isDemoPerson2Api) {
+    return {
+      data: [
+        { userId: "demo-owner", role: demoMembershipRole, joinedAt: new Date(2025, 0, 8).toISOString() },
+        { userId: "demo-member", role: demoMembershipRole === "OWNER" ? "MEMBER" : "OWNER", joinedAt: new Date(2025, 4, 12).toISOString() },
+      ],
+      meta: null,
+    };
+  }
+  assertCanonicalUuidV4(companyId, "companyId");
+  return requestApi<CompanyMember[]>(`${API_PATHS.companies}${companyId}/members`, {
+    privateData: true,
+    signal,
+  });
+}
+
+export async function transferCompanyOwnership(
+  companyId: string,
+  targetUserId: string,
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<CompanyMember[]>> {
+  if (isDemoPerson2Api) {
+    demoMembershipRole = "MEMBER";
+    return getCompanyMembers(companyId, signal);
+  }
+  assertCanonicalUuidV4(companyId, "companyId");
+  assertCanonicalUuidV4(targetUserId, "userId");
+  return requestApi<CompanyMember[]>(`${API_PATHS.companies}${companyId}/members/${targetUserId}/transfer-ownership`, {
+    method: "PATCH",
+    privateData: true,
+    signal,
+    maxRetries: 0,
+  });
+}
+
+export async function removeCompanyMember(
+  companyId: string,
+  targetUserId: string,
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<{ removedUserId: string }>> {
+  if (isDemoPerson2Api) return { data: { removedUserId: targetUserId }, meta: null };
+  assertCanonicalUuidV4(companyId, "companyId");
+  assertCanonicalUuidV4(targetUserId, "userId");
+  return requestApi<{ removedUserId: string }>(`${API_PATHS.companies}${companyId}/members/${targetUserId}`, {
+    method: "DELETE",
+    privateData: true,
+    signal,
     maxRetries: 0,
   });
 }

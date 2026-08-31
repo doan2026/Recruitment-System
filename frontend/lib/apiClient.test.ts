@@ -6,6 +6,7 @@ import {
   clearApiSession,
   buildQuery,
   collectionPath,
+  getApiSessionAccountId,
   getApiSessionRevision,
   parseRetryAfter,
   requestApi,
@@ -26,6 +27,11 @@ import {
   invitationFailureView,
   validateInvitationToken,
 } from "./companyInvitationAcceptance";
+import {
+  canManageCompanyAsOwner,
+  roleAfterOwnershipTransfer,
+  withoutRemovedMember,
+} from "./companyMembership";
 import {
   normalizeCompanyCreate,
   validateCompanyCreate,
@@ -553,4 +559,25 @@ test("invitation acceptance keeps unknown failures retryable", () => {
     action: "RETRY",
     actionLabel: "Thử lại",
   });
+});
+
+
+test("session exposes only the in-memory account id needed for self membership lookup", () => {
+  setApiSession({ token: "membership-token", accountId: "recruiter-membership" });
+  assert.equal(getApiSessionAccountId(), "recruiter-membership");
+  clearApiSession();
+  assert.equal(getApiSessionAccountId(), null);
+});
+
+test("owner actions fail closed and disappear immediately after ownership transfer", () => {
+  assert.equal(canManageCompanyAsOwner(null), false);
+  assert.equal(canManageCompanyAsOwner("MEMBER"), false);
+  assert.equal(canManageCompanyAsOwner("OWNER"), true);
+  assert.equal(roleAfterOwnershipTransfer("OWNER"), "MEMBER");
+});
+
+test("removed members are deleted from the local authoritative list", () => {
+  const members = [{ userId: "owner" }, { userId: "member" }];
+  assert.deepEqual(withoutRemovedMember(members, "member"), [{ userId: "owner" }]);
+  assert.deepEqual(withoutRemovedMember(members, "unknown"), members);
 });

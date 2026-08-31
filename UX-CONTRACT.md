@@ -74,6 +74,8 @@
 | Public company cursor search | Nhập từ khóa / tải thêm | khóa `q`/`limit` trong cursor chain | `/companies` | append theo `hasMore` | retry hoặc tìm kiếm mới | ô tìm kiếm / list heading | P16.N2 Company Search |
 | Invite company member | OWNER nhập email | khóa submit | ở hồ sơ công ty | hiện token một lần để copy | giữ email + safe error; clipboard fallback | token rồi email input | P16.N2 Company Member |
 | Accept company invitation | Recruiter dán token | khóa submit | route nhận lời mời | membership + CTA mở công ty | CTA riêng theo 404/410/409/403/401 | error action hoặc success heading | P16.N2 Company Member |
+| Manage members | OWNER chọn member | khóa dialog action | hồ sơ công ty | cập nhật list/role | fail closed + retry | members heading | P16.N2 Company Member |
+| Transfer ownership | OWNER xác nhận | khóa dialog | hồ sơ read-only MEMBER | ẩn OWNER actions ngay + re-fetch role | giữ MEMBER guard nếu re-fetch lỗi | membership status | P16.N2 Company Member |
 | Replace-all media | Kéo thả/xóa rồi lưu | khóa editor khi PUT | ở company | reload library từ response | giữ draft + safe error | library heading | P16.N2 Company media |
 | Upload | Chọn file / xin chữ ký | khóa action theo step | ở company | confirm rồi attach fileId | kiểm policy, xin signature mới, giữ confirmed file để retry attach | bước hiện tại | P16.N2 Media handshake |
 | Cancel/back | Hủy / Quay lại | none | owning list | none | dirty guard pending | originating context | P16.N2 |
@@ -116,7 +118,7 @@
 
 ## Permission and clipboard
 
-- OWNER-only action ẩn sau khi membership được tải; 403 vẫn có trang/inline access boundary.
+- OWNER-only action chỉ hiện khi self-membership trả `OWNER`; role null/MEMBER/lỗi đều fail closed. Sau transfer, hạ local role trước rồi re-fetch; nếu re-fetch lỗi vẫn giữ MEMBER guard. 403 vẫn là inline access boundary cuối.
 - Invitation token chỉ hiện một lần trong React memory, copy chủ động có manual fallback; không đưa secret vào toast, URL hoặc storage. Đóng panel/reload sẽ xóa token, mời lại cùng email phải cảnh báo token cũ bị vô hiệu.
 
 ## Verification

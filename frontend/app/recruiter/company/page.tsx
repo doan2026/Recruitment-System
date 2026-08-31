@@ -6,6 +6,7 @@ import { ConfirmationDialog } from "../../../components/ConfirmationDialog";
 import { CompanyMediaUploader } from "../../../components/CompanyMediaUploader";
 import { CompanyMediaLibrary } from "../../../components/CompanyMediaLibrary";
 import { CompanyMemberInvitation } from "../../../components/CompanyMemberInvitation";
+import { CompanyMemberManagement } from "../../../components/CompanyMemberManagement";
 import { EmptyState, ErrorState, LoadingState, Metric, PageHeader, StatusBadge } from "../../../components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import {
@@ -18,7 +19,7 @@ import {
   isInvalidResubmissionTransition,
   requiresCompanyReverification,
 } from "../../../lib/companyVerification";
-import { type Company, getCompany, resubmitCompanyVerification, updateCompany } from "../../../lib/person2Api";
+import { type Company, type CompanyMemberRole, getCompany, resubmitCompanyVerification, updateCompany } from "../../../lib/person2Api";
 
 type CompanyDraft = { name: string; taxCode: string };
 
@@ -36,6 +37,7 @@ export default function RecruiterCompanyPage() {
   const [confirmationDraft, setConfirmationDraft] = useState<CompanyDraft | null>(null);
   const [conflict, setConflict] = useState<ConflictSnapshot<CompanyDraft, Company> | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [memberRole, setMemberRole] = useState<CompanyMemberRole | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -200,7 +202,7 @@ export default function RecruiterCompanyPage() {
         eyebrow="RECRUITER · COMPANY"
         title="Hồ sơ công ty"
         description="Quản lý danh tính doanh nghiệp, trạng thái xác minh và thư viện hình ảnh."
-        action={<button className="btn btn-primary" type="button" onClick={() => setEditing((value) => !value)}>{editing ? "Đóng chỉnh sửa" : "Chỉnh sửa hồ sơ"}</button>}
+        action={memberRole === "OWNER" ? <button className="btn btn-primary" type="button" onClick={() => setEditing((value) => !value)}>{editing ? "Đóng chỉnh sửa" : "Chỉnh sửa hồ sơ"}</button> : undefined}
       />
 
       <ConfirmationDialog
@@ -220,7 +222,7 @@ export default function RecruiterCompanyPage() {
       <section className="metric-grid" aria-label="Tóm tắt công ty">
         <Metric label="Trạng thái" value={company.verificationStatus} detail="Xác minh doanh nghiệp" />
         <Metric label="Phiên bản" value={`v${company.aggregateVersion}`} detail="Optimistic concurrency" />
-        <Metric label="Thành viên" value="12" detail="1 Owner · 11 Member" />
+        <Metric label="Quyền công ty" value={memberRole ?? "Đang tải"} detail="Authoritative membership" />
         <Metric label="Tin đang tuyển" value="5" detail="3 đang công khai" />
       </section>
 
@@ -243,7 +245,7 @@ export default function RecruiterCompanyPage() {
             {verification.rejectReason ? (
               <p><strong>Lý do từ chối:</strong> {verification.rejectReason}</p>
             ) : null}
-            {verification.canResubmit ? (
+            {verification.canResubmit && memberRole === "OWNER" ? (
               <button
                 className="btn btn-secondary"
                 type="button"
@@ -265,7 +267,7 @@ export default function RecruiterCompanyPage() {
             />
           ) : null}
 
-          {editing ? (
+          {editing && memberRole === "OWNER" ? (
             <form className="form-grid" noValidate onSubmit={saveCompany}>
               <div className="field">
                 <label className="label" htmlFor="company-name">Tên công ty</label>
@@ -287,7 +289,7 @@ export default function RecruiterCompanyPage() {
           ) : null}
         </section>
 
-        <aside className="panel">
+        {memberRole === "OWNER" ? <aside className="panel">
           <h2>Luồng tải media</h2>
           <p className="help">Xin chữ ký → tải trực tiếp → xác nhận canonical → gắn fileId vào hồ sơ.</p>
           <CompanyMediaUploader
@@ -298,19 +300,20 @@ export default function RecruiterCompanyPage() {
               setTaxCode(nextCompany.taxCode);
             }}
           />
-        </aside>
+        </aside> : <aside className="panel"><h2>Quyền MEMBER</h2><p className="help">Thư viện media và thay đổi pháp lý chỉ dành cho OWNER.</p></aside>}
       </section>
 
-      <CompanyMediaLibrary
+      {memberRole === "OWNER" ? <CompanyMediaLibrary
         company={company}
         onCompanyChange={(nextCompany) => {
           setCompany(nextCompany);
           setName(nextCompany.name);
           setTaxCode(nextCompany.taxCode);
         }}
-      />
+      /> : null}
 
-      <CompanyMemberInvitation companyId={company.id} />
+      <CompanyMemberManagement companyId={company.id} onRoleChange={setMemberRole} />
+      {memberRole === "OWNER" ? <CompanyMemberInvitation companyId={company.id} /> : null}
     </main>
   );
 }
