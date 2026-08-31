@@ -99,6 +99,16 @@ let sessionAccountId: string | null = null;
 let sessionRevision = 0;
 const sessionListeners = new Set<(revision: number) => void>();
 
+export interface ApiSessionRefreshResult {
+  token?: string | null;
+  accountId: string;
+}
+
+export type ApiSessionRefresher = () => Promise<ApiSessionRefreshResult | null>;
+
+let sessionRefresher: ApiSessionRefresher | null = null;
+let sessionRefreshFlight: Promise<boolean> | null = null;
+
 function publishSessionRevision(): void {
   sessionRevision += 1;
   sessionListeners.forEach((listener) => listener(sessionRevision));
@@ -150,6 +160,30 @@ export function getApiSessionRevision(): number {
 
 export function getApiSessionAccountId(): string | null {
   return sessionAccountId;
+}
+
+export function configureApiSessionRefresh(refresher: ApiSessionRefresher | null): void {
+  sessionRefresher = refresher;
+}
+
+async function refreshApiSession(expectedAccountId: string | null): Promise<boolean> {
+  if (!sessionRefresher) return false;
+  if (!sessionRefreshFlight) {
+    sessionRefreshFlight = (async () => {
+      try {
+        const refreshed = await sessionRefresher?.();
+        const accountId = refreshed?.accountId.trim() ?? "";
+        if (!refreshed || !accountId || (expectedAccountId !== null && accountId !== expectedAccountId)) return false;
+        setApiSession({ token: refreshed.token, accountId });
+        return true;
+      } catch {
+        return false;
+      }
+    })().finally(() => {
+      sessionRefreshFlight = null;
+    });
+  }
+  return sessionRefreshFlight;
 }
 
 export function isCanonicalUuidV4(value: string): boolean {
@@ -251,6 +285,8 @@ export function normalizeError(code: string): string {
     CHAT_BUSY: "Trợ lý đang bận. Hãy thử lại sau ít phút.",
     CHAT_PROVIDER_UNAVAILABLE: "Nhà cung cấp trợ lý đang tạm gián đoạn. Hãy chủ động thử lại.",
     CHAT_HISTORY_UNAVAILABLE: "Lịch sử hội thoại đang tạm gián đoạn. Hãy chủ động thử lại.",
+    CHAT_NOT_CONFIGURED: "Trợ lý nghề nghiệp chưa được bật trong môi trường này.",
+    CHAT_ACCESS_FORBIDDEN: "Trợ lý nghề nghiệp chỉ dành cho tài khoản ứng viên.",
     SESSION_ACCOUNT_REQUIRED: "Không thể thiết lập phiên vì thiếu định danh tài khoản.",
     UNKNOWN_REQUEST_FIELD: "Dữ liệu gửi đi chứa trường không được API hỗ trợ.",
     JOB_SEARCH_CURSOR_STALE: "Danh sách việc làm đã thay đổi. Hãy tải lại từ đầu.",
@@ -371,8 +407,12 @@ export async function requestApi<T>(
   const fetcher = options.fetcher ?? fetch;
   const maxRetries = options.maxRetries ?? (SAFE_RETRY_METHODS.has(method) ? 1 : 0);
 
+  let transientAttempt = 0;
+  let authRefreshAttempted = false;
+  const requestAccountId = sessionAccountId;
+
   try {
-    for (let attempt = 0; ; attempt += 1) {
+    for (;;) {
       let response: Response;
       try {
         response = await fetcher(url, {
@@ -411,20 +451,32 @@ export async function requestApi<T>(
         details: errorPayload.details,
         retryAfterSeconds,
       });
-      if (response.status === 401) clearApiSession();
-      if (!TRANSIENT_STATUSES.has(response.status) || attempt >= maxRetries) throw apiError;
+      if (response.status === 401) {
+        if (options.privateData && !authRefreshAttempted) {
+          authRefreshAttempted = true;
+          if (await refreshApiSession(requestAccountId)) {
+            if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+            else headers.delete("Authorization");
+            continue;
+          }
+        }
+        clearApiSession();
+        throw apiError;
+      }
+      if (!TRANSIENT_STATUSES.has(response.status) || transientAttempt >= maxRetries) throw apiError;
       if (retryAfterSeconds !== null && retryAfterSeconds * 1_000 > MAX_RETRY_DELAY_MS) {
         throw apiError;
       }
 
       const backoffMs = retryAfterSeconds === null
-        ? Math.min(250 * (2 ** attempt), MAX_RETRY_DELAY_MS)
+        ? Math.min(250 * (2 ** transientAttempt), MAX_RETRY_DELAY_MS)
         : retryAfterSeconds * 1_000;
       try {
         await delay(backoffMs, controller.signal);
       } catch {
         throw new ApiClientError({ code: timedOut ? "TIMEOUT" : "REQUEST_CANCELLED" });
       }
+      transientAttempt += 1;
     }
   } finally {
     clearTimeout(timeout);
