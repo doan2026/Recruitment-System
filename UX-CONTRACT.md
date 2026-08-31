@@ -56,6 +56,7 @@
 - Recruiter-owned `/jobs/mine`: client filter/page because API trả toàn bộ mảng.
 - Candidate search: offset hoặc cursor đúng hợp đồng backend; đổi filter xóa cursor.
 - Public Company search: giữ signed cursor trong memory, khóa `q`/`limit` khi đang tải chuỗi và kết thúc theo `hasMore`; không hiển thị `total`/số trang.
+- Public Company detail: `logoUrl=null` dùng initials placeholder; media chỉ lấy từ public response, giữ `sortOrder`, có empty state và không optimistic-insert media vừa confirm.
 - Recommendation: load-more chỉ khi source AI có `nextCursor`.
 - URL state: vẫn pending; adapter đã hỗ trợ API Gateway thật nhưng filter hiện giữ local state.
 - Empty/no-results/error/loading: state riêng, không đổi footprint bất ngờ.
