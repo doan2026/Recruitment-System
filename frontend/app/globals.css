@@ -629,3 +629,10 @@ textarea { resize: none; }
 .invitation-accept-panel { display: grid; max-width: 760px; gap: 20px; }
 .invitation-accept-panel .notice { margin: 0; }
 .invitation-accept-success { max-width: 760px; }
+
+.company-members { margin-top: 20px; }
+.company-members code { display: inline-block; max-width: 280px; overflow: hidden; color: var(--text); text-overflow: ellipsis; vertical-align: middle; }
+.company-members .btn { white-space: nowrap; }
+@media (max-width: 680px) {
+  .company-members code { max-width: 180px; }
+}
