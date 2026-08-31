@@ -32,6 +32,7 @@ import { offerResponseRecoveryView } from "./offerResponseRecovery";
 import { OFFER_ATTACHMENT_SUPPORT, emptyOfferAttachment, normalizeOfferAttachment } from "./offerAttachment";
 import { candidateApplicationActions, recruiterApplicationActions, validateRecruiterApplicationStatus } from "./applicationStateMachine";
 import { applicationCooldownView } from "./applicationCooldown";
+import { activeJobsMetricView, bookmarkCardView, dashboardWarningView } from "./applicationDegradedStates";
 import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, validateRecruiterApplicationFilters, type RecruiterApplicationFilterDraft } from "./recruiterApplicationTable";
 import {
   normalizeInvitationEmail,
@@ -441,6 +442,28 @@ test("offset Application pages restart when totals move or records overlap", () 
   assert.equal(shouldRestartOffsetApplications({ page: 1, expectedTotal: 40, actualTotal: 40, seenIds: new Set(["a", "b"]), currentIds: ["b", "c"] }), true);
   assert.equal(shouldRestartOffsetApplications({ page: 1, expectedTotal: 40, actualTotal: 40, seenIds: new Set(["a", "b"]), currentIds: ["c", "d"] }), false);
   assert.equal(shouldRestartOffsetApplications({ page: 0, expectedTotal: 40, actualTotal: 41, seenIds: new Set(["a"]), currentIds: ["a"] }), false);
+});
+
+test("bookmark degradation keeps the saved record and replaces only missing Job detail", () => {
+  const degraded = bookmarkCardView({ jobId: "job-123", job: null });
+  assert.equal(degraded.available, false);
+  assert.match(degraded.description, /job-123/);
+  assert.match(degraded.description, /vẫn được giữ/);
+
+  const available = bookmarkCardView({ jobId: "job-123", job: { title: "Backend Engineer", exists: true } });
+  assert.equal(available.available, true);
+  assert.equal(available.title, "Backend Engineer");
+});
+
+test("dashboard degradation preserves Application metrics and masks unavailable active Jobs", () => {
+  assert.deepEqual(activeJobsMetricView({ count: null, available: false }), {
+    value: "—",
+    detail: "Job Service đang gián đoạn; các số liệu Application khác vẫn chính xác.",
+    degraded: true,
+  });
+  assert.equal(activeJobsMetricView({ count: 7, available: true }).value, "7");
+  assert.match(dashboardWarningView("JOB_SERVICE_UNAVAILABLE"), /thống kê hồ sơ/);
+  assert.doesNotMatch(dashboardWarningView("UNKNOWN_DOWNSTREAM"), /UNKNOWN_DOWNSTREAM/);
 });
 
 test("Retry-After drives one bounded automatic retry before manual recovery", () => {
