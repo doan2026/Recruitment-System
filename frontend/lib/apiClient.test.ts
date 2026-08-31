@@ -35,6 +35,7 @@ import {
 import { isRejectedRecruiterJob, nextRecruiterJobStatus, recruiterJobActionLabel, recruiterJobActions, recruiterJobEditLabel } from "./jobLifecycle";
 import { normalizeJobSkills, normalizeRecruiterJobForm, validateRecruiterJobForm, type RecruiterJobFormValues } from "./jobForm";
 import { isOffsetWindowTooDeep, mergePublicJobPage, normalizePublicJobSearch, publicJobSearchScope, validatePublicJobSearch } from "./publicJobSearch";
+import { cursorRestartView } from "./cursorRecovery";
 import {
   normalizeCompanyCreate,
   validateCompanyCreate,
@@ -683,4 +684,11 @@ test("public Job pagination enforces the offset window and appends cursor pages 
     publicJobSearchScope({ q: "React", sort: "RELEVANCE" }, 20),
     publicJobSearchScope({ q: "React", sort: "NEWEST" }, 20),
   );
+});
+
+test("only stale Job and recommendation cursors restart their owning list", () => {
+  assert.equal(cursorRestartView("JOB_SEARCH_CURSOR_STALE")?.code, "JOB_SEARCH_CURSOR_STALE");
+  assert.equal(cursorRestartView("RECOMMENDATION_CURSOR_STALE")?.code, "RECOMMENDATION_CURSOR_STALE");
+  assert.equal(cursorRestartView("JOB_SEARCH_CURSOR_SCOPE_MISMATCH"), null);
+  assert.equal(cursorRestartView("JOB_SEARCH_PAGE_TOO_DEEP"), null);
 });

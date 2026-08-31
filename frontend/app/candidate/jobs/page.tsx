@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { EmptyState, ErrorState, LoadingState, PageHeader } from "../../../components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
+import { cursorRestartView } from "../../../lib/cursorRecovery";
 import {
   emptyPublicJobSearchForm,
   isOffsetWindowTooDeep,
@@ -46,6 +47,11 @@ export default function CandidateJobsPage() {
   const [reloadKey, setReloadKey] = useState(0);
   const [recs, setRecs] = useState<JobRecommendation[]>([]);
   const [recommendationError, setRecommendationError] = useState("");
+  const [searchRestartNotice, setSearchRestartNotice] = useState("");
+  const [recommendationRestartNotice, setRecommendationRestartNotice] = useState("");
+  const searchRestartedRef = useRef(false);
+  const restoreListFocusRef = useRef(false);
+  const jobListRef = useRef<HTMLElement>(null);
   const scope = useMemo(() => publicJobSearchScope(filters, limit), [filters, limit]);
 
   useEffect(() => {
@@ -63,11 +69,25 @@ export default function CandidateJobsPage() {
         setNextCursor(response.meta?.nextCursor ?? null);
         setTotal(Number(response.meta?.total ?? 0));
         setResponseSource((response.meta?.source as JobDataSource | undefined) ?? "");
+        searchRestartedRef.current = false;
+        if (restoreListFocusRef.current) {
+          restoreListFocusRef.current = false;
+          requestAnimationFrame(() => jobListRef.current?.scrollIntoView({ block: "start" }));
+        }
       })
       .catch((reason: unknown) => {
         if (!active || (reason instanceof ApiClientError && reason.code === "REQUEST_CANCELLED")) return;
         if (reason instanceof ApiClientError && reason.code === "JOB_SEARCH_PAGE_TOO_DEEP") {
           setTooDeep(true);
+        } else if (reason instanceof ApiClientError && cursorRestartView(reason.code)?.code === "JOB_SEARCH_CURSOR_STALE" && !searchRestartedRef.current) {
+          searchRestartedRef.current = true;
+          restoreListFocusRef.current = true;
+          setSearchRestartNotice(cursorRestartView(reason.code)?.message ?? "");
+          setCursor(null);
+          setPage(1);
+          setNextCursor(null);
+          setHasMore(false);
+          if (!cursor) setReloadKey((value) => value + 1);
         } else {
           setError(toUserMessage(reason));
         }
@@ -84,15 +104,22 @@ export default function CandidateJobsPage() {
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
-    getRecommendationsForCandidate(controller.signal)
-      .then((response) => {
+    async function loadRecommendations(restarted = false): Promise<void> {
+      try {
+        const response = await getRecommendationsForCandidate(controller.signal);
         if (active) setRecs(response.data);
-      })
-      .catch((reason: unknown) => {
-        if (active && !(reason instanceof ApiClientError && reason.code === "REQUEST_CANCELLED")) {
-          setRecommendationError(toUserMessage(reason));
+      } catch (reason: unknown) {
+        if (!active || (reason instanceof ApiClientError && reason.code === "REQUEST_CANCELLED")) return;
+        const restart = reason instanceof ApiClientError ? cursorRestartView(reason.code) : null;
+        if (restart?.code === "RECOMMENDATION_CURSOR_STALE" && !restarted) {
+          setRecommendationRestartNotice(restart.message);
+          await loadRecommendations(true);
+          return;
         }
-      });
+        setRecommendationError(toUserMessage(reason));
+      }
+    }
+    void loadRecommendations();
     return () => {
       active = false;
       controller.abort();
@@ -111,6 +138,9 @@ export default function CandidateJobsPage() {
   }
 
   function resetTraversal() {
+    searchRestartedRef.current = false;
+    restoreListFocusRef.current = false;
+    setSearchRestartNotice("");
     setPage(1);
     setCursor(null);
     setNextCursor(null);
@@ -232,9 +262,10 @@ export default function CandidateJobsPage() {
           <div className="btn-group"><button className="btn btn-primary" type="button" onClick={switchToCursor}>Chuyển sang tải thêm</button><button className="btn" type="button" onClick={() => document.getElementById("q")?.focus()}>Thu hẹp bộ lọc</button></div>
         </section>
       ) : null}
+      {searchRestartNotice ? <p className="notice" role="status">{searchRestartNotice}</p> : null}
 
       <section className="grid-2">
-        <section className="panel">
+        <section ref={jobListRef} className="panel" tabIndex={-1}>
           <div className="section-head row-between">
             <div><h2>Danh sách việc làm</h2><p className="help">Nguồn dữ liệu: {responseSource || "đang xác định"}</p></div>
             <span className="badge">{mode === "OFFSET" ? `${total} kết quả` : `${jobs.length} đã tải`}</span>
@@ -274,6 +305,7 @@ export default function CandidateJobsPage() {
         <section className="panel">
           <h2>Gợi ý phù hợp</h2>
           <p className="help">Danh sách riêng theo hồ sơ ứng viên; không bị thay đổi bởi bộ lọc tìm kiếm.</p>
+          {recommendationRestartNotice ? <p className="notice" role="status">{recommendationRestartNotice}</p> : null}
           {recommendationError ? <ErrorState message={recommendationError} /> : null}
           <div className="stack">
             {recs.map((item) => (
