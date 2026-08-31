@@ -33,6 +33,7 @@ import {
   validateCompanyMediaLibrary,
 } from "./companyMediaLibrary";
 import { mergePublicCompanyPage, shouldLockCompanySearch } from "./companyPublicSearch";
+import { companyLogoFallback, orderPublicCompanyMedia } from "./companyPublicProfile";
 import {
   companyVerificationView,
   isInvalidResubmissionTransition,
@@ -466,4 +467,24 @@ test("public company criteria stay locked for the entire cursor chain", () => {
   assert.equal(shouldLockCompanySearch(true, null), true);
   assert.equal(shouldLockCompanySearch(false, "opaque.signed-cursor"), true);
   assert.equal(shouldLockCompanySearch(false, null), false);
+});
+
+test("public company detail has a stable logo placeholder", () => {
+  assert.equal(companyLogoFallback("  Đường Việt"), "Đ");
+  assert.equal(companyLogoFallback(""), "DN");
+});
+
+test("public company detail renders only usable media in backend order", () => {
+  const ordered = orderPublicCompanyMedia([
+    { url: "https://cdn.test/second.jpg", type: "IMAGE", sortOrder: 2 },
+    { url: " ", type: "IMAGE", sortOrder: 0 },
+    { url: "https://cdn.test/first.mp4", type: "VIDEO", sortOrder: 1 },
+  ]);
+  assert.deepEqual(
+    ordered.map((item) => [item.type, item.sortOrder]),
+    [
+      ["VIDEO", 1],
+      ["IMAGE", 2],
+    ],
+  );
 });

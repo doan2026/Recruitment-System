@@ -70,6 +70,28 @@ export interface PublicCompanySummary {
   logoUrl: string | null;
 }
 
+export interface PublicCompanyMedia {
+  url: string;
+  type: "IMAGE" | "VIDEO";
+  sortOrder: number;
+}
+
+export interface PublicCompanyProfile {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  industry: string;
+  size: string;
+  address: string;
+  website: string | null;
+  taxCode: string;
+  logoUrl: string | null;
+  media: PublicCompanyMedia[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface BackendJob {
   id: string;
   companyId: string;
@@ -417,7 +439,7 @@ export async function searchPublicCompanies(search: {
       .map((company) => ({
         id: company.id, name: company.name, slug: company.shortName,
         industry: "Công nghệ", size: "51-200", address: "Hà Nội",
-        logoUrl: company.media.logo?.url ?? null,
+        logoUrl: null,
       }));
     return { data: items, meta: { limit: search.limit, hasMore: false, nextCursor: null } };
   }
@@ -426,6 +448,36 @@ export async function searchPublicCompanies(search: {
     query: { q: search.q, limit: search.limit, cursor: search.cursor },
     allowedQueryKeys: ["q", "limit", "cursor"],
   });
+}
+
+export async function getPublicCompany(
+  id: string,
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<PublicCompanyProfile | null>> {
+  if (isDemoPerson2Api) {
+    const company = demo.companies.find((item) => item.id === id);
+    if (!company) return { data: null, meta: null };
+    return {
+      data: {
+        id: company.id,
+        name: company.name,
+        slug: company.shortName,
+        description: "Môi trường sản phẩm chú trọng chất lượng trải nghiệm và phát triển nghề nghiệp bền vững.",
+        industry: "Công nghệ",
+        size: "51-200",
+        address: "Hà Nội",
+        website: null,
+        taxCode: company.taxCode,
+        logoUrl: null,
+        media: [],
+        createdAt: company.createdAt,
+        updatedAt: company.updatedAt,
+      },
+      meta: null,
+    };
+  }
+  assertCanonicalUuidV4(id, "companyId");
+  return requestApi<PublicCompanyProfile>(`${API_PATHS.companies}${id}`, { signal });
 }
 
 export async function getPublicJobs(search: {

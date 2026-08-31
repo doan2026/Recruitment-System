@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EmptyState, ErrorState, LoadingState, PageHeader } from "../../components/ui";
 import { toUserMessage } from "../../lib/apiClient";
@@ -115,10 +116,10 @@ export default function CompaniesPage() {
         {!loading && !error && companies.length === 0 ? <EmptyState title="Chưa có công ty phù hợp" description="Thử từ khóa ngắn hơn hoặc xóa bộ lọc để xem tất cả doanh nghiệp." /> : null}
         <div className="grid-3">
           {companies.map((company) => (
-            <article className="card company-search-card" key={company.id}>
+            <Link className="card company-search-card" href={`/companies/${company.id}`} key={company.id} aria-label={`Xem hồ sơ ${company.name}`}>
               <div className="company-logo-placeholder" aria-hidden="true">{company.logoUrl ? <img src={company.logoUrl} alt="" /> : company.name.slice(0, 1).toUpperCase()}</div>
               <div><p className="eyebrow">ĐÃ XÁC MINH</p><h3>{company.name}</h3><p className="help">{company.industry} · {company.size}</p><p>{company.address}</p></div>
-            </article>
+            </Link>
           ))}
         </div>
         {loading && companies.length > 0 ? <p className="status-line" role="status">Đang tải thêm doanh nghiệp…</p> : null}
