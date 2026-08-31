@@ -41,6 +41,7 @@ import { APPLICATION_API_ROUTES, applicationResourceRoute, offerResponseRoute, r
 import { assertChatResponseSession } from "./aiChatSession";
 import { appendAiChatExchange, createAiChatConversation } from "./aiChatConversation";
 import { isAiChatSessionBusy, withAiChatSessionLock } from "./aiChatSessionLock";
+import { classifyAiChatBackpressure, runAiChatWithBusyRetry } from "./aiChatBackpressure";
 import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, validateRecruiterApplicationFilters, type RecruiterApplicationFilterDraft } from "./recruiterApplicationTable";
 import {
   normalizeInvitationEmail,
@@ -165,6 +166,50 @@ test("AI chat recognizes only the exact 409 session-busy contract for manual ret
   assert.equal(isAiChatSessionBusy(new ApiClientError({ code: "CHAT_SESSION_BUSY", status: 409 })), true);
   assert.equal(isAiChatSessionBusy(new ApiClientError({ code: "CHAT_SESSION_BUSY", status: 503 })), false);
   assert.equal(isAiChatSessionBusy(new ApiClientError({ code: "APPLICATION_CHANGED_CONCURRENTLY", status: 409 })), false);
+});
+
+test("AI chat maps rate limit, short busy retry and provider/history manual recovery separately", () => {
+  assert.deepEqual(
+    classifyAiChatBackpressure(new ApiClientError({ code: "CHAT_RATE_LIMITED", status: 429, retryAfterSeconds: 12 })),
+    { kind: "rate-limit", retryAfterSeconds: 12 },
+  );
+  assert.deepEqual(
+    classifyAiChatBackpressure(new ApiClientError({ code: "CHAT_BUSY", status: 503, retryAfterSeconds: 4 })),
+    { kind: "busy", retryAfterSeconds: 4, delayMs: 2_000 },
+  );
+  assert.deepEqual(
+    classifyAiChatBackpressure(new ApiClientError({ code: "CHAT_PROVIDER_UNAVAILABLE", status: 503 })),
+    { kind: "manual", code: "CHAT_PROVIDER_UNAVAILABLE" },
+  );
+  assert.deepEqual(
+    classifyAiChatBackpressure(new ApiClientError({ code: "CHAT_HISTORY_UNAVAILABLE", status: 503 })),
+    { kind: "manual", code: "CHAT_HISTORY_UNAVAILABLE" },
+  );
+});
+
+test("AI chat retries exact CHAT_BUSY with Retry-After once and keeps the retry short", async () => {
+  let calls = 0;
+  const delays: number[] = [];
+  const value = await runAiChatWithBusyRetry(async () => {
+    calls += 1;
+    if (calls === 1) throw new ApiClientError({ code: "CHAT_BUSY", status: 503, retryAfterSeconds: 1 });
+    return "answer";
+  }, async (delayMs) => { delays.push(delayMs); });
+  assert.equal(value, "answer");
+  assert.equal(calls, 2);
+  assert.deepEqual(delays, [1_000]);
+});
+
+test("AI chat never auto-retries rate, provider or history failures", async () => {
+  for (const error of [
+    new ApiClientError({ code: "CHAT_RATE_LIMITED", status: 429, retryAfterSeconds: 9 }),
+    new ApiClientError({ code: "CHAT_PROVIDER_UNAVAILABLE", status: 503 }),
+    new ApiClientError({ code: "CHAT_HISTORY_UNAVAILABLE", status: 503 }),
+  ]) {
+    let calls = 0;
+    await assert.rejects(runAiChatWithBusyRetry(async () => { calls += 1; throw error; }));
+    assert.equal(calls, 1);
+  }
 });
 
 test("query and body allowlists reject unknown fields", () => {
