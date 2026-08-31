@@ -186,7 +186,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - **Công nghệ:** Next.js 14, React 18, TypeScript.
 - **Chức năng chính:** auth UI; hồ sơ/CV; công ty; job search/detail; apply/bookmark; recruiter pipeline/offer/dashboard; interview/video/chat/notification; admin console.
 - **Phụ thuộc:** API Gateway và hợp đồng API của toàn bộ backend.
-- **Trạng thái:** 🟡 React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter `demo|gateway` đã nối các read flow, cập nhật Company và tạo Company qua Gateway; các nền tảng safe error, conflict/transient recovery và private session boundary có unit test. `404 COMPANY_NOT_FOUND` đã thành onboarding thay vì lỗi. Auth UI thật, các mutation còn lại và E2E vẫn pending; P16.N2 hiện 46/52.
+- **Trạng thái:** 🟡 React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter `demo|gateway` đã nối các read flow, cập nhật Company và tạo Company qua Gateway; các nền tảng safe error, conflict/transient recovery và private session boundary có unit test. `404 COMPANY_NOT_FOUND` đã thành onboarding thay vì lỗi. Auth UI thật, các mutation còn lại và E2E vẫn pending; P16.N2 hiện 47/52.
 
 ## T14 — Tích hợp, kiểm thử và vận hành
 
@@ -1336,7 +1336,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [ ] Admin dashboard, company/job approval, user/report management và export.
 - [ ] Loading/error/empty state, responsive UI, accessibility và E2E test.
 
-### P16.N2 — FE tiêu thụ bốn service của Người 2 (46/52 tích hợp API thật; baseline UI đã có)
+### P16.N2 — FE tiêu thụ bốn service của Người 2 (47/52 tích hợp API thật; baseline UI đã có)
 
 > Bổ sung ngày 30/08/2026 theo yêu cầu. Đây là danh sách chi tiết task FE **chưa làm**, nhưng **chỉ giới hạn ở phần tiêu thụ bốn service của Người 2** (Company, Job & Search, Application, AI chatbot). FE của Auth, Profile, Media, Interview, Notification, Admin và Chat **không** nằm trong danh sách này. Bản thân việc code FE vẫn **thuộc Người 3** — mục này ghi ra để thấy backend của Người 2 đang chờ FE làm những gì, không phải chuyển việc sang Người 2.
 >
@@ -1395,6 +1395,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [x] Validate message chatbot đồng nhất backend ở cả UI và adapter: normalize NFC/trim, không rỗng, tối đa 2.000 Unicode code point và 8.000 byte UTF-8, chỉ cho tab/newline trong nhóm control; composer hiện live counters/error; 92/92 unit test PASS.
 - [x] Render response chatbot text-only: không inner HTML/Markdown parser, chặn response blank/control/>8.000 ký tự; chỉ parse exact dãy job đánh số, UUID vẫn là text; intent deterministic mở CTA nội bộ `#suitable-jobs`; 95/95 unit test PASS.
 - [x] Khóa public API boundary cho AI FE Người 2: chatbot chỉ `/ai/chat`, gợi ý việc/ứng viên chỉ qua `/jobs/recommended` và `/jobs/:id/recommended-candidates`; mọi biến thể internal AI bị fail-closed; 97/97 unit test PASS.
+- [x] Hoàn tất shared optimistic `409` cho cả ba consumer: Company, Job edit/submit và Application status/match đều reload authoritative đúng một lần, giữ draft/intent, mở bảng so sánh và chỉ gửi lại sau quyết định chủ động; 99/99 unit test PASS.
 - [ ] Nối các màn trên với API Gateway/Auth session thật, hoàn thiện error mapping/409/429/503 và thêm component/E2E test trước khi đóng checkbox endpoint bên dưới.
 >
 > Danh sách bám theo **48 endpoint user-facing có thật**, khảo sát trực tiếp từ code controller và đối chiếu với `infra/nginx/nginx.conf` — không suy đoán từ tài liệu.
@@ -1403,7 +1404,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 
 - [x] API client bóc envelope thống nhất: thành công là `{data, meta}`, lỗi là `{code, message, details}`. Hiển thị theo `code` chứ không hiển thị `message` thô; `details` mới là chỗ mang thông tin điều hướng (`currentStatus`, `reason`, `eligibleAt`, `retryAfterSeconds`).
 - [x] Gọi đúng đường dẫn có **dấu `/` cuối** cho ba route collection — `POST /companies/`, `POST /jobs/`, `POST|GET /applications/`. Gateway chỉ khai báo `location /companies/`, `/jobs/`, `/applications/`, nên bỏ dấu `/` là nhận 404 **từ nginx**, không phải từ service; lỗi này không có mã nghiệp vụ để bắt.
-- [ ] Bộ xử lý `409` dùng chung cho optimistic locking: tải lại resource, so sánh, cho người dùng quyết định gửi lại — **không retry mù**. Áp cho `APPLICATION_CHANGED_CONCURRENTLY`, `JOB_STATE_CHANGED`, `COMPANY_UPDATE_CONFLICT`.
+- [x] Bộ xử lý `409` dùng chung cho optimistic locking: tải lại resource, so sánh, cho người dùng quyết định gửi lại — **không retry mù**. Áp cho `APPLICATION_CHANGED_CONCURRENTLY`, `JOB_STATE_CHANGED`, `COMPANY_UPDATE_CONFLICT`.
   - Shared primitive và Company consumer đã hoàn thành; Job/Application consumer sẽ đóng cùng mutation flow tương ứng.
 - [x] Bộ xử lý `429`/`503` phân biệt hai nhóm: nhóm **có** `Retry-After` đếm ngược và tự thử lại đúng một lần; nhóm **không có** như `MEDIA_UPLOAD_RATE_LIMITED` của Company hay AI rate-limit quy về `503` ở Application dùng local backoff 2–30 giây và khóa nút đến khi được phép thử lại.
 - [x] Tôn trọng `Cache-Control: private, no-store` + `Vary: Authorization` trên dữ liệu riêng: mọi request private dùng `credentials: include`, `cache: no-store` và header no-cache; không có service worker/Web Storage; root session boundary xóa sạch React state khi logout, 401 hoặc đổi tài khoản.

@@ -4,7 +4,10 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../../../components/ui";
+import { ConflictRecoveryPanel } from "../../../../../components/ConflictRecoveryPanel";
 import { ApiClientError, toUserMessage } from "../../../../../lib/apiClient";
+import { prepareConflictSnapshot, type ConflictSnapshot } from "../../../../../lib/conflictRecovery";
+import { JOB_CONFLICT_FIELDS } from "../../../../../lib/person2ConflictFields";
 import {
   normalizeRecruiterJobForm,
   validateRecruiterJobForm,
@@ -48,6 +51,8 @@ export default function EditRecruiterJobPage() {
   const [mutationError, setMutationError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  const [conflict, setConflict] = useState<ConflictSnapshot<RecruiterJobFormValues, Job> | null>(null);
+  const [conflictStage, setConflictStage] = useState<"SAVE" | "SUBMIT">("SAVE");
 
   useEffect(() => {
     let active = true;
@@ -81,6 +86,7 @@ export default function EditRecruiterJobPage() {
     setSavedForSubmission(false);
     setMutationError("");
     setSuccessMessage("");
+    setConflict(null);
   }
 
   async function submitForReview(event?: React.FormEvent<HTMLFormElement>) {
@@ -107,11 +113,26 @@ export default function EditRecruiterJobPage() {
       setSavedForSubmission(false);
       setSuccessMessage("Đã lưu thay đổi và gửi tin cho admin duyệt.");
     } catch (reason: unknown) {
-      setMutationError(
-        draftSaved
-          ? `Bản sửa đã được lưu nhưng chưa gửi duyệt được. ${toUserMessage(reason)}`
-          : `Chưa lưu được bản sửa. ${toUserMessage(reason)}`,
-      );
+      try {
+        const snapshot = await prepareConflictSnapshot({
+          error: reason,
+          localDraft: { ...draft },
+          localVersion: job.aggregateVersion,
+          reload: async () => (await getRecruiterJob(job.id)).data,
+          serverVersion: (server) => server.aggregateVersion,
+          fields: JOB_CONFLICT_FIELDS,
+        });
+        setJob(snapshot.server);
+        setConflict(snapshot);
+        setConflictStage(draftSaved ? "SUBMIT" : "SAVE");
+        setMutationError("");
+      } catch (recoveryError: unknown) {
+        setMutationError(
+          draftSaved
+            ? `Bản sửa đã được lưu nhưng chưa gửi duyệt được. ${toUserMessage(recoveryError)}`
+            : `Chưa lưu được bản sửa. ${toUserMessage(recoveryError)}`,
+        );
+      }
     } finally {
       setSubmitting(false);
     }
@@ -153,6 +174,25 @@ export default function EditRecruiterJobPage() {
           <p>{mutationError}</p>
           {savedForSubmission ? <button className="btn btn-secondary" type="button" disabled={submitting} onClick={() => { void submitForReview(); }}>Thử gửi admin duyệt</button> : null}
         </div>
+      ) : null}
+      {conflict ? (
+        <ConflictRecoveryPanel
+          resourceName="Tin tuyển dụng"
+          snapshot={conflict}
+          onKeepDraft={() => {
+            setJob(conflict.server);
+            setSavedForSubmission(conflictStage === "SUBMIT" && conflict.server.status === "DRAFT");
+            setConflict(null);
+            setSuccessMessage("Đã giữ bản bạn nhập trên nền dữ liệu mới. Hãy kiểm tra và bấm gửi lại; CareerHub chưa tự phát lại mutation.");
+          }}
+          onUseServer={() => {
+            setJob(conflict.server);
+            setDraft(toDraft(conflict.server));
+            setSavedForSubmission(false);
+            setConflict(null);
+            setSuccessMessage("Đã dùng bản mới nhất từ server.");
+          }}
+        />
       ) : null}
 
       <form className="panel form-grid" noValidate onSubmit={submitForReview}>
