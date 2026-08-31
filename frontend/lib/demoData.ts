@@ -82,6 +82,8 @@ export interface Job {
   companyId: string;
   title: string;
   level: string;
+  experienceYears?: number;
+  quantity?: number;
   type: "FULLTIME" | "PARTTIME" | "CONTRACT";
   location: string;
   department: string;

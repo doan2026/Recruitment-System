@@ -6,36 +6,28 @@ import { useEffect, useMemo, useState } from "react";
 import { ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../../../components/ui";
 import { ApiClientError, toUserMessage } from "../../../../../lib/apiClient";
 import {
+  normalizeRecruiterJobForm,
+  validateRecruiterJobForm,
+  type RecruiterJobFormValues,
+} from "../../../../../lib/jobForm";
+import {
   getRecruiterJob,
   submitJobForApproval,
   updateRecruiterJob,
   type Job,
-  type RecruiterJobUpdateInput,
 } from "../../../../../lib/person2Api";
 
-interface JobDraft {
-  title: string;
-  location: string;
-  jobType: RecruiterJobUpdateInput["jobType"];
-  deadline: string;
-  negotiable: boolean;
-  salaryMin: string;
-  salaryMax: string;
-  skills: string;
-  description: string;
-  requirements: string;
-  benefits: string;
-}
-
-function toDraft(job: Job): JobDraft {
+function toDraft(job: Job): RecruiterJobFormValues {
   return {
     title: job.title,
     location: job.location,
     jobType: job.type === "FULLTIME" ? "FULL_TIME" : job.type === "PARTTIME" ? "PART_TIME" : "CONTRACT",
     deadline: job.deadline.slice(0, 10),
-    negotiable: job.isNegotiable,
+    isNegotiable: job.isNegotiable,
     salaryMin: job.isNegotiable ? "" : String(job.salaryMin),
     salaryMax: job.isNegotiable || job.salaryMax === null ? "" : String(job.salaryMax),
+    experienceYears: String(job.experienceYears ?? 0),
+    quantity: String(job.quantity ?? 1),
     skills: job.skills.join(", "),
     description: job.description,
     requirements: job.requirements.join("\n"),
@@ -47,7 +39,7 @@ export default function EditRecruiterJobPage() {
   const params = useParams<{ jobId: string }>();
   const jobId = params.jobId;
   const [job, setJob] = useState<Job | null>(null);
-  const [draft, setDraft] = useState<JobDraft | null>(null);
+  const [draft, setDraft] = useState<RecruiterJobFormValues | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [attempted, setAttempted] = useState(false);
@@ -82,53 +74,13 @@ export default function EditRecruiterJobPage() {
     };
   }, [jobId, reloadKey]);
 
-  const errors = useMemo(() => {
-    const result: Record<string, string> = {};
-    if (!draft) return result;
-    if (!draft.title.trim()) result.title = "Nhập tên vị trí.";
-    if (!draft.location.trim()) result.location = "Nhập địa điểm làm việc.";
-    if (!draft.description.trim()) result.description = "Nhập mô tả công việc.";
-    if (!draft.requirements.trim()) result.requirements = "Nhập yêu cầu ứng viên.";
-    if (!draft.deadline || new Date(`${draft.deadline}T23:59:59`) <= new Date()) {
-      result.deadline = "Hạn nộp phải sau hôm nay.";
-    }
-    const skills = draft.skills.split(",").map((skill) => skill.trim()).filter(Boolean);
-    if (!skills.length) result.skills = "Nhập ít nhất một kỹ năng.";
-    if (!draft.negotiable) {
-      const min = Number(draft.salaryMin);
-      const max = Number(draft.salaryMax);
-      if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max < min) {
-        result.salary = "Kiểm tra lại khoảng lương tối thiểu và tối đa.";
-      }
-    }
-    return result;
-  }, [draft]);
+  const errors = useMemo(() => draft ? validateRecruiterJobForm(draft) : {}, [draft]);
 
-  function change<K extends keyof JobDraft>(field: K, value: JobDraft[K]) {
+  function change<K extends keyof RecruiterJobFormValues>(field: K, value: RecruiterJobFormValues[K]) {
     setDraft((current) => current ? { ...current, [field]: value } : current);
     setSavedForSubmission(false);
     setMutationError("");
     setSuccessMessage("");
-  }
-
-  function buildPayload(current: JobDraft): RecruiterJobUpdateInput {
-    const payload: RecruiterJobUpdateInput = {
-      title: current.title.trim(),
-      description: current.description.trim(),
-      requirements: current.requirements.trim(),
-      benefits: current.benefits.trim(),
-      isNegotiable: current.negotiable,
-      currency: "VND",
-      location: current.location.trim(),
-      jobType: current.jobType,
-      skills: current.skills.split(",").map((skill) => skill.trim()).filter(Boolean),
-      deadline: current.deadline,
-    };
-    if (!current.negotiable) {
-      payload.salaryMin = Number(current.salaryMin);
-      payload.salaryMax = Number(current.salaryMax);
-    }
-    return payload;
   }
 
   async function submitForReview(event?: React.FormEvent<HTMLFormElement>) {
@@ -145,7 +97,7 @@ export default function EditRecruiterJobPage() {
     let draftSaved = savedForSubmission;
     try {
       if (!draftSaved) {
-        const updated = await updateRecruiterJob(job.id, buildPayload(draft));
+        const updated = await updateRecruiterJob(job.id, normalizeRecruiterJobForm(draft));
         setJob(updated.data);
         setSavedForSubmission(true);
         draftSaved = true;
@@ -206,62 +158,73 @@ export default function EditRecruiterJobPage() {
       <form className="panel form-grid" noValidate onSubmit={submitForReview}>
         <div className="field span-2">
           <label className="label" htmlFor="title">Tên vị trí</label>
-          <input id="title" className="input" disabled={!editable} value={draft.title} onChange={(event) => change("title", event.target.value)} aria-invalid={attempted && !!errors.title} />
-          {attempted && errors.title ? <span className="form-error">{errors.title}</span> : null}
+          <input id="title" className="input" disabled={!editable} value={draft.title} onChange={(event) => change("title", event.target.value)} aria-invalid={attempted && !!errors.title} aria-describedby={attempted && errors.title ? "title-error" : undefined} />
+          {attempted && errors.title ? <span id="title-error" className="form-error">{errors.title}</span> : null}
         </div>
         <div className="field">
           <label className="label" htmlFor="location">Địa điểm</label>
-          <input id="location" className="input" disabled={!editable} value={draft.location} onChange={(event) => change("location", event.target.value)} aria-invalid={attempted && !!errors.location} />
-          {attempted && errors.location ? <span className="form-error">{errors.location}</span> : null}
+          <input id="location" className="input" disabled={!editable} value={draft.location} onChange={(event) => change("location", event.target.value)} aria-invalid={attempted && !!errors.location} aria-describedby={attempted && errors.location ? "location-error" : undefined} />
+          {attempted && errors.location ? <span id="location-error" className="form-error">{errors.location}</span> : null}
         </div>
         <div className="field">
           <label className="label" htmlFor="jobType">Hình thức</label>
-          <select id="jobType" className="select" disabled={!editable} value={draft.jobType} onChange={(event) => change("jobType", event.target.value as JobDraft["jobType"])}>
+          <select id="jobType" className="select" disabled={!editable} value={draft.jobType} onChange={(event) => change("jobType", event.target.value as RecruiterJobFormValues["jobType"])}>
             <option value="FULL_TIME">Toàn thời gian</option>
             <option value="PART_TIME">Bán thời gian</option>
             <option value="CONTRACT">Hợp đồng</option>
           </select>
         </div>
         <div className="field">
+          <label className="label" htmlFor="experienceYears">Số năm kinh nghiệm</label>
+          <input id="experienceYears" className="input" type="number" min="0" max="60" step="1" disabled={!editable} value={draft.experienceYears} onChange={(event) => change("experienceYears", event.target.value)} aria-invalid={attempted && !!errors.experienceYears} aria-describedby={attempted && errors.experienceYears ? "experienceYears-error" : undefined} />
+          {attempted && errors.experienceYears ? <span id="experienceYears-error" className="form-error">{errors.experienceYears}</span> : null}
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="quantity">Số lượng tuyển</label>
+          <input id="quantity" className="input" type="number" min="1" max="10000" step="1" disabled={!editable} value={draft.quantity} onChange={(event) => change("quantity", event.target.value)} aria-invalid={attempted && !!errors.quantity} aria-describedby={attempted && errors.quantity ? "quantity-error" : undefined} />
+          {attempted && errors.quantity ? <span id="quantity-error" className="form-error">{errors.quantity}</span> : null}
+        </div>
+        <div className="field">
           <label className="label" htmlFor="deadline">Hạn nộp</label>
-          <input id="deadline" className="input" type="date" disabled={!editable} value={draft.deadline} onChange={(event) => change("deadline", event.target.value)} aria-invalid={attempted && !!errors.deadline} />
-          {attempted && errors.deadline ? <span className="form-error">{errors.deadline}</span> : null}
+          <input id="deadline" className="input" type="date" disabled={!editable} value={draft.deadline} onChange={(event) => change("deadline", event.target.value)} aria-invalid={attempted && !!errors.deadline} aria-describedby={attempted && errors.deadline ? "deadline-error" : undefined} />
+          {attempted && errors.deadline ? <span id="deadline-error" className="form-error">{errors.deadline}</span> : null}
         </div>
         <div className="field">
           <span className="label">Chính sách lương</span>
-          <label className="row"><input type="checkbox" disabled={!editable} checked={draft.negotiable} onChange={(event) => change("negotiable", event.target.checked)} /> Thỏa thuận khi phỏng vấn</label>
+          <label className="row"><input type="checkbox" disabled={!editable} checked={draft.isNegotiable} onChange={(event) => change("isNegotiable", event.target.checked)} /> Thỏa thuận khi phỏng vấn</label>
         </div>
-        {!draft.negotiable ? (
+        {!draft.isNegotiable ? (
           <>
             <div className="field">
-              <label className="label" htmlFor="salaryMin">Lương tối thiểu</label>
-              <input id="salaryMin" className="input" inputMode="numeric" disabled={!editable} value={draft.salaryMin} onChange={(event) => change("salaryMin", event.target.value)} aria-invalid={attempted && !!errors.salary} />
+              <label className="label" htmlFor="salary">Lương tối thiểu</label>
+              <input id="salary" className="input" inputMode="decimal" disabled={!editable} value={draft.salaryMin} onChange={(event) => change("salaryMin", event.target.value)} aria-invalid={attempted && !!errors.salary} aria-describedby={attempted && errors.salary ? "salary-error" : undefined} />
             </div>
             <div className="field">
               <label className="label" htmlFor="salaryMax">Lương tối đa</label>
-              <input id="salaryMax" className="input" inputMode="numeric" disabled={!editable} value={draft.salaryMax} onChange={(event) => change("salaryMax", event.target.value)} aria-invalid={attempted && !!errors.salary} />
-              {attempted && errors.salary ? <span className="form-error">{errors.salary}</span> : null}
+              <input id="salaryMax" className="input" inputMode="decimal" disabled={!editable} value={draft.salaryMax} onChange={(event) => change("salaryMax", event.target.value)} aria-invalid={attempted && !!errors.salary} aria-describedby={attempted && errors.salary ? "salary-error" : undefined} />
+              {attempted && errors.salary ? <span id="salary-error" className="form-error">{errors.salary}</span> : null}
             </div>
           </>
         ) : null}
         <div className="field span-2">
           <label className="label" htmlFor="skills">Kỹ năng, phân tách bằng dấu phẩy</label>
-          <input id="skills" className="input" disabled={!editable} value={draft.skills} onChange={(event) => change("skills", event.target.value)} aria-invalid={attempted && !!errors.skills} />
-          {attempted && errors.skills ? <span className="form-error">{errors.skills}</span> : null}
+          <input id="skills" className="input" disabled={!editable} value={draft.skills} onChange={(event) => change("skills", event.target.value)} aria-invalid={attempted && !!errors.skills} aria-describedby={attempted && errors.skills ? "skills-error" : undefined} />
+          {attempted && errors.skills ? <span id="skills-error" className="form-error">{errors.skills}</span> : null}
         </div>
         <div className="field span-2">
           <label className="label" htmlFor="description">Mô tả công việc</label>
-          <textarea id="description" className="textarea resize-none" rows={7} disabled={!editable} value={draft.description} onChange={(event) => change("description", event.target.value)} aria-invalid={attempted && !!errors.description} />
-          {attempted && errors.description ? <span className="form-error">{errors.description}</span> : null}
+          <textarea id="description" className="textarea resize-none" rows={7} disabled={!editable} value={draft.description} onChange={(event) => change("description", event.target.value)} aria-invalid={attempted && !!errors.description} aria-describedby={attempted && errors.description ? "description-error" : undefined} />
+          {attempted && errors.description ? <span id="description-error" className="form-error">{errors.description}</span> : null}
         </div>
         <div className="field span-2">
           <label className="label" htmlFor="requirements">Yêu cầu ứng viên</label>
-          <textarea id="requirements" className="textarea resize-none" rows={6} disabled={!editable} value={draft.requirements} onChange={(event) => change("requirements", event.target.value)} aria-invalid={attempted && !!errors.requirements} />
-          {attempted && errors.requirements ? <span className="form-error">{errors.requirements}</span> : null}
+          <textarea id="requirements" className="textarea resize-none" rows={6} disabled={!editable} value={draft.requirements} onChange={(event) => change("requirements", event.target.value)} aria-invalid={attempted && !!errors.requirements} aria-describedby={attempted && errors.requirements ? "requirements-error" : undefined} />
+          {attempted && errors.requirements ? <span id="requirements-error" className="form-error">{errors.requirements}</span> : null}
         </div>
         <div className="field span-2">
           <label className="label" htmlFor="benefits">Quyền lợi</label>
-          <textarea id="benefits" className="textarea resize-none" rows={4} disabled={!editable} value={draft.benefits} onChange={(event) => change("benefits", event.target.value)} />
+          <textarea id="benefits" className="textarea resize-none" rows={4} disabled={!editable} value={draft.benefits} onChange={(event) => change("benefits", event.target.value)} aria-invalid={attempted && !!errors.benefits} aria-describedby={attempted && errors.benefits ? "benefits-error" : undefined} />
+          {attempted && errors.benefits ? <span id="benefits-error" className="form-error">{errors.benefits}</span> : null}
         </div>
         <div className="span-2 btn-group">
           {editable ? <button className="btn btn-primary" type="submit" disabled={submitting} aria-busy={submitting}>{submitting ? "Đang lưu và gửi…" : savedForSubmission ? "Gửi admin duyệt" : "Lưu và gửi admin duyệt"}</button> : null}
