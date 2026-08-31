@@ -186,7 +186,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - **Công nghệ:** Next.js 14, React 18, TypeScript.
 - **Chức năng chính:** auth UI; hồ sơ/CV; công ty; job search/detail; apply/bookmark; recruiter pipeline/offer/dashboard; interview/video/chat/notification; admin console.
 - **Phụ thuộc:** API Gateway và hợp đồng API của toàn bộ backend.
-- **Trạng thái:** 🟡 React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter `demo|gateway` đã nối các read flow, cập nhật Company và tạo Company qua Gateway; các nền tảng safe error, conflict/transient recovery và private session boundary có unit test. `404 COMPANY_NOT_FOUND` đã thành onboarding thay vì lỗi. Auth UI thật, các mutation còn lại và E2E vẫn pending; P16.N2 hiện 35/52.
+- **Trạng thái:** 🟡 React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter `demo|gateway` đã nối các read flow, cập nhật Company và tạo Company qua Gateway; các nền tảng safe error, conflict/transient recovery và private session boundary có unit test. `404 COMPANY_NOT_FOUND` đã thành onboarding thay vì lỗi. Auth UI thật, các mutation còn lại và E2E vẫn pending; P16.N2 hiện 36/52.
 
 ## T14 — Tích hợp, kiểm thử và vận hành
 
@@ -1336,7 +1336,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [ ] Admin dashboard, company/job approval, user/report management và export.
 - [ ] Loading/error/empty state, responsive UI, accessibility và E2E test.
 
-### P16.N2 — FE tiêu thụ bốn service của Người 2 (35/52 tích hợp API thật; baseline UI đã có)
+### P16.N2 — FE tiêu thụ bốn service của Người 2 (36/52 tích hợp API thật; baseline UI đã có)
 
 > Bổ sung ngày 30/08/2026 theo yêu cầu. Đây là danh sách chi tiết task FE **chưa làm**, nhưng **chỉ giới hạn ở phần tiêu thụ bốn service của Người 2** (Company, Job & Search, Application, AI chatbot). FE của Auth, Profile, Media, Interview, Notification, Admin và Chat **không** nằm trong danh sách này. Bản thân việc code FE vẫn **thuộc Người 3** — mục này ghi ra để thấy backend của Người 2 đang chờ FE làm những gì, không phải chuyển việc sang Người 2.
 >
@@ -1383,6 +1383,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [x] Nâng recruiter Application pipeline thành bảng offset 0-based: đủ status/date/skills, ba sort, size 10/20/50/100; validate `appliedFrom<=appliedTo` và chuẩn hóa UTC trước request; theo dõi total + ID theo từng page, tự restart trang đầu khi offset drift và re-fetch sau mutation; 67/67 unit test PASS.
 - [x] Chuẩn bị UI/guard cho file Offer: form hiển thị rõ attachment tạm chưa khả dụng, vẫn cho gửi Offer không file; command chặn cặp thiếu `fileId/fileUrl`, chỉ nhận URL HTTP(S) cùng UUID v4 và bỏ file thì xóa đồng thời cả hai field; 68/68 unit test PASS. Live handshake chưa thể bật vì Media policy v1 chưa có `OFFER_LETTER` và Recruiter không được phép tạo loại file này.
 - [x] Thêm `/candidate/bookmarks` và `/recruiter/dashboard` cho degraded response: bookmark `job=null` giữ card/ID cùng CTA đồng bộ lại thay vì crash; dashboard mask raw warning, hiển thị `activeJobs` là “—” nhưng giữ mọi metric Application và bảng theo Job; 70/70 unit test PASS.
+- [x] Nối nút làm mới match score trong recruiter pipeline: gửi expected version, cập nhật score/version từ response, map an toàn bốn reason `AI_MATCH_NOT_READY`, tự poll đúng một lần sau 5 giây rồi chuyển sang retry thủ công; conflict version vẫn reload riêng; 71/71 unit test PASS.
 - [ ] Nối các màn trên với API Gateway/Auth session thật, hoàn thiện error mapping/409/429/503 và thêm component/E2E test trước khi đóng checkbox endpoint bên dưới.
 >
 > Danh sách bám theo **48 endpoint user-facing có thật**, khảo sát trực tiếp từ code controller và đối chiếu với `infra/nginx/nginx.conf` — không suy đoán từ tài liệu.
@@ -1440,7 +1441,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [ ] Handshake upload file offer với Media **trước khi** gọi `POST /offer`: phải có cặp `fileId` + `fileUrl` đã xác nhận, thiếu một trong hai là `400`; bỏ file thì gửi cả hai rỗng.
   - FE guard/form đã sẵn sàng nhưng checkbox giữ mở: Media hiện không có `OFFER_LETTER`, còn `CHAT_ATTACHMENT` là private và không trả stable canonical URL nên không được dùng thay thế sai policy.
 - [x] Hai loại phản hồi suy giảm phải render được thay vì báo lỗi: danh sách bookmark trả `200` với `job=null` khi Job Service lỗi (thẻ placeholder), và dashboard trả `warnings[]` cùng `summary.activeJobs.available=false` (hiện số liệu một phần kèm cảnh báo).
-- [ ] Nút làm mới match score xử lý riêng `409 AI_MATCH_NOT_READY` kèm `details.reason`: đây là trạng thái "chưa sẵn sàng" cần cho thử lại/poll, **khác hẳn** `409` xung đột version.
+- [x] Nút làm mới match score xử lý riêng `409 AI_MATCH_NOT_READY` kèm `details.reason`: đây là trạng thái "chưa sẵn sàng" cần cho thử lại/poll, **khác hẳn** `409` xung đột version.
 - [ ] Màn xem/tải CV của recruiter: `expiresAt` rất ngắn nên phải mở ngay và xin link mới khi hết hạn; không cache metadata lẫn link.
 - [ ] Bù ba lỗ hổng API hiện có: ứng viên **không lấy được `version`** từ `GET /applications/my` (phải gọi thêm `GET /applications/:id` trước khi rút hồ sơ); **không có endpoint đọc offer** nên `offerId` phải lấy từ Notification Service; **không có endpoint GET đánh giá** nên phải tự nhớ trạng thái "đã đánh giá" từ `409`.
 - [ ] Chú ý ba prefix khác nhau: hồ sơ ở `/applications/`, bookmark ở `/applications/bookmarks`, còn **phản hồi offer nằm ở prefix riêng `/offers/`**.

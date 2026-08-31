@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { ApiClientError, toUserMessage } from "../lib/apiClient";
+import { aiMatchNotReadyView } from "../lib/aiMatchRecovery";
 import { recruiterApplicationActions, validateRecruiterApplicationStatus } from "../lib/applicationStateMachine";
 import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, validateRecruiterApplicationFilters, type RecruiterApplicationFilterDraft } from "../lib/recruiterApplicationTable";
-import { changeApplicationStatus, getRecruiterApplications, type CandidateApplication } from "../lib/person2Api";
+import { changeApplicationStatus, getRecruiterApplications, refreshApplicationMatchScore, type CandidateApplication } from "../lib/person2Api";
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./ui";
 
 const DEFAULT_FILTERS: RecruiterApplicationFilterDraft = {
@@ -34,8 +35,20 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [driftNotice, setDriftNotice] = useState("");
+  const [matchStates, setMatchStates] = useState<Record<string, { message: string; polling: boolean }>>({});
   const expectedTotalRef = useRef<number | null>(null);
   const seenPageIdsRef = useRef<Map<number, Set<string>>>(new Map());
+  const applicationsRef = useRef<CandidateApplication[]>([]);
+  const matchPollTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  useEffect(() => {
+    applicationsRef.current = applications;
+  }, [applications]);
+
+  useEffect(() => () => {
+    matchPollTimersRef.current.forEach((timer) => clearTimeout(timer));
+    matchPollTimersRef.current.clear();
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -151,6 +164,58 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
     }
   }
 
+  async function refreshMatch(application: CandidateApplication, autoPollOnce = true) {
+    if (pendingApplicationId) return;
+    if (application.version === null) {
+      setActionError("Response pipeline thiếu phiên bản Application. Hãy tải lại danh sách.");
+      return;
+    }
+    const scheduled = matchPollTimersRef.current.get(application.id);
+    if (scheduled) clearTimeout(scheduled);
+    matchPollTimersRef.current.delete(application.id);
+    setPendingApplicationId(application.id);
+    setActionError("");
+    setActionStatus("");
+    setMatchStates((current) => {
+      const next = { ...current };
+      delete next[application.id];
+      return next;
+    });
+    try {
+      const response = await refreshApplicationMatchScore(application.id, application.version);
+      setApplications((current) => current.map((item) => item.id === application.id ? {
+        ...item,
+        matchScore: response.data.matchScore,
+        version: response.data.version,
+      } : item));
+      setActionStatus(`Đã cập nhật match score cho ${application.candidateName || "ứng viên"}.`);
+    } catch (requestError: unknown) {
+      const notReady = aiMatchNotReadyView(requestError);
+      if (notReady) {
+        setMatchStates((current) => ({ ...current, [application.id]: { message: notReady.message, polling: autoPollOnce } }));
+        if (autoPollOnce) {
+          const timer = setTimeout(() => {
+            matchPollTimersRef.current.delete(application.id);
+            const latest = applicationsRef.current.find((item) => item.id === application.id);
+            setMatchStates((current) => current[application.id] ? {
+              ...current,
+              [application.id]: { ...current[application.id], polling: false },
+            } : current);
+            if (latest) void refreshMatch(latest, false);
+          }, notReady.pollDelayMs);
+          matchPollTimersRef.current.set(application.id, timer);
+        }
+      } else {
+        setActionError(toUserMessage(requestError));
+        if (requestError instanceof ApiClientError && requestError.code === "APPLICATION_CHANGED_CONCURRENTLY") {
+          setReloadKey((value) => value + 1);
+        }
+      }
+    } finally {
+      setPendingApplicationId(null);
+    }
+  }
+
   return (
     <section className="panel">
       <div className="section-head row-between">
@@ -178,6 +243,7 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
           const actions = recruiterApplicationActions(application.status);
           const hasRejectAction = actions.some((action) => action.kind === "STATUS" && action.status === "REJECTED");
           const pending = pendingApplicationId === application.id;
+          const matchState = matchStates[application.id];
           return (
             <article className="card application-pipeline-card" key={application.id}>
               <div className="section-head row-between">
@@ -185,6 +251,11 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
                 <StatusBadge tone={application.status === "HIRED" ? "success" : application.status === "REJECTED" || application.status === "WITHDRAWN" ? "danger" : "warning"}>{application.status}</StatusBadge>
               </div>
               <p className="help">Match score: {application.matchScore ?? "chưa sẵn sàng"}</p>
+              {matchState ? (
+                <p className="notice notice-warning" role="status">
+                  <strong>AI chưa sẵn sàng.</strong> {matchState.message} {matchState.polling ? "CareerHub sẽ tự thử lại một lần sau 5 giây." : "Bạn có thể thử lại khi dữ liệu đã đồng bộ."}
+                </p>
+              ) : null}
               {hasRejectAction ? (
                 <div className="field">
                   <label className="label" htmlFor={`reject-${application.id}`}>Lý do nếu từ chối</label>
@@ -193,6 +264,9 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
                 </div>
               ) : null}
               <div className="btn-group">
+                <button className="btn" type="button" disabled={pendingApplicationId !== null || matchState?.polling} aria-busy={pending && !matchState} onClick={() => { void refreshMatch(application); }}>
+                  {pending && !matchState ? "Đang tính điểm…" : matchState?.polling ? "Đang chờ AI…" : "Làm mới match score"}
+                </button>
                 {actions.map((action) => action.kind === "SEND_OFFER" ? (
                   <Link key={action.kind} className="btn btn-primary" href={`/recruiter/applications/${application.id}/offer`}>{action.label}</Link>
                 ) : (

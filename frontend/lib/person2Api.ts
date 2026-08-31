@@ -1228,7 +1228,7 @@ export async function refreshApplicationMatchScore(
 ): Promise<ApiEnvelope<ApplicationMatchScoreResult>> {
   const body = buildMatchRefreshCommand(applicationVersion);
   if (isDemoPerson2Api) {
-    return { data: { applicationId, matchScore: 0.91, version: body.expectedVersion + 1 }, meta: null };
+    return { data: { applicationId, matchScore: 91, version: body.expectedVersion + 1 }, meta: null };
   }
   assertCanonicalUuidV4(applicationId, "applicationId");
   return requestApi<ApplicationMatchScoreResult>(`${API_PATHS.applications}${applicationId}/match-score/refresh`, {
