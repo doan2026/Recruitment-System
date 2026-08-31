@@ -15,10 +15,22 @@ const person2Cards = [
     cta: "Mở hồ sơ của tôi",
   },
   {
+    title: "Việc làm đã lưu",
+    desc: "Giữ bookmark ổn định và hiển thị placeholder khi dữ liệu Job tạm gián đoạn.",
+    href: "/candidate/bookmarks",
+    cta: "Mở việc đã lưu",
+  },
+  {
     title: "Quản trị tin đăng",
     desc: "Recruiter tạo/sửa job, duyệt, đóng/mở tin, và quy tắc owner-only.",
     href: "/recruiter/jobs",
     cta: "Quản lý tin",
+  },
+  {
+    title: "Dashboard tuyển dụng",
+    desc: "Theo dõi số liệu Application đầy đủ ngay cả khi thống kê tin đang tuyển bị suy giảm.",
+    href: "/recruiter/dashboard",
+    cta: "Mở dashboard",
   },
   {
     title: "Quản lý công ty",

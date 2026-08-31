@@ -244,6 +244,53 @@ export interface ApplicationOfferMutationResult {
   applicationVersion: number;
 }
 
+export interface CandidateBookmarkJob {
+  exists: boolean;
+  companyId: string | null;
+  title: string;
+  status: string;
+  deadline: string | null;
+  acceptingApplications: boolean;
+  description: string | null;
+  requirements: string | null;
+  benefits: string | null;
+  salaryMin: string | null;
+  salaryMax: string | null;
+  isNegotiable: boolean | null;
+  currency: string | null;
+  location: string | null;
+  jobType: string | null;
+  experienceYears: number | null;
+  quantity: number | null;
+  skills: string[] | null;
+  availabilityReason: string | null;
+}
+
+export interface CandidateBookmark {
+  id: string;
+  jobId: string;
+  createdAt: string;
+  job: CandidateBookmarkJob | null;
+}
+
+export interface RecruiterDashboard {
+  companyId: string;
+  generatedAt: string;
+  range: { from: string; toExclusive: string; granularity: "DAY" | "WEEK" | "MONTH"; timezone: string };
+  summary: {
+    activeJobs: { count: number | null; available: boolean };
+    totalApplications: number;
+    hiredApplications: number;
+    hiredRatePercent: number;
+  };
+  statusCounts: Record<string, number>;
+  applicationsByJob: Array<{ jobId: string; jobTitle: string; totalApplications: number; statusCounts: Record<string, number> }>;
+  funnel: Array<{ status: string; count: number; rateFromPreviousPercent: number | null }>;
+  timeSeries: Array<{ bucketStart: string; count: number }>;
+  sourceBreakdown: Record<string, number>;
+  warnings: Array<{ code: string; message: string }>;
+}
+
 async function normalizeDemo<T>(
   response: Promise<{ data: T; meta?: ApiEnvelope<T>["meta"] }>,
 ): Promise<ApiEnvelope<T>> {
@@ -909,6 +956,111 @@ export async function closeRecruiterJob(jobId: string, signal?: AbortSignal): Pr
     maxRetries: 0,
   });
   return { ...response, data: toJob(response.data) };
+}
+
+export async function getCandidateBookmarks(signal?: AbortSignal): Promise<ApiEnvelope<CandidateBookmark[]>> {
+  if (isDemoPerson2Api) {
+    const job = demo.jobs[0];
+    return {
+      data: [
+        {
+          id: "bookmark-demo-ready",
+          jobId: job.id,
+          createdAt: new Date().toISOString(),
+          job: {
+            exists: true,
+            companyId: job.companyId,
+            title: job.title,
+            status: job.status,
+            deadline: job.deadline,
+            acceptingApplications: job.status === "PUBLISHED",
+            description: job.description,
+            requirements: job.requirements.join("\n"),
+            benefits: job.benefits.join("\n"),
+            salaryMin: String(job.salaryMin),
+            salaryMax: job.salaryMax === null ? null : String(job.salaryMax),
+            isNegotiable: job.isNegotiable,
+            currency: job.currency,
+            location: job.location,
+            jobType: job.type,
+            experienceYears: job.experienceYears ?? null,
+            quantity: job.quantity ?? null,
+            skills: job.skills,
+            availabilityReason: null,
+          },
+        },
+        {
+          id: "bookmark-demo-degraded",
+          jobId: "job-service-temporarily-unavailable",
+          createdAt: new Date(Date.now() - 86_400_000).toISOString(),
+          job: null,
+        },
+      ],
+      meta: null,
+    };
+  }
+  return requestApi<CandidateBookmark[]>(API_PATHS.bookmarks, {
+    privateData: true,
+    signal,
+  });
+}
+
+export async function getRecruiterDashboard(
+  companyId: string,
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<RecruiterDashboard>> {
+  if (isDemoPerson2Api) {
+    const statusCounts = demo.applications.reduce<Record<string, number>>((counts, application) => {
+      counts[application.status] = (counts[application.status] ?? 0) + 1;
+      return counts;
+    }, {});
+    const totalApplications = demo.applications.length;
+    const hiredApplications = statusCounts.HIRED ?? 0;
+    const now = new Date();
+    return {
+      data: {
+        companyId,
+        generatedAt: now.toISOString(),
+        range: {
+          from: new Date(now.getTime() - 30 * 86_400_000).toISOString(),
+          toExclusive: now.toISOString(),
+          granularity: "DAY",
+          timezone: "Asia/Ho_Chi_Minh",
+        },
+        summary: {
+          activeJobs: { count: null, available: false },
+          totalApplications,
+          hiredApplications,
+          hiredRatePercent: totalApplications === 0 ? 0 : Number(((hiredApplications / totalApplications) * 100).toFixed(2)),
+        },
+        statusCounts,
+        applicationsByJob: demo.jobs.slice(0, 3).map((job) => {
+          const applications = demo.applications.filter((application) => application.jobId === job.id);
+          return {
+            jobId: job.id,
+            jobTitle: job.title,
+            totalApplications: applications.length,
+            statusCounts: applications.reduce<Record<string, number>>((counts, application) => {
+              counts[application.status] = (counts[application.status] ?? 0) + 1;
+              return counts;
+            }, {}),
+          };
+        }),
+        funnel: Object.entries(statusCounts).map(([status, count]) => ({ status, count, rateFromPreviousPercent: null })),
+        timeSeries: [],
+        sourceBreakdown: { SEARCH: totalApplications },
+        warnings: [{ code: "JOB_SERVICE_UNAVAILABLE", message: "raw downstream message must not be rendered" }],
+      },
+      meta: null,
+    };
+  }
+  assertCanonicalUuidV4(companyId, "company_id");
+  return requestApi<RecruiterDashboard>(`${API_PATHS.applications}stats`, {
+    query: { company_id: companyId },
+    allowedQueryKeys: ["company_id"],
+    privateData: true,
+    signal,
+  });
 }
 
 export async function getApplications(candidateId?: string, signal?: AbortSignal): Promise<ApiEnvelope<CandidateApplication[]>> {
