@@ -36,7 +36,7 @@ import { isRejectedRecruiterJob, nextRecruiterJobStatus, recruiterJobActionLabel
 import { normalizeJobSkills, normalizeRecruiterJobForm, validateRecruiterJobForm, type RecruiterJobFormValues } from "./jobForm";
 import { isOffsetWindowTooDeep, mergePublicJobPage, normalizePublicJobSearch, publicJobSearchScope, validatePublicJobSearch } from "./publicJobSearch";
 import { cursorRestartView } from "./cursorRecovery";
-import { jobDataSourceView, recommendationFallbackView, recommendationSourceView } from "./recommendationPresentation";
+import { canLoadMoreRecommendations, jobDataSourceView, mergeRecommendationPage, recommendationFallbackView, recommendationSourceView } from "./recommendationPresentation";
 import {
   normalizeCompanyCreate,
   validateCompanyCreate,
@@ -708,4 +708,15 @@ test("every candidate recommendation fallback has a distinct recovery CTA", () =
   assert.equal(new Set(views.map((view) => view?.actionLabel)).size, reasons.length);
   assert.equal(recommendationFallbackView("NO_ACTIVE_CV")?.action, "UPLOAD_CV");
   assert.equal(recommendationFallbackView("NO_MATCHING_CV_EMBEDDINGS"), null);
+});
+
+test("recommendation pagination is enabled only for AI with an opaque next cursor", () => {
+  assert.equal(canLoadMoreRecommendations("AI", "opaque-next"), true);
+  assert.equal(canLoadMoreRecommendations("AI", null), false);
+  assert.equal(canLoadMoreRecommendations("PREFERENCES", "unexpected"), false);
+  assert.equal(canLoadMoreRecommendations("LATEST", "unexpected"), false);
+  assert.deepEqual(
+    mergeRecommendationPage([{ id: "a" }, { id: "b" }], [{ id: "b" }, { id: "c" }], true),
+    [{ id: "a" }, { id: "b" }, { id: "c" }],
+  );
 });

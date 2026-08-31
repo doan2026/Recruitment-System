@@ -862,13 +862,26 @@ export async function getApplicationsByJob(jobId: string, signal?: AbortSignal):
   return { ...response, data: response.data.items.map(toApplication) };
 }
 
-export async function getRecommendationsForCandidate(signal?: AbortSignal): Promise<ApiEnvelope<JobRecommendation[]>> {
-  if (isDemoPerson2Api) return normalizeDemo(demo.getRecommendationsForCandidate());
+export async function getRecommendationsForCandidate(
+  options: { cursor?: string | null; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<JobRecommendation[]>> {
+  if (isDemoPerson2Api) {
+    const response = await normalizeDemo(demo.getRecommendationsForCandidate());
+    return {
+      ...response,
+      meta: {
+        source: response.data[0]?.source ?? "LATEST",
+        nextCursor: null,
+        hasMore: false,
+      },
+    };
+  }
   const response = await requestApi<JobRecommendationResult>(API_PATHS.jobRecommended, {
     privateData: true,
     signal,
-    query: { limit: 10 },
-    allowedQueryKeys: ["limit"],
+    query: { limit: options.limit ?? 10, cursor: options.cursor },
+    allowedQueryKeys: ["limit", "cursor"],
   });
   return {
     data: response.data.items.map((item) => ({
