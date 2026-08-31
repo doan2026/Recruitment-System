@@ -35,6 +35,7 @@ import { applicationCooldownView } from "./applicationCooldown";
 import { activeJobsMetricView, bookmarkCardView, dashboardWarningView } from "./applicationDegradedStates";
 import { AI_MATCH_POLL_DELAY_MS, aiMatchNotReadyView } from "./aiMatchRecovery";
 import { isCvDownloadFresh, resolveFreshCvDownload } from "./recruiterCvAccess";
+import { isEvaluationAlreadyExists, normalizeEvaluationDraft } from "./applicationEvaluation";
 import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, validateRecruiterApplicationFilters, type RecruiterApplicationFilterDraft } from "./recruiterApplicationTable";
 import {
   normalizeInvitationEmail,
@@ -513,6 +514,30 @@ test("expired recruiter CV links are refreshed exactly once and never cached", a
     resolveFreshCvDownload(async () => ({ cvId: "cv-1", url: "https://media.test/cv.pdf", expiresAt: "2026-08-31T00:00:00Z" }), () => now),
     (error: unknown) => error instanceof ApiClientError && error.code === "CV_DOWNLOAD_EXPIRED",
   );
+});
+
+test("evaluation form mirrors backend score precision, criteria and note rules", () => {
+  assert.deepEqual(normalizeEvaluationDraft({
+    score: "85.50",
+    technical: "90",
+    communication: "80.25",
+    culture: "75",
+    note: "  Ứng viên phù hợp  ",
+  }), {
+    score: 85.5,
+    criteria: { technical: 90, communication: 80.25, culture: 75 },
+    note: "Ứng viên phù hợp",
+  });
+  assert.throws(
+    () => normalizeEvaluationDraft({ score: "100.001", technical: "90", communication: "80", culture: "75", note: "" }),
+    (error: unknown) => error instanceof ApiClientError && error.code === "INVALID_EVALUATION_SCORE",
+  );
+});
+
+test("only exact evaluation duplicate 409 becomes remembered evaluated state", () => {
+  assert.equal(isEvaluationAlreadyExists(new ApiClientError({ code: "EVALUATION_ALREADY_EXISTS", status: 409 })), true);
+  assert.equal(isEvaluationAlreadyExists(new ApiClientError({ code: "APPLICATION_CHANGED_CONCURRENTLY", status: 409 })), false);
+  assert.equal(isEvaluationAlreadyExists(new ApiClientError({ code: "EVALUATION_ALREADY_EXISTS", status: 503 })), false);
 });
 
 test("Retry-After drives one bounded automatic retry before manual recovery", () => {

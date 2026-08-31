@@ -1385,6 +1385,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [x] Thêm `/candidate/bookmarks` và `/recruiter/dashboard` cho degraded response: bookmark `job=null` giữ card/ID cùng CTA đồng bộ lại thay vì crash; dashboard mask raw warning, hiển thị `activeJobs` là “—” nhưng giữ mọi metric Application và bảng theo Job; 70/70 unit test PASS.
 - [x] Nối nút làm mới match score trong recruiter pipeline: gửi expected version, cập nhật score/version từ response, map an toàn bốn reason `AI_MATCH_NOT_READY`, tự poll đúng một lần sau 5 giây rồi chuyển sang retry thủ công; conflict version vẫn reload riêng; 71/71 unit test PASS.
 - [x] Nối recruiter CV qua Application boundary: mỗi lần xem gọi lại metadata no-store và POST lấy URL, mở cửa sổ ngay từ user gesture, không giữ signed URL; URL phải HTTPS và còn hơn 1 giây, nếu quá ngắn/hết hạn xin lại đúng một lần; 73/73 unit test PASS.
+- [x] Hoàn thiện phần Evaluation trong API-gap: form validate score/ba criteria/note đúng DTO, POST không retry; success hoặc exact `409 EVALUATION_ALREADY_EXISTS` đều chuyển thành “Đã đánh giá” trong React session dù backend không có GET; 75/75 unit test PASS. Gap Offer vẫn chờ Notification handoff thật.
 - [ ] Nối các màn trên với API Gateway/Auth session thật, hoàn thiện error mapping/409/429/503 và thêm component/E2E test trước khi đóng checkbox endpoint bên dưới.
 >
 > Danh sách bám theo **48 endpoint user-facing có thật**, khảo sát trực tiếp từ code controller và đối chiếu với `infra/nginx/nginx.conf` — không suy đoán từ tài liệu.
@@ -1445,6 +1446,9 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [x] Nút làm mới match score xử lý riêng `409 AI_MATCH_NOT_READY` kèm `details.reason`: đây là trạng thái "chưa sẵn sàng" cần cho thử lại/poll, **khác hẳn** `409` xung đột version.
 - [x] Màn xem/tải CV của recruiter: `expiresAt` rất ngắn nên phải mở ngay và xin link mới khi hết hạn; không cache metadata lẫn link.
 - [ ] Bù ba lỗ hổng API hiện có: ứng viên **không lấy được `version`** từ `GET /applications/my` (phải gọi thêm `GET /applications/:id` trước khi rút hồ sơ); **không có endpoint đọc offer** nên `offerId` phải lấy từ Notification Service; **không có endpoint GET đánh giá** nên phải tự nhớ trạng thái "đã đánh giá" từ `409`.
+  - [x] Candidate withdraw đã lấy detail/version authoritative trước mutation.
+  - [ ] Offer route đã nhận `offerId` theo deep link nhưng chưa có Notification handoff chứa hai version; không giả lập GET Offer không tồn tại.
+  - [x] Evaluation ghi nhớ “đã đánh giá” từ POST thành công hoặc exact duplicate `409` trong React session.
 - [ ] Chú ý ba prefix khác nhau: hồ sơ ở `/applications/`, bookmark ở `/applications/bookmarks`, còn **phản hồi offer nằm ở prefix riêng `/offers/`**.
 
 #### AI chatbot — 1 endpoint

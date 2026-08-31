@@ -239,6 +239,16 @@ export interface RecruiterApplicationCvDownload {
   expiresAt: string;
 }
 
+export interface ApplicationEvaluationResult {
+  id: string;
+  applicationId: string;
+  evaluatorId: string;
+  score: number;
+  criteria: Record<string, number>;
+  note: string | null;
+  createdAt: string;
+}
+
 export interface ApplicationOfferMutationResult {
   id: string;
   applicationId: string;
@@ -1233,6 +1243,40 @@ export async function createRecruiterCvDownload(
   assertCanonicalUuidV4(applicationId, "applicationId");
   return requestApi<RecruiterApplicationCvDownload>(`${API_PATHS.applications}${applicationId}/cv/download-url`, {
     method: "POST",
+    privateData: true,
+    signal,
+    maxRetries: 0,
+  });
+}
+
+export async function createApplicationEvaluation(
+  applicationId: string,
+  input: { score: number; criteria: Record<string, number>; note?: string },
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<ApplicationEvaluationResult>> {
+  const body = selectContractFields({
+    score: input.score,
+    criteria: input.criteria,
+    note: input.note,
+  }, ["score", "criteria", "note"]);
+  if (isDemoPerson2Api) {
+    return {
+      data: {
+        id: crypto.randomUUID().toLowerCase(),
+        applicationId,
+        evaluatorId: "018f47a2-6f4d-4b7d-8c91-ff02d770a944",
+        score: input.score,
+        criteria: input.criteria,
+        note: input.note ?? null,
+        createdAt: new Date().toISOString(),
+      },
+      meta: null,
+    };
+  }
+  assertCanonicalUuidV4(applicationId, "applicationId");
+  return requestApi<ApplicationEvaluationResult>(`${API_PATHS.applications}${applicationId}/evaluation`, {
+    method: "POST",
+    body,
     privateData: true,
     signal,
     maxRetries: 0,
