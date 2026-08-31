@@ -225,6 +225,20 @@ export interface ApplicationMatchScoreResult {
   version: number;
 }
 
+export interface RecruiterApplicationCv {
+  cvId: string;
+  title: string;
+  type: string;
+  isDeleted: boolean;
+  createdAt: string;
+}
+
+export interface RecruiterApplicationCvDownload {
+  cvId: string;
+  url: string;
+  expiresAt: string;
+}
+
 export interface ApplicationOfferMutationResult {
   id: string;
   applicationId: string;
@@ -1177,6 +1191,52 @@ export async function getApplicationDetail(
     { privateData: true, signal },
   );
   return { ...response, data: toApplication(response.data) };
+}
+
+export async function getRecruiterApplicationCv(
+  applicationId: string,
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<RecruiterApplicationCv>> {
+  if (isDemoPerson2Api) {
+    return {
+      data: {
+        cvId: "018f47a2-6f4d-4b7d-8c91-ff02d770a944",
+        title: "CV ứng tuyển đã chốt",
+        type: "UPLOAD",
+        isDeleted: false,
+        createdAt: new Date(Date.now() - 14 * 86_400_000).toISOString(),
+      },
+      meta: null,
+    };
+  }
+  assertCanonicalUuidV4(applicationId, "applicationId");
+  return requestApi<RecruiterApplicationCv>(`${API_PATHS.applications}${applicationId}/cv`, {
+    privateData: true,
+    signal,
+  });
+}
+
+export async function createRecruiterCvDownload(
+  applicationId: string,
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<RecruiterApplicationCvDownload>> {
+  if (isDemoPerson2Api) {
+    return {
+      data: {
+        cvId: "018f47a2-6f4d-4b7d-8c91-ff02d770a944",
+        url: "https://example.com/demo-cv.pdf",
+        expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+      },
+      meta: null,
+    };
+  }
+  assertCanonicalUuidV4(applicationId, "applicationId");
+  return requestApi<RecruiterApplicationCvDownload>(`${API_PATHS.applications}${applicationId}/cv/download-url`, {
+    method: "POST",
+    privateData: true,
+    signal,
+    maxRetries: 0,
+  });
 }
 
 export async function changeApplicationStatus(
