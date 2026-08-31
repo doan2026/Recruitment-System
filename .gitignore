@@ -10,6 +10,8 @@ service-account*.json
 **/target/
 **/.next/
 **/.test-dist/
+**/playwright-report/
+**/test-results/
 **/*.tsbuildinfo
 **/__pycache__/
 *.py[cod]

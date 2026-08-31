@@ -186,7 +186,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - **Công nghệ:** Next.js 14, React 18, TypeScript.
 - **Chức năng chính:** auth UI; hồ sơ/CV; công ty; job search/detail; apply/bookmark; recruiter pipeline/offer/dashboard; interview/video/chat/notification; admin console.
 - **Phụ thuộc:** API Gateway và hợp đồng API của toàn bộ backend.
-- **Trạng thái:** 🟡 React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter `demo|gateway` đã nối các read flow, cập nhật Company và tạo Company qua Gateway; các nền tảng safe error, conflict/transient recovery và private session boundary có unit test. `404 COMPANY_NOT_FOUND` đã thành onboarding thay vì lỗi. Auth UI thật, các mutation còn lại và E2E vẫn pending; P16.N2 hiện 47/52.
+- **Trạng thái:** 🟡 React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter `demo|gateway` đã nối các read flow, cập nhật Company và tạo Company qua Gateway; các nền tảng safe error, conflict/transient recovery và private session boundary có unit test. `404 COMPANY_NOT_FOUND` đã thành onboarding thay vì lỗi. Gateway-contract E2E đã chạy trên Chrome desktop/mobile; Auth UI thật, các phụ thuộc Offer và deployed E2E vẫn pending; P16.N2 hiện 47/52.
 
 ## T14 — Tích hợp, kiểm thử và vận hành
 
@@ -1396,7 +1396,10 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [x] Render response chatbot text-only: không inner HTML/Markdown parser, chặn response blank/control/>8.000 ký tự; chỉ parse exact dãy job đánh số, UUID vẫn là text; intent deterministic mở CTA nội bộ `#suitable-jobs`; 95/95 unit test PASS.
 - [x] Khóa public API boundary cho AI FE Người 2: chatbot chỉ `/ai/chat`, gợi ý việc/ứng viên chỉ qua `/jobs/recommended` và `/jobs/:id/recommended-candidates`; mọi biến thể internal AI bị fail-closed; 97/97 unit test PASS.
 - [x] Hoàn tất shared optimistic `409` cho cả ba consumer: Company, Job edit/submit và Application status/match đều reload authoritative đúng một lần, giữ draft/intent, mở bảng so sánh và chỉ gửi lại sau quyết định chủ động; 99/99 unit test PASS.
+- [x] Thêm Playwright Gateway-contract E2E cho đủ bốn service Người 2: Company success/error và chống lộ raw message; Job Search/Recommendation giữ đúng hai contract; Application lấy detail version trước withdraw; AI Chat gửi exact private body/no-store/cookie và render text-only. Chrome desktop 1440px + mobile 390px đều không tràn document; 10/10 E2E PASS.
 - [ ] Nối các màn trên với API Gateway/Auth session thật, hoàn thiện error mapping/409/429/503 và thêm component/E2E test trước khi đóng checkbox endpoint bên dưới.
+  - [x] Browser E2E với Gateway contract đã có cho Company, Job & Search, Application và AI; chạy bằng `NEXT_PUBLIC_API_MODE=gateway`, không fallback demo.
+  - [ ] Live Auth bootstrap, môi trường Gateway triển khai thật và cross-service E2E vẫn chờ phần Auth/vận hành dùng chung; test intercept không được dùng để tuyên bố deployed PASS.
 >
 > Danh sách bám theo **48 endpoint user-facing có thật**, khảo sát trực tiếp từ code controller và đối chiếu với `infra/nginx/nginx.conf` — không suy đoán từ tài liệu.
 

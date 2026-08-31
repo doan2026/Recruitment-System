@@ -11,14 +11,16 @@
     "Scrollbar": "global-stylesheet",
     "CRUD": "route-and-api-adapter"
   },
-  "requiredCommands": ["test", "typecheck", "build"],
+  "requiredCommands": ["test", "e2e", "typecheck", "build"],
   "commands": {
     "test": "npm run test",
+    "e2e": "npm run test:e2e",
     "typecheck": "npm run typecheck",
     "build": "npm run build"
   },
   "evidence": {
     "apiClient": "frontend/lib/apiClient.test.ts",
+    "gatewayE2E": "frontend/tests/e2e/person2-gateway.spec.ts",
     "build": "frontend/.next/build-manifest.json"
   }
 }
