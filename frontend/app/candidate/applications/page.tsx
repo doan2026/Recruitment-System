@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ErrorState, LoadingState } from "../../../components/ui";
-import { toUserMessage } from "../../../lib/apiClient";
-import { applicationStatusTransitions, CandidateApplication, getApplications } from "../../../lib/person2Api";
+import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../components/ui";
+import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
+import { candidateApplicationActions, type CandidateApplicationAction } from "../../../lib/applicationStateMachine";
+import { getApplicationDetail, getApplications, withdrawCandidateApplication, type CandidateApplication } from "../../../lib/person2Api";
 
 function fmtDate(value?: string) {
   if (!value) return "-";
@@ -12,126 +13,99 @@ function fmtDate(value?: string) {
 
 export default function CandidateApplicationsPage() {
   const [applications, setApplications] = useState<CandidateApplication[]>([]);
-  const [error, setError] = useState("");
   const [loadError, setLoadError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [actionStatus, setActionStatus] = useState("");
+  const [pendingApplicationId, setPendingApplicationId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
-    let live = true;
+    let active = true;
     const controller = new AbortController();
     setLoading(true);
     setLoadError("");
     getApplications(undefined, controller.signal)
       .then((response) => {
-        if (live) setApplications(response.data);
+        if (active) setApplications(response.data);
       })
       .catch((reason: unknown) => {
-        if (live) setLoadError(toUserMessage(reason));
+        if (active && !(reason instanceof ApiClientError && reason.code === "REQUEST_CANCELLED")) {
+          setLoadError(toUserMessage(reason));
+        }
       })
       .finally(() => {
-        if (live) setLoading(false);
+        if (active) setLoading(false);
       });
     return () => {
-      live = false;
+      active = false;
       controller.abort();
     };
   }, [reloadKey]);
 
-  function onAction(app: CandidateApplication, action: string) {
-    const nextError = `${app.id}: hành động ${action} đã gửi đi`;
-    setError(nextError);
+  async function withdraw(application: CandidateApplication) {
+    if (pendingApplicationId) return;
+    setPendingApplicationId(application.id);
+    setActionError("");
+    setActionStatus("");
+    try {
+      const detail = await getApplicationDetail(application.id);
+      if (detail.data.version === null) throw new ApiClientError({ code: "INVALID_API_RESPONSE" });
+      const response = await withdrawCandidateApplication(application.id, {
+        note: "Ứng viên chủ động rút hồ sơ",
+        applicationVersion: detail.data.version,
+      });
+      setApplications((current) => current.map((item) => item.id === application.id ? {
+        ...item,
+        status: response.data.toStatus,
+        version: response.data.version,
+        notes: "Ứng viên chủ động rút hồ sơ",
+      } : item));
+      setActionStatus(`Đã rút hồ sơ ứng tuyển ${application.jobTitle}.`);
+    } catch (reason: unknown) {
+      setActionError(toUserMessage(reason));
+    } finally {
+      setPendingApplicationId(null);
+    }
+  }
 
-    if (action === "WITHDRAWN") {
-      setApplications((list) =>
-        list.map((item) =>
-          item.id === app.id
-            ? {
-                ...item,
-                status: "WITHDRAWN",
-                version: item.version + 1,
-                notes: "Ứng viên tự rút hồ sơ",
-              }
-            : item,
-        ),
-      );
+  function runAction(application: CandidateApplication, action: CandidateApplicationAction) {
+    if (action.kind === "WITHDRAW") {
+      void withdraw(application);
       return;
     }
-
-    if (action === "HIRED") {
-      setApplications((list) =>
-        list.map((item) =>
-          item.id === app.id
-            ? {
-                ...item,
-                status: "HIRED",
-                version: item.version + 1,
-                notes: "Offer accepted",
-              }
-            : item,
-        ),
-      );
-    }
-
-    if (action === "REJECTED") {
-      setApplications((list) =>
-        list.map((item) =>
-          item.id === app.id
-            ? {
-                ...item,
-                status: "REJECTED",
-                version: item.version + 1,
-                lastRejectedAt: new Date().toISOString().slice(0, 10),
-              }
-            : item,
-        ),
-      );
-    }
+    setActionError("");
+    setActionStatus("Hãy mở Offer từ thông báo đã nhận để dùng đúng offerId và hai phiên bản đi kèm.");
   }
 
   return (
     <main>
-      <h1 className="page-title">Hồ sơ ứng tuyển của tôi</h1>
-      <p className="help">Checklist machine-state và optimistic lock đang hiển thị trực quan trước khi gọi API.</p>
-      {error ? <p className="notice">{error}</p> : null}
+      <PageHeader eyebrow="CANDIDATE · APPLICATIONS" title="Hồ sơ ứng tuyển của tôi" description="Theo dõi trạng thái và chỉ thực hiện những hành động hợp lệ ở bước hiện tại." />
+      {actionStatus ? <p className="notice notice-success" role="status">{actionStatus}</p> : null}
+      {actionError ? <p className="notice notice-danger" role="alert"><strong>Chưa hoàn tất thao tác.</strong> {actionError}</p> : null}
       {loadError ? <ErrorState message={loadError} onRetry={() => setReloadKey((value) => value + 1)} /> : null}
       {loading ? <LoadingState label="Đang tải hồ sơ ứng tuyển" /> : null}
+      {!loading && !loadError && applications.length === 0 ? <EmptyState title="Chưa có hồ sơ ứng tuyển" description="Các công việc bạn đã ứng tuyển sẽ xuất hiện tại đây." /> : null}
       <section className="stack">
-        {applications.map((app) => {
-          const allowed = applicationStatusTransitions[app.status] || [];
-
+        {applications.map((application) => {
+          const actions = candidateApplicationActions(application.status);
+          const pending = pendingApplicationId === application.id;
           return (
-            <article className="panel" key={app.id}>
+            <article className="panel" key={application.id}>
               <div className="section-head row-between">
-                <div>
-                  <strong>{app.jobTitle}</strong>
-                  <p className="help">{app.companyName}</p>
-                </div>
-                <span className="badge">Ver {app.version}</span>
+                <div><strong>{application.jobTitle}</strong><p className="help">{application.companyName}</p></div>
+                <StatusBadge tone={application.status === "HIRED" ? "success" : application.status === "REJECTED" || application.status === "WITHDRAWN" ? "danger" : "warning"}>{application.status}</StatusBadge>
               </div>
-              <p className="help">
-                Trạng thái: <strong>{app.status}</strong> • Match {app.matchScore ?? 0}% • nộp ngày {fmtDate(app.createdAt)}
-              </p>
-
-              <p className="help">Hành động cho backend conflict: nếu `409` thì reload trước, giữ version mới rồi retry.</p>
-              <div className="row-wrap">
-                <span className="badge">candidateId: {app.candidateId}</span>
-                <span className="badge">jobId: {app.jobId}</span>
-                <span className="badge">email: {app.email}</span>
-              </div>
-
-              <div className="btn-group" style={{ marginTop: 10 }}>
-                {allowed.map((action) => (
-                  <button key={action} className={action === "REJECTED" ? "btn btn-danger" : "btn"} onClick={() => onAction(app, action)}>
-                    {action}
+              <p className="help">Match {application.matchScore ?? "chưa có"}% · Nộp ngày {fmtDate(application.createdAt)} · Phiên bản {application.version ?? "tải khi thao tác"}</p>
+              <div className="btn-group">
+                {actions.map((action) => (
+                  <button key={action.kind} className={action.kind === "RESPOND_OFFER" ? "btn btn-primary" : "btn btn-warning"} type="button" disabled={pendingApplicationId !== null} aria-busy={pending && action.kind === "WITHDRAW"} onClick={() => runAction(application, action)}>
+                    {pending && action.kind === "WITHDRAW" ? "Đang rút hồ sơ…" : action.label}
                   </button>
                 ))}
               </div>
-
-              <p className="status-line">
-                Ngày gợi ý tiếp tục sau từ chối: {app.status === "REJECTED" ? fmtDate(app.lastRejectedAt || new Date().toISOString()) : "-"}
-              </p>
-              {app.notes ? <p className="help">Ghi chú backend: {app.notes}</p> : null}
+              {actions.length === 0 ? <p className="status-line">Hồ sơ ở trạng thái kết thúc, không còn hành động khả dụng.</p> : null}
+              {application.notes ? <p className="help">Ghi chú: {application.notes}</p> : null}
             </article>
           );
         })}

@@ -186,7 +186,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - **Công nghệ:** Next.js 14, React 18, TypeScript.
 - **Chức năng chính:** auth UI; hồ sơ/CV; công ty; job search/detail; apply/bookmark; recruiter pipeline/offer/dashboard; interview/video/chat/notification; admin console.
 - **Phụ thuộc:** API Gateway và hợp đồng API của toàn bộ backend.
-- **Trạng thái:** 🟡 React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter `demo|gateway` đã nối các read flow, cập nhật Company và tạo Company qua Gateway; các nền tảng safe error, conflict/transient recovery và private session boundary có unit test. `404 COMPANY_NOT_FOUND` đã thành onboarding thay vì lỗi. Auth UI thật, các mutation còn lại và E2E vẫn pending; P16.N2 hiện 31/52.
+- **Trạng thái:** 🟡 React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter `demo|gateway` đã nối các read flow, cập nhật Company và tạo Company qua Gateway; các nền tảng safe error, conflict/transient recovery và private session boundary có unit test. `404 COMPANY_NOT_FOUND` đã thành onboarding thay vì lỗi. Auth UI thật, các mutation còn lại và E2E vẫn pending; P16.N2 hiện 32/52.
 
 ## T14 — Tích hợp, kiểm thử và vận hành
 
@@ -1336,7 +1336,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [ ] Admin dashboard, company/job approval, user/report management và export.
 - [ ] Loading/error/empty state, responsive UI, accessibility và E2E test.
 
-### P16.N2 — FE tiêu thụ bốn service của Người 2 (31/52 tích hợp API thật; baseline UI đã có)
+### P16.N2 — FE tiêu thụ bốn service của Người 2 (32/52 tích hợp API thật; baseline UI đã có)
 
 > Bổ sung ngày 30/08/2026 theo yêu cầu. Đây là danh sách chi tiết task FE **chưa làm**, nhưng **chỉ giới hạn ở phần tiêu thụ bốn service của Người 2** (Company, Job & Search, Application, AI chatbot). FE của Auth, Profile, Media, Interview, Notification, Admin và Chat **không** nằm trong danh sách này. Bản thân việc code FE vẫn **thuộc Người 3** — mục này ghi ra để thấy backend của Người 2 đang chờ FE làm những gì, không phải chuyển việc sang Người 2.
 >
@@ -1378,6 +1378,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [x] Phân biệt phạm vi Job theo membership authoritative: OWNER được giải thích là xem toàn công ty, MEMBER chỉ xem tin do mình tạo; bỏ nhãn role suy đoán trên từng row, nhận diện đúng `403 JOB_ACCESS_DENIED`, hiển thị safe message và đồng bộ lại cả danh sách lẫn vai trò; 58/58 unit test PASS.
 - [x] Thêm versioned command adapter cho toàn bộ Application write flow: status, withdraw, match refresh, send offer và offer response đều gửi exact expected version, tắt auto-retry mutation và giữ `version`/`applicationVersion` từ response làm nguồn cho lệnh kế tiếp; thêm detail read để lấy version authoritative; 60/60 unit test PASS.
 - [x] Nối màn Candidate Offer với `PATCH /offers/:id/respond`: gửi đồng thời hai version độc lập, validate lý do decline, khóa double-submit và cập nhật cả hai version theo response; bốn mã 409 có bốn nội dung/CTA riêng, không retry mù; 61/61 unit test PASS.
+- [x] Thay Application demo actions bằng state machine theo actor: Candidate chỉ withdraw ở bốn trạng thái active và lấy detail version trước mutation; Recruiter pipeline gọi PATCH status đúng cạnh, reject bắt buộc lý do, terminal read-only; `INTERVIEW→OFFER` có route soạn Offer riêng gọi POST `/offer`, không giả lập status; 64/64 unit test PASS.
 - [ ] Nối các màn trên với API Gateway/Auth session thật, hoàn thiện error mapping/409/429/503 và thêm component/E2E test trước khi đóng checkbox endpoint bên dưới.
 >
 > Danh sách bám theo **48 endpoint user-facing có thật**, khảo sát trực tiếp từ code controller và đối chiếu với `infra/nginx/nginx.conf` — không suy đoán từ tài liệu.
@@ -1429,7 +1430,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 
 - [x] Lưu và gắn `expectedVersion` cho **mọi lệnh ghi** (đổi trạng thái, rút hồ sơ, gửi offer, phản hồi offer, làm mới match score): giữ `version` từ mọi response và gắn vào request kế tiếp.
 - [x] Luồng phản hồi offer giữ **hai version độc lập** (`expectedOfferVersion` + `expectedApplicationVersion`) và tách **bốn** loại `409` thành bốn thông báo/hành động khác nhau: `OFFER_EXPIRED`, `OFFER_ALREADY_RESPONDED`, `OFFER_CHANGED_CONCURRENTLY`, `APPLICATION_CHANGED_CONCURRENTLY`.
-- [ ] Máy trạng thái hồ sơ phía client để chỉ hiện nút hợp lệ: `APPLIED→REVIEWING`, `REVIEWING→INTERVIEW`, `→REJECTED` (bắt buộc lý do) từ `APPLIED`/`REVIEWING`/`INTERVIEW`/`OFFER`; `INTERVIEW→OFFER` chỉ qua `POST /offer`; `OFFER→HIRED|REJECTED` chỉ do ứng viên phản hồi; `WITHDRAWN` từ bốn trạng thái active. Đoán sai là `409 INVALID_APPLICATION_TRANSITION`.
+- [x] Máy trạng thái hồ sơ phía client để chỉ hiện nút hợp lệ: `APPLIED→REVIEWING`, `REVIEWING→INTERVIEW`, `→REJECTED` (bắt buộc lý do) từ `APPLIED`/`REVIEWING`/`INTERVIEW`/`OFFER`; `INTERVIEW→OFFER` chỉ qua `POST /offer`; `OFFER→HIRED|REJECTED` chỉ do ứng viên phản hồi; `WITHDRAWN` từ bốn trạng thái active. Đoán sai là `409 INVALID_APPLICATION_TRANSITION`.
 - [ ] Màn nộp hồ sơ xử lý cooldown: `details.eligibleAt` cho biết mốc 30 ngày kể từ lần `REJECTED` gần nhất — hiện ngày cụ thể thay vì lỗi chung.
 - [ ] Bảng hồ sơ của nhà tuyển dụng: phân trang **offset** (`page`/`size`, tối đa 100) cùng bộ lọc `job_id`/`status`/`appliedFrom`/`appliedTo`/`skills` và ba kiểu sắp xếp. Đây **không** phải cursor nên phải xử lý trôi dữ liệu khi có hồ sơ mới chèn vào giữa các trang; tự validate `appliedFrom <= appliedTo` trước khi gửi.
 - [ ] Handshake upload file offer với Media **trước khi** gọi `POST /offer`: phải có cặp `fileId` + `fileUrl` đã xác nhận, thiếu một trong hai là `400`; bỏ file thì gửi cả hai rỗng.

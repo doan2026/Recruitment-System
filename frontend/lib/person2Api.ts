@@ -326,7 +326,7 @@ function toApplication(value: BackendApplicationListItem): CandidateApplication 
     jobTitle: value.jobTitle,
     companyName: "Doanh nghiệp tuyển dụng",
     status: value.status,
-    version: value.version ?? 0,
+    version: value.version ?? null,
     matchScore: value.matchScore ?? undefined,
     createdAt: value.appliedAt,
   };
@@ -914,7 +914,7 @@ export async function getApplicationsByJob(jobId: string, signal?: AbortSignal):
   const response = await requestApi<{ items: BackendApplicationListItem[] }>(API_PATHS.applications, {
     privateData: true,
     signal,
-    query: { job_id: jobId, page: 1, size: 100 },
+    query: { job_id: jobId, page: 0, size: 100 },
     allowedQueryKeys: ["job_id", "page", "size"],
   });
   return { ...response, data: response.data.items.map(toApplication) };
