@@ -620,3 +620,8 @@ textarea { resize: none; }
   .company-public-logo { width: 104px; border-radius: 22px; }
   .company-public-media { grid-template-columns: 1fr; }
 }
+
+.company-invitation { margin-top: 20px; }
+.invitation-token-panel { display: grid; gap: 16px; }
+.invitation-token { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; }
+.invitation-token-panel .notice { margin: 0; }

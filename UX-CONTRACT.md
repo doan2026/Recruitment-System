@@ -72,6 +72,7 @@
 | Resubmit company verification | Gửi lại để xác minh | khóa nút, giữ trạng thái hiện tại | ở company | badge PENDING + status inline | 409 tải resource đúng một lần, không retry mutation | block trạng thái xác minh | P16.N2 Company |
 | Search | Nhập từ khóa | list loader | cùng route | result count | clear/retry | search/list heading | P16.N2 Search |
 | Public company cursor search | Nhập từ khóa / tải thêm | khóa `q`/`limit` trong cursor chain | `/companies` | append theo `hasMore` | retry hoặc tìm kiếm mới | ô tìm kiếm / list heading | P16.N2 Company Search |
+| Invite company member | OWNER nhập email | khóa submit | ở hồ sơ công ty | hiện token một lần để copy | giữ email + safe error; clipboard fallback | token rồi email input | P16.N2 Company Member |
 | Replace-all media | Kéo thả/xóa rồi lưu | khóa editor khi PUT | ở company | reload library từ response | giữ draft + safe error | library heading | P16.N2 Company media |
 | Upload | Chọn file / xin chữ ký | khóa action theo step | ở company | confirm rồi attach fileId | kiểm policy, xin signature mới, giữ confirmed file để retry attach | bước hiện tại | P16.N2 Media handshake |
 | Cancel/back | Hủy / Quay lại | none | owning list | none | dirty guard pending | originating context | P16.N2 |
@@ -115,7 +116,7 @@
 ## Permission and clipboard
 
 - OWNER-only action ẩn sau khi membership được tải; 403 vẫn có trang/inline access boundary.
-- Invitation token chỉ hiện một lần, copy chủ động; không đưa secret vào toast hoặc URL.
+- Invitation token chỉ hiện một lần trong React memory, copy chủ động có manual fallback; không đưa secret vào toast, URL hoặc storage. Đóng panel/reload sẽ xóa token, mời lại cùng email phải cảnh báo token cũ bị vô hiệu.
 
 ## Verification
 

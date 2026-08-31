@@ -92,6 +92,16 @@ export interface PublicCompanyProfile {
   updatedAt: string;
 }
 
+export interface CreatedCompanyInvitation {
+  id: string;
+  companyId: string;
+  email: string;
+  status: "PENDING" | "ACCEPTED" | "EXPIRED" | "REVOKED";
+  expiresAt: string;
+  createdAt: string;
+  invitationToken: string;
+}
+
 interface BackendJob {
   id: string;
   companyId: string;
@@ -478,6 +488,39 @@ export async function getPublicCompany(
   }
   assertCanonicalUuidV4(id, "companyId");
   return requestApi<PublicCompanyProfile>(`${API_PATHS.companies}${id}`, { signal });
+}
+
+export async function inviteCompanyMember(
+  companyId: string,
+  email: string,
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<CreatedCompanyInvitation>> {
+  if (isDemoPerson2Api) {
+    const now = new Date();
+    const expiresAt = new Date(now);
+    expiresAt.setDate(expiresAt.getDate() + 7);
+    return {
+      data: {
+        id: `demo-invitation-${now.getTime()}`,
+        companyId,
+        email,
+        status: "PENDING",
+        expiresAt: expiresAt.toISOString(),
+        createdAt: now.toISOString(),
+        invitationToken: `demo-token-${now.getTime()}-copy-this-value`,
+      },
+      meta: null,
+    };
+  }
+  assertCanonicalUuidV4(companyId, "companyId");
+  const body = selectContractFields({ email }, ["email"] as const);
+  return requestApi<CreatedCompanyInvitation>(`${API_PATHS.companies}${companyId}/members`, {
+    method: "POST",
+    privateData: true,
+    signal,
+    body,
+    maxRetries: 0,
+  });
 }
 
 export async function getPublicJobs(search: {
