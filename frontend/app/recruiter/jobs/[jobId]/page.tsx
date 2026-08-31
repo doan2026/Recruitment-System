@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { TransientRecoveryState } from "../../../../components/TransientRecoveryState";
 import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../../components/ui";
 import { ApiClientError, toUserMessage } from "../../../../lib/apiClient";
-import { candidateRecommendationEmptyView } from "../../../../lib/candidateRecommendation";
+import { CANDIDATE_RECOMMENDATION_DEBOUNCE_MS, candidateRecommendationEmptyView } from "../../../../lib/candidateRecommendation";
 import {
   getRecruiterCandidateRecommendations,
   getRecruiterJob,
@@ -22,8 +23,16 @@ export default function RecruiterJobPipelinePage() {
   const [jobReloadKey, setJobReloadKey] = useState(0);
   const [recommendations, setRecommendations] = useState<RecruiterCandidateRecommendationResult | null>(null);
   const [recommendationLoading, setRecommendationLoading] = useState(true);
-  const [recommendationError, setRecommendationError] = useState("");
+  const [recommendationError, setRecommendationError] = useState<unknown>(null);
+  const [recommendationFailureCount, setRecommendationFailureCount] = useState(0);
   const [recommendationReloadKey, setRecommendationReloadKey] = useState(0);
+  const recommendationRequestPendingRef = useRef(false);
+
+  const retryRecommendations = useCallback(() => {
+    if (recommendationRequestPendingRef.current) return;
+    recommendationRequestPendingRef.current = true;
+    setRecommendationReloadKey((value) => value + 1);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -51,23 +60,36 @@ export default function RecruiterJobPipelinePage() {
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+    recommendationRequestPendingRef.current = true;
     setRecommendationLoading(true);
-    setRecommendationError("");
-    getRecruiterCandidateRecommendations(jobId, { limit: 10 }, controller.signal)
-      .then((response) => {
-        if (active) setRecommendations(response.data);
-      })
-      .catch((reason: unknown) => {
-        if (active && !(reason instanceof ApiClientError && reason.code === "REQUEST_CANCELLED")) {
-          setRecommendationError(toUserMessage(reason));
-        }
-      })
-      .finally(() => {
-        if (active) setRecommendationLoading(false);
-      });
+    setRecommendationError(null);
+    debounceTimer = setTimeout(() => {
+      getRecruiterCandidateRecommendations(jobId, { limit: 10 }, controller.signal)
+        .then((response) => {
+          if (active) {
+            setRecommendations(response.data);
+            setRecommendationFailureCount(0);
+          }
+        })
+        .catch((reason: unknown) => {
+          if (active && !(reason instanceof ApiClientError && reason.code === "REQUEST_CANCELLED")) {
+            setRecommendationError(reason);
+            setRecommendationFailureCount((value) => value + 1);
+          }
+        })
+        .finally(() => {
+          if (active) {
+            recommendationRequestPendingRef.current = false;
+            setRecommendationLoading(false);
+          }
+        });
+    }, CANDIDATE_RECOMMENDATION_DEBOUNCE_MS);
     return () => {
       active = false;
+      if (debounceTimer) clearTimeout(debounceTimer);
       controller.abort();
+      recommendationRequestPendingRef.current = false;
     };
   }, [jobId, recommendationReloadKey]);
 
@@ -96,14 +118,20 @@ export default function RecruiterJobPipelinePage() {
         </div>
 
         {recommendationLoading ? <LoadingState label="Đang đối chiếu tập ứng viên có consent" /> : null}
-        {recommendationError ? <ErrorState message={recommendationError} onRetry={() => setRecommendationReloadKey((value) => value + 1)} /> : null}
+        {recommendationError ? (
+          <TransientRecoveryState
+            error={recommendationError}
+            failureCount={recommendationFailureCount}
+            onRetry={retryRecommendations}
+          />
+        ) : null}
         {!recommendationLoading && !recommendationError && emptyView ? (
           <div className="candidate-empty-state" role="status">
             <EmptyState title={emptyView.title} description={emptyView.description} />
             {emptyView.action === "EDIT_JOB" && job.status === "DRAFT" ? (
               <Link className="btn btn-primary" href={`/recruiter/jobs/${job.id}/edit`}>{emptyView.actionLabel}</Link>
             ) : (
-              <button className="btn btn-secondary" type="button" onClick={() => setRecommendationReloadKey((value) => value + 1)}>{emptyView.action === "EDIT_JOB" ? "Tìm lại ứng viên" : emptyView.actionLabel}</button>
+              <button className="btn btn-secondary" type="button" disabled={recommendationLoading} aria-busy={recommendationLoading} onClick={retryRecommendations}>{recommendationLoading ? "Đang tìm lại…" : emptyView.action === "EDIT_JOB" ? "Tìm lại ứng viên" : emptyView.actionLabel}</button>
             )}
           </div>
         ) : null}

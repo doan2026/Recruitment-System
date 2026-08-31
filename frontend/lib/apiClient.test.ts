@@ -37,7 +37,7 @@ import { normalizeJobSkills, normalizeRecruiterJobForm, validateRecruiterJobForm
 import { isOffsetWindowTooDeep, mergePublicJobPage, normalizePublicJobSearch, publicJobSearchScope, validatePublicJobSearch } from "./publicJobSearch";
 import { cursorRestartView } from "./cursorRecovery";
 import { canLoadMoreRecommendations, jobDataSourceView, mergeRecommendationPage, recommendationFallbackView, recommendationSourceView } from "./recommendationPresentation";
-import { candidateRecommendationEmptyView, type CandidateRecommendationEmptyReason } from "./candidateRecommendation";
+import { CANDIDATE_RECOMMENDATION_DEBOUNCE_MS, candidateRecommendationEmptyView, type CandidateRecommendationEmptyReason } from "./candidateRecommendation";
 import {
   normalizeCompanyCreate,
   validateCompanyCreate,
@@ -122,6 +122,35 @@ test("gateway errors expose safe code mapping and retry metadata, not raw messag
       return true;
     },
   );
+});
+
+test("service rate-limit body uses the same Retry-After recovery contract", async () => {
+  await assert.rejects(
+    requestApi("/jobs/018f47a2-6f4d-4b7d-8c91-ff02d770a944/recommended-candidates", {
+      maxRetries: 0,
+      fetcher: async () => new Response(JSON.stringify({
+        code: "RECOMMENDATION_RATE_LIMITED",
+        message: "service internal details",
+        details: { retryAfterSeconds: 60 },
+      }), {
+        status: 429,
+        headers: { "content-type": "application/json" },
+      }),
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof ApiClientError);
+      assert.equal(error.code, "RECOMMENDATION_RATE_LIMITED");
+      assert.equal(error.status, 429);
+      assert.equal(error.retryAfterSeconds, 60);
+      assert.equal(error.recovery, "retry-after");
+      assert.doesNotMatch(error.message, /service|internal/i);
+      return true;
+    },
+  );
+});
+
+test("candidate recommendation refresh uses the shared 300ms debounce window", () => {
+  assert.equal(CANDIDATE_RECOMMENDATION_DEBOUNCE_MS, 300);
 });
 
 test("private requests stay no-store and 401 clears the in-memory session", async () => {
