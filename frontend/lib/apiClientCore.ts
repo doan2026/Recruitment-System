@@ -167,8 +167,8 @@ export function assertCanonicalUuidV4(value: string, field = "id"): string {
   return value;
 }
 
-export function createChatSessionId(): string {
-  const value = globalThis.crypto?.randomUUID?.().toLowerCase();
+export function createChatSessionId(randomUuid?: () => string): string {
+  const value = (randomUuid?.() ?? globalThis.crypto?.randomUUID?.())?.toLowerCase();
   if (!value) throw new ApiClientError({ code: "UUID_GENERATION_UNAVAILABLE" });
   return assertCanonicalUuidV4(value, "session_id");
 }

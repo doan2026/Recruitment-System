@@ -186,7 +186,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - **Công nghệ:** Next.js 14, React 18, TypeScript.
 - **Chức năng chính:** auth UI; hồ sơ/CV; công ty; job search/detail; apply/bookmark; recruiter pipeline/offer/dashboard; interview/video/chat/notification; admin console.
 - **Phụ thuộc:** API Gateway và hợp đồng API của toàn bộ backend.
-- **Trạng thái:** 🟡 React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter `demo|gateway` đã nối các read flow, cập nhật Company và tạo Company qua Gateway; các nền tảng safe error, conflict/transient recovery và private session boundary có unit test. `404 COMPANY_NOT_FOUND` đã thành onboarding thay vì lỗi. Auth UI thật, các mutation còn lại và E2E vẫn pending; P16.N2 hiện 38/52.
+- **Trạng thái:** 🟡 React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter `demo|gateway` đã nối các read flow, cập nhật Company và tạo Company qua Gateway; các nền tảng safe error, conflict/transient recovery và private session boundary có unit test. `404 COMPANY_NOT_FOUND` đã thành onboarding thay vì lỗi. Auth UI thật, các mutation còn lại và E2E vẫn pending; P16.N2 hiện 39/52.
 
 ## T14 — Tích hợp, kiểm thử và vận hành
 
@@ -1336,7 +1336,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [ ] Admin dashboard, company/job approval, user/report management và export.
 - [ ] Loading/error/empty state, responsive UI, accessibility và E2E test.
 
-### P16.N2 — FE tiêu thụ bốn service của Người 2 (38/52 tích hợp API thật; baseline UI đã có)
+### P16.N2 — FE tiêu thụ bốn service của Người 2 (39/52 tích hợp API thật; baseline UI đã có)
 
 > Bổ sung ngày 30/08/2026 theo yêu cầu. Đây là danh sách chi tiết task FE **chưa làm**, nhưng **chỉ giới hạn ở phần tiêu thụ bốn service của Người 2** (Company, Job & Search, Application, AI chatbot). FE của Auth, Profile, Media, Interview, Notification, Admin và Chat **không** nằm trong danh sách này. Bản thân việc code FE vẫn **thuộc Người 3** — mục này ghi ra để thấy backend của Người 2 đang chờ FE làm những gì, không phải chuyển việc sang Người 2.
 >
@@ -1387,6 +1387,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [x] Nối recruiter CV qua Application boundary: mỗi lần xem gọi lại metadata no-store và POST lấy URL, mở cửa sổ ngay từ user gesture, không giữ signed URL; URL phải HTTPS và còn hơn 1 giây, nếu quá ngắn/hết hạn xin lại đúng một lần; 73/73 unit test PASS.
 - [x] Hoàn thiện phần Evaluation trong API-gap: form validate score/ba criteria/note đúng DTO, POST không retry; success hoặc exact `409 EVALUATION_ALREADY_EXISTS` đều chuyển thành “Đã đánh giá” trong React session dù backend không có GET; 75/75 unit test PASS. Gap Offer vẫn chờ Notification handoff thật.
 - [x] Khóa ba prefix Application trong `applicationApiRoutes.ts` và refactor toàn adapter dùng chung: collection/resource `/applications/`, bookmark exact `/applications/bookmarks`, response Offer `/offers/`; contract test chặn ghép Offer nhầm vào Application; 76/76 unit test PASS.
+- [x] Tạo route `/ai` và session boundary cho chatbot: sinh UUID v4 canonical lowercase ở client sau hydration, giữ duy nhất trong React memory suốt hội thoại, tạo mới khi người dùng chủ động bắt đầu lại; kiểm response phải khớp exact session; 78/78 unit test PASS.
 - [ ] Nối các màn trên với API Gateway/Auth session thật, hoàn thiện error mapping/409/429/503 và thêm component/E2E test trước khi đóng checkbox endpoint bên dưới.
 >
 > Danh sách bám theo **48 endpoint user-facing có thật**, khảo sát trực tiếp từ code controller và đối chiếu với `infra/nginx/nginx.conf` — không suy đoán từ tài liệu.
@@ -1454,7 +1455,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 
 #### AI chatbot — 1 endpoint
 
-- [ ] Tự sinh và giữ `session_id`: backend **không có** endpoint tạo session. Phải sinh UUID v4 canonical chữ thường và giữ nguyên suốt hội thoại; sai định dạng là `422`.
+- [x] Tự sinh và giữ `session_id`: backend **không có** endpoint tạo session. Phải sinh UUID v4 canonical chữ thường và giữ nguyên suốt hội thoại; sai định dạng là `422`.
 - [ ] Tự dựng toàn bộ khung hội thoại: API chỉ trả một câu trả lời cho một tin nhắn và **không có endpoint đọc lại lịch sử** (lịch sử ở Redis chỉ để làm ngữ cảnh cho model). Reload trang là mất hiển thị dù server vẫn còn ngữ cảnh.
 - [ ] Khoá gửi theo từng session: chỉ một request `/ai/chat` đang bay cho mỗi `session_id`; gặp `409 CHAT_SESSION_BUSY` thì báo và thử lại, **tuyệt đối không gửi trùng** vì server có thể đã ghi lượt đó vào lịch sử.
 - [ ] Ba loại backpressure ba cách xử lý: `429 CHAT_RATE_LIMITED` (đếm ngược theo `Retry-After`, chặn ô nhập), `503 CHAT_BUSY` (có `Retry-After`, tự retry ngắn với backoff), `503 CHAT_PROVIDER_UNAVAILABLE`/`CHAT_HISTORY_UNAVAILABLE` (không có `Retry-After`, để người dùng bấm thử lại).

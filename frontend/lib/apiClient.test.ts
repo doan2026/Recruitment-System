@@ -6,6 +6,7 @@ import {
   clearApiSession,
   buildQuery,
   collectionPath,
+  createChatSessionId,
   getApiSessionAccountId,
   getApiSessionRevision,
   parseRetryAfter,
@@ -37,6 +38,7 @@ import { AI_MATCH_POLL_DELAY_MS, aiMatchNotReadyView } from "./aiMatchRecovery";
 import { isCvDownloadFresh, resolveFreshCvDownload } from "./recruiterCvAccess";
 import { isEvaluationAlreadyExists, normalizeEvaluationDraft } from "./applicationEvaluation";
 import { APPLICATION_API_ROUTES, applicationResourceRoute, offerResponseRoute, recruiterDashboardRoute } from "./applicationApiRoutes";
+import { assertChatResponseSession } from "./aiChatSession";
 import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, validateRecruiterApplicationFilters, type RecruiterApplicationFilterDraft } from "./recruiterApplicationTable";
 import {
   normalizeInvitationEmail,
@@ -107,6 +109,21 @@ test("canonical UUID v4 accepts lowercase only", () => {
   assert.throws(
     () => assertCanonicalUuidV4(uuid.toUpperCase()),
     (error: unknown) => error instanceof ApiClientError && error.code === "INVALID_UUID_V4",
+  );
+});
+
+test("AI chat creates one canonical lowercase UUID v4 without a backend session endpoint", () => {
+  const generated = createChatSessionId(() => "018F47A2-6F4D-4B7D-8C91-FF02D770A944");
+  assert.equal(generated, "018f47a2-6f4d-4b7d-8c91-ff02d770a944");
+  assert.equal(createChatSessionId(() => generated), generated);
+});
+
+test("AI chat rejects a response belonging to another in-memory session", () => {
+  const expected = "018f47a2-6f4d-4b7d-8c91-ff02d770a944";
+  assert.equal(assertChatResponseSession(expected, expected), expected);
+  assert.throws(
+    () => assertChatResponseSession(expected, "118f47a2-6f4d-4b7d-8c91-ff02d770a944"),
+    (error: unknown) => error instanceof ApiClientError && error.code === "CHAT_SESSION_MISMATCH",
   );
 });
 
