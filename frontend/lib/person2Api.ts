@@ -29,6 +29,7 @@ import type {
 } from "./companyMediaUpload";
 import { assertChatResponseSession } from "./aiChatSession";
 import { withAiChatSessionLock } from "./aiChatSessionLock";
+import { normalizeAiChatMessage } from "./aiChatMessage";
 import * as demo from "./demoData";
 
 export type {
@@ -341,7 +342,8 @@ export async function sendAiChatMessage(
   signal?: AbortSignal,
 ): Promise<ApiEnvelope<AiChatReply>> {
   const canonicalSessionId = assertCanonicalUuidV4(sessionId, "session_id");
-  const body = selectContractFields({ session_id: canonicalSessionId, message }, ["session_id", "message"]);
+  const normalizedMessage = normalizeAiChatMessage(message);
+  const body = selectContractFields({ session_id: canonicalSessionId, message: normalizedMessage }, ["session_id", "message"]);
 
   return withAiChatSessionLock(canonicalSessionId, async () => {
     if (isDemoPerson2Api) {
