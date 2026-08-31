@@ -29,6 +29,7 @@ import {
   nextOfferVersions,
 } from "./applicationVersioning";
 import { offerResponseRecoveryView } from "./offerResponseRecovery";
+import { OFFER_ATTACHMENT_SUPPORT, emptyOfferAttachment, normalizeOfferAttachment } from "./offerAttachment";
 import { candidateApplicationActions, recruiterApplicationActions, validateRecruiterApplicationStatus } from "./applicationStateMachine";
 import { applicationCooldownView } from "./applicationCooldown";
 import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, validateRecruiterApplicationFilters, type RecruiterApplicationFilterDraft } from "./recruiterApplicationTable";
@@ -330,6 +331,25 @@ test("every Application write command carries its latest expected version", () =
     expectedOfferVersion: 2,
     expectedApplicationVersion: 8,
   });
+});
+
+test("Offer attachment is either one confirmed pair or fully absent", () => {
+  const fileId = "018f47a2-6f4d-4b7d-8c91-ff02d770a944";
+  assert.deepEqual(normalizeOfferAttachment({ fileId, fileUrl: "https://media.test/offer.pdf" }), {
+    fileId,
+    fileUrl: "https://media.test/offer.pdf",
+  });
+  assert.equal(normalizeOfferAttachment(emptyOfferAttachment()), null);
+  assert.throws(
+    () => normalizeOfferAttachment({ fileId }),
+    (error: unknown) => error instanceof ApiClientError && error.code === "INVALID_OFFER_FILE_PAIR",
+  );
+  assert.throws(
+    () => normalizeOfferAttachment({ fileId, fileUrl: "file:///tmp/offer.pdf" }),
+    (error: unknown) => error instanceof ApiClientError && error.code === "INVALID_OFFER_FILE_URL",
+  );
+  assert.equal(OFFER_ATTACHMENT_SUPPORT.available, false);
+  assert.match(OFFER_ATTACHMENT_SUPPORT.description, /OFFER_LETTER/);
 });
 
 test("mutation responses become the only source for the next command versions", () => {

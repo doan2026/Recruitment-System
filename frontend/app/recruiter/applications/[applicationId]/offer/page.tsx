@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../../../components/ui";
 import { ApiClientError, toUserMessage } from "../../../../../lib/apiClient";
+import { OFFER_ATTACHMENT_SUPPORT } from "../../../../../lib/offerAttachment";
 import { getApplicationDetail, sendApplicationOffer, type CandidateApplication } from "../../../../../lib/person2Api";
 
 export default function RecruiterSendOfferPage() {
@@ -107,6 +108,13 @@ export default function RecruiterSendOfferPage() {
             <div className="field"><label className="label" htmlFor="offer-position">Vị trí</label><input id="offer-position" className="input" maxLength={200} value={position} onChange={(event) => setPosition(event.target.value)} /></div>
             <div className="field"><label className="label" htmlFor="offer-expires">Hạn phản hồi</label><input id="offer-expires" className="input" type="datetime-local" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} /></div>
             <div className="field span-2"><label className="label" htmlFor="offer-note">Ghi chú</label><textarea id="offer-note" className="textarea resize-none" maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} /></div>
+            <div className="field span-2">
+              <label className="label" htmlFor="offer-file">File Offer (tùy chọn)</label>
+              <input id="offer-file" className="input" type="file" accept="application/pdf,.pdf" disabled aria-describedby="offer-file-support" />
+              <div id="offer-file-support" className="notice notice-warning" role="status">
+                <strong>{OFFER_ATTACHMENT_SUPPORT.title}.</strong> {OFFER_ATTACHMENT_SUPPORT.description}
+              </div>
+            </div>
           </div>
           {formError ? <p className="form-error" role="alert">{formError}</p> : null}
           {submitError ? <p className="notice notice-danger" role="alert"><strong>Chưa gửi được Offer.</strong> {submitError}</p> : null}

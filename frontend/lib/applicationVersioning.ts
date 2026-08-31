@@ -1,4 +1,5 @@
 import { ApiClientError } from "./apiClientCore";
+import { emptyOfferAttachment, normalizeOfferAttachment } from "./offerAttachment";
 import type { ApplicationStatus } from "./demoData";
 
 export type OfferDecision = "ACCEPTED" | "DECLINED";
@@ -48,13 +49,14 @@ export interface SendOfferValues {
 }
 
 export function buildSendOfferCommand(input: SendOfferValues) {
+  const attachment = normalizeOfferAttachment(input) ?? emptyOfferAttachment();
   return {
     salary: input.salary,
     startDate: input.startDate,
     position: input.position.trim(),
     note: input.note?.trim() || undefined,
-    fileId: input.fileId,
-    fileUrl: input.fileUrl,
+    fileId: attachment.fileId,
+    fileUrl: attachment.fileUrl,
     expiresAt: input.expiresAt,
     expectedApplicationVersion: exactVersion(input.applicationVersion, "expectedApplicationVersion"),
   };
