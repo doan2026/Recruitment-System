@@ -45,6 +45,7 @@ import { isAiChatSessionBusy, withAiChatSessionLock } from "./aiChatSessionLock"
 import { classifyAiChatBackpressure, runAiChatWithBusyRetry } from "./aiChatBackpressure";
 import { classifyAiChatFeatureState } from "./aiChatFeatureState";
 import { normalizeAiChatMessage, validateAiChatMessage } from "./aiChatMessage";
+import { normalizeAiChatAnswer, presentAiChatResponse } from "./aiChatResponse";
 import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, validateRecruiterApplicationFilters, type RecruiterApplicationFilterDraft } from "./recruiterApplicationTable";
 import {
   normalizeInvitationEmail,
@@ -305,6 +306,35 @@ test("AI chat rejects the UTF-8 byte limit before the character-count constraint
   assert.equal(oversized.byteCount, 8_004);
   assert.equal(oversized.errorCode, "CHAT_MESSAGE_TOO_MANY_BYTES");
   assert.throws(() => normalizeAiChatMessage("😀".repeat(2_001)), (error: unknown) => error instanceof ApiClientError && error.status === 422);
+});
+
+test("AI chat keeps model HTML and markdown-like content as literal text", () => {
+  const raw = "Không mở <script>evil()</script> hay [link](https://evil.invalid).";
+  const presentation = presentAiChatResponse(raw);
+  assert.equal(presentation.text, raw);
+  assert.equal(presentation.jobLines.length, 0);
+  assert.equal(presentation.hasSuitableJobsIntent, false);
+});
+
+test("AI chat recognizes only deterministic numbered Job lines and exposes UUID as plain text", () => {
+  const answer = [
+    "Mình tìm thấy các gợi ý việc làm hiện tại cho bạn:",
+    "1. Backend Engineer — CareerHub — Hà Nội; Toàn thời gian; Lương thỏa thuận; mã việc 30000000-0000-4000-8000-000000000001",
+    "2. AI Engineer — CareerHub — Remote; Toàn thời gian; 20–30 VND; mã việc 30000000-0000-4000-8000-000000000002",
+    "Hãy mở màn “Việc làm phù hợp” để xem chi tiết và trạng thái mới nhất.",
+  ].join("\n");
+  const presentation = presentAiChatResponse(answer);
+  assert.equal(presentation.jobLines.length, 2);
+  assert.equal(presentation.jobLines[0].jobId, "30000000-0000-4000-8000-000000000001");
+  assert.match(presentation.jobLines[0].text, /mã việc 30000000/);
+  assert.doesNotMatch(presentation.jobLines[0].text, /href|https?:/i);
+  assert.equal(presentation.hasSuitableJobsIntent, true);
+});
+
+test("AI chat rejects unsafe or unbounded response bodies before rendering", () => {
+  assert.throws(() => normalizeAiChatAnswer("   "), (error: unknown) => error instanceof ApiClientError && error.code === "INVALID_API_RESPONSE");
+  assert.throws(() => normalizeAiChatAnswer("unsafe\u0000answer"), (error: unknown) => error instanceof ApiClientError && error.code === "INVALID_API_RESPONSE");
+  assert.throws(() => normalizeAiChatAnswer("x".repeat(8_001)), (error: unknown) => error instanceof ApiClientError && error.code === "INVALID_API_RESPONSE");
 });
 
 test("query and body allowlists reject unknown fields", () => {

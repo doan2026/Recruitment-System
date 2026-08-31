@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { EmptyState, PageHeader, StatusBadge } from "../../components/ui";
 import { createChatSessionId, toUserMessage } from "../../lib/apiClient";
@@ -8,7 +9,26 @@ import { classifyAiChatBackpressure, runAiChatWithBusyRetry } from "../../lib/ai
 import { isAiChatSessionBusy } from "../../lib/aiChatSessionLock";
 import { classifyAiChatFeatureState, type AiChatFeatureState } from "../../lib/aiChatFeatureState";
 import { validateAiChatMessage } from "../../lib/aiChatMessage";
+import { presentAiChatResponse } from "../../lib/aiChatResponse";
 import { sendAiChatMessage } from "../../lib/person2Api";
+
+function AssistantMessage({ content }: { content: string }) {
+  const presentation = presentAiChatResponse(content);
+  return (
+    <div className="message bot">
+      {presentation.jobLines.length > 0 ? (
+        <>
+          {presentation.introduction ? <p className="chat-response-text">{presentation.introduction}</p> : null}
+          <ol className="chat-job-list">
+            {presentation.jobLines.map((item) => <li key={item.jobId}>{item.text}</li>)}
+          </ol>
+          {presentation.conclusion ? <p className="chat-response-text">{presentation.conclusion}</p> : null}
+        </>
+      ) : <p className="chat-response-text">{presentation.text}</p>}
+      {presentation.hasSuitableJobsIntent ? <Link className="btn btn-secondary chat-response-cta" href="/candidate/jobs#suitable-jobs">Mở Việc làm phù hợp</Link> : null}
+    </div>
+  );
+}
 
 export default function AiAssistantPage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -121,9 +141,9 @@ export default function AiAssistantPage() {
           </div>
           <div className="chat-box" aria-live="polite" aria-label="Lịch sử hội thoại trong tab hiện tại">
             {messages.map((message) => (
-              <div className={`message ${message.role === "assistant" ? "bot" : "user"}`} key={message.id}>
-                {message.content}
-              </div>
+              message.role === "assistant"
+                ? <AssistantMessage content={message.content} key={message.id} />
+                : <div className="message user" key={message.id}>{message.content}</div>
             ))}
             {pending ? <div className="message bot" role="status">AI đang soạn câu trả lời…</div> : null}
           </div>
