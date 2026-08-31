@@ -1,11 +1,12 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { PageHeader, StatusBadge } from "../../components/ui";
+import { EmptyState, PageHeader, StatusBadge } from "../../components/ui";
 import { createChatSessionId, toUserMessage } from "../../lib/apiClient";
 import { appendAiChatExchange, createAiChatConversation, type AiChatMessage } from "../../lib/aiChatConversation";
 import { classifyAiChatBackpressure, runAiChatWithBusyRetry } from "../../lib/aiChatBackpressure";
 import { isAiChatSessionBusy } from "../../lib/aiChatSessionLock";
+import { classifyAiChatFeatureState, type AiChatFeatureState } from "../../lib/aiChatFeatureState";
 import { sendAiChatMessage } from "../../lib/person2Api";
 
 export default function AiAssistantPage() {
@@ -16,6 +17,7 @@ export default function AiAssistantPage() {
   const [error, setError] = useState("");
   const [sessionBusy, setSessionBusy] = useState(false);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
+  const [featureState, setFeatureState] = useState<AiChatFeatureState>(null);
   const exchangeSequence = useRef(0);
 
   useEffect(() => {
@@ -35,6 +37,7 @@ export default function AiAssistantPage() {
     setError("");
     setSessionBusy(false);
     setCooldownSeconds(0);
+    setFeatureState(null);
     exchangeSequence.current = 0;
   }
 
@@ -58,7 +61,11 @@ export default function AiAssistantPage() {
       ));
       setDraft("");
     } catch (reason: unknown) {
-      if (isAiChatSessionBusy(reason)) {
+      const nextFeatureState = classifyAiChatFeatureState(reason);
+      if (nextFeatureState) {
+        setFeatureState(nextFeatureState);
+        setError("");
+      } else if (isAiChatSessionBusy(reason)) {
         setSessionBusy(true);
         setError("Phiên đang xử lý một tin nhắn khác. Hãy đợi rồi bấm Thử lại; hệ thống không tự gửi lại để tránh ghi trùng lịch sử.");
       } else {
@@ -79,6 +86,18 @@ export default function AiAssistantPage() {
     } finally {
       setPending(false);
     }
+  }
+
+  if (featureState === "hidden") {
+    return <main><PageHeader eyebrow="CANDIDATE · AI ASSISTANT" title="Trợ lý nghề nghiệp" /><EmptyState title="Tính năng chưa được mở" description="Chatbot chưa được cấu hình trong môi trường này nên khung trò chuyện đã được ẩn." /></main>;
+  }
+
+  if (featureState === "forbidden") {
+    return <main><PageHeader eyebrow="CANDIDATE · AI ASSISTANT" title="Trợ lý nghề nghiệp" /><EmptyState title="Tài khoản không phù hợp" description="Chatbot chỉ dành cho vai trò CANDIDATE. Hãy chuyển sang tài khoản ứng viên để sử dụng." /></main>;
+  }
+
+  if (featureState === "reauthenticate") {
+    return <main><PageHeader eyebrow="CANDIDATE · AI ASSISTANT" title="Trợ lý nghề nghiệp" /><EmptyState title="Phiên đăng nhập đã hết hạn" description="Auth không làm mới được phiên. Hãy đăng nhập lại bằng tài khoản ứng viên rồi mở lại chatbot." /></main>;
   }
 
   return (

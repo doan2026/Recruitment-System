@@ -4,6 +4,7 @@ import {
   ApiClientError,
   assertCanonicalUuidV4,
   clearApiSession,
+  configureApiSessionRefresh,
   buildQuery,
   collectionPath,
   createChatSessionId,
@@ -42,6 +43,7 @@ import { assertChatResponseSession } from "./aiChatSession";
 import { appendAiChatExchange, createAiChatConversation } from "./aiChatConversation";
 import { isAiChatSessionBusy, withAiChatSessionLock } from "./aiChatSessionLock";
 import { classifyAiChatBackpressure, runAiChatWithBusyRetry } from "./aiChatBackpressure";
+import { classifyAiChatFeatureState } from "./aiChatFeatureState";
 import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, validateRecruiterApplicationFilters, type RecruiterApplicationFilterDraft } from "./recruiterApplicationTable";
 import {
   normalizeInvitationEmail,
@@ -210,6 +212,69 @@ test("AI chat never auto-retries rate, provider or history failures", async () =
     await assert.rejects(runAiChatWithBusyRetry(async () => { calls += 1; throw error; }));
     assert.equal(calls, 1);
   }
+});
+
+test("AI chat feature states distinguish disabled, wrong role and exhausted authentication", () => {
+  assert.equal(classifyAiChatFeatureState(new ApiClientError({ code: "CHAT_NOT_CONFIGURED", status: 503 })), "hidden");
+  assert.equal(classifyAiChatFeatureState(new ApiClientError({ code: "CHAT_ACCESS_FORBIDDEN", status: 403 })), "forbidden");
+  assert.equal(classifyAiChatFeatureState(new ApiClientError({ code: "AUTH_INVALID", status: 401 })), "reauthenticate");
+  assert.equal(classifyAiChatFeatureState(new ApiClientError({ code: "CHAT_BUSY", status: 503 })), null);
+});
+
+test("private API refreshes the same account once and retries a rejected request with the new access token", async () => {
+  setApiSession({ token: "expired-token", accountId: "candidate-refresh" });
+  const revision = getApiSessionRevision();
+  let refreshCalls = 0;
+  const authorizations: Array<string | null> = [];
+  configureApiSessionRefresh(async () => {
+    refreshCalls += 1;
+    return { token: "fresh-token", accountId: "candidate-refresh" };
+  });
+  let requests = 0;
+  const response = await requestApi<{ answer: string }>("/ai/chat", {
+    method: "POST",
+    privateData: true,
+    maxRetries: 0,
+    body: { session_id: "018f47a2-6f4d-4b7d-8c91-ff02d770a944", message: "hello" },
+    fetcher: async (_input, init) => {
+      requests += 1;
+      authorizations.push(new Headers(init?.headers).get("authorization"));
+      return requests === 1
+        ? new Response(JSON.stringify({ code: "AUTH_INVALID" }), { status: 401, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify({ data: { answer: "ok" }, meta: null }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+  assert.equal(response.data.answer, "ok");
+  assert.equal(refreshCalls, 1);
+  assert.equal(requests, 2);
+  assert.deepEqual(authorizations, ["Bearer expired-token", "Bearer fresh-token"]);
+  assert.equal(getApiSessionRevision(), revision);
+  configureApiSessionRefresh(null);
+  clearApiSession();
+});
+
+test("private API never loops refresh and clears session after a second 401", async () => {
+  setApiSession({ token: "expired-token", accountId: "candidate-refresh-fails" });
+  let refreshCalls = 0;
+  let requests = 0;
+  configureApiSessionRefresh(async () => {
+    refreshCalls += 1;
+    return { token: "still-invalid", accountId: "candidate-refresh-fails" };
+  });
+  await assert.rejects(requestApi("/ai/chat", {
+    method: "POST",
+    privateData: true,
+    maxRetries: 0,
+    body: {},
+    fetcher: async () => {
+      requests += 1;
+      return new Response(JSON.stringify({ code: "AUTH_INVALID" }), { status: 401, headers: { "content-type": "application/json" } });
+    },
+  }), (error: unknown) => error instanceof ApiClientError && error.status === 401);
+  assert.equal(refreshCalls, 1);
+  assert.equal(requests, 2);
+  assert.equal(getApiSessionAccountId(), null);
+  configureApiSessionRefresh(null);
 });
 
 test("query and body allowlists reject unknown fields", () => {
