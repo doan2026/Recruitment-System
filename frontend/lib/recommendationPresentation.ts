@@ -73,3 +73,21 @@ export function recommendationFallbackView(reason?: FallbackReason): Recommendat
       return null;
   }
 }
+
+export function canLoadMoreRecommendations(
+  source: RecommendationSource | null,
+  nextCursor: string | null,
+): boolean {
+  return source === "AI" && Boolean(nextCursor);
+}
+
+export function mergeRecommendationPage<T extends { id: string }>(
+  current: T[],
+  incoming: T[],
+  continuation: boolean,
+): T[] {
+  if (!continuation) return incoming;
+  const byId = new Map(current.map((item) => [item.id, item]));
+  for (const item of incoming) byId.set(item.id, item);
+  return [...byId.values()];
+}
