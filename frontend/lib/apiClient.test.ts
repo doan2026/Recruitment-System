@@ -32,7 +32,7 @@ import {
   roleAfterOwnershipTransfer,
   withoutRemovedMember,
 } from "./companyMembership";
-import { nextRecruiterJobStatus, recruiterJobActionLabel, recruiterJobActions } from "./jobLifecycle";
+import { isRejectedRecruiterJob, nextRecruiterJobStatus, recruiterJobActionLabel, recruiterJobActions, recruiterJobEditLabel } from "./jobLifecycle";
 import {
   normalizeCompanyCreate,
   validateCompanyCreate,
@@ -597,4 +597,12 @@ test("recruiter Job action copy and target status match backend semantics", () =
   assert.equal(nextRecruiterJobStatus("SUBMIT_FOR_APPROVAL"), "PENDING_APPROVAL");
   assert.equal(recruiterJobActionLabel("CLOSE"), "Đóng tin");
   assert.equal(nextRecruiterJobStatus("CLOSE"), "CLOSED");
+});
+
+test("rejected recruiter Jobs expose review feedback and a specific edit action", () => {
+  assert.equal(isRejectedRecruiterJob("DRAFT", "Bổ sung mô tả"), true);
+  assert.equal(isRejectedRecruiterJob("DRAFT", "  "), false);
+  assert.equal(isRejectedRecruiterJob("PENDING_APPROVAL", "Góp ý cũ"), false);
+  assert.equal(recruiterJobEditLabel("DRAFT", "Bổ sung mô tả"), "Sửa theo góp ý");
+  assert.equal(recruiterJobEditLabel("DRAFT"), "Sửa tin");
 });

@@ -68,6 +68,7 @@
 |---|---|---|---|---|---|---|---|
 | Create job | Lưu bản nháp | khóa submit | ở form/list | status inline | giữ dữ liệu + lỗi field | field lỗi đầu tiên | P16.N2 Job |
 | Job lifecycle | Gửi admin duyệt / Đóng tin | khóa action theo job | recruiter list | dùng status từ response | giữ row + safe error | action status | P16.N2 Job |
+| Edit rejected job | Sửa theo góp ý / Lưu và gửi admin duyệt | khóa form; PUT rồi PATCH tuần tự | edit route | status PENDING_APPROVAL từ response | PUT đã thành công thì chỉ retry PATCH; không lưu lặp | lỗi đầu tiên hoặc action gửi lại | P16.N2 Job |
 | Create company | Empty-state CTA | khóa submit | company profile | badge PENDING | giữ form + safe error | field lỗi đầu tiên | P16.N2 Company |
 | Edit company | Lưu thay đổi; legal change ở VERIFIED mở dialog | khóa submit/dialog action | ở company | badge theo response + status inline | hủy giữ draft; 409 reload/merge | dialog/form | P16.N2 Company |
 | Resubmit company verification | Gửi lại để xác minh | khóa nút, giữ trạng thái hiện tại | ở company | badge PENDING + status inline | 409 tải resource đúng một lần, không retry mutation | block trạng thái xác minh | P16.N2 Company |

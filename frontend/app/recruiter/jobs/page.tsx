@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { TransientRecoveryState } from "../../../components/TransientRecoveryState";
 import { EmptyState, LoadingState, Metric, PageHeader, StatusBadge } from "../../../components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
-import { recruiterJobActionLabel, recruiterJobActions, type RecruiterJobAction } from "../../../lib/jobLifecycle";
+import { isRejectedRecruiterJob, recruiterJobActionLabel, recruiterJobActions, recruiterJobEditLabel, type RecruiterJobAction } from "../../../lib/jobLifecycle";
 import { closeRecruiterJob, getRecruiterJobs, submitJobForApproval, type Job, type JobStatus } from "../../../lib/person2Api";
 
 export default function RecruiterJobsPage() {
@@ -119,12 +119,21 @@ export default function RecruiterJobsPage() {
               <thead><tr><th scope="col">Vị trí</th><th scope="col">Trạng thái</th><th scope="col">Hạn nộp</th><th scope="col">Phụ trách</th><th scope="col">Thao tác</th></tr></thead>
               <tbody>{visibleJobs.map((job) => (
                 <tr key={job.id}>
-                  <td><strong>{job.title}</strong><div className="help">{job.location} · {job.department}</div></td>
+                  <td>
+                    <strong>{job.title}</strong><div className="help">{job.location} · {job.department}</div>
+                    {isRejectedRecruiterJob(job.status, job.rejectionReason) ? (
+                      <div className="job-rejection-summary" role="note">
+                        <strong>Admin yêu cầu chỉnh sửa</strong>
+                        <span>{job.rejectionReason}</span>
+                      </div>
+                    ) : null}
+                  </td>
                   <td><StatusBadge tone={job.status === "PUBLISHED" ? "success" : job.status === "DRAFT" ? "neutral" : job.status === "EXPIRED" ? "danger" : "warning"}>{job.status}</StatusBadge></td>
                   <td>{new Date(job.deadline).toLocaleDateString("vi-VN")}</td>
                   <td>{job.ownerName}<div className="help">{job.memberRole ?? "MEMBER"}</div></td>
                   <td><div className="btn-group">
                     <Link className="btn btn-ghost" href={`/recruiter/jobs/${job.id}`}>Pipeline</Link>
+                    {job.status === "DRAFT" ? <Link className={isRejectedRecruiterJob(job.status, job.rejectionReason) ? "btn btn-warning" : "btn btn-ghost"} href={`/recruiter/jobs/${job.id}/edit`}>{recruiterJobEditLabel(job.status, job.rejectionReason)}</Link> : null}
                     {recruiterJobActions(job.status).map((action) => <button key={action} className={action === "CLOSE" ? "btn btn-warning" : "btn btn-secondary"} type="button" disabled={pendingJobId === job.id} aria-busy={pendingJobId === job.id} onClick={() => { void runJobAction(job, action); }}>{pendingJobId === job.id ? "Đang xử lý…" : recruiterJobActionLabel(action)}</button>)}
                   </div></td>
                 </tr>
