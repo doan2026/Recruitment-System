@@ -36,6 +36,7 @@ import { activeJobsMetricView, bookmarkCardView, dashboardWarningView } from "./
 import { AI_MATCH_POLL_DELAY_MS, aiMatchNotReadyView } from "./aiMatchRecovery";
 import { isCvDownloadFresh, resolveFreshCvDownload } from "./recruiterCvAccess";
 import { isEvaluationAlreadyExists, normalizeEvaluationDraft } from "./applicationEvaluation";
+import { APPLICATION_API_ROUTES, applicationResourceRoute, offerResponseRoute, recruiterDashboardRoute } from "./applicationApiRoutes";
 import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, validateRecruiterApplicationFilters, type RecruiterApplicationFilterDraft } from "./recruiterApplicationTable";
 import {
   normalizeInvitationEmail,
@@ -86,6 +87,18 @@ process.env.NEXT_PUBLIC_API_BASE_URL = "http://gateway.test";
 test("collection paths always preserve the gateway trailing slash", () => {
   assert.equal(collectionPath("/applications"), "/applications/");
   assert.equal(collectionPath("/jobs/"), "/jobs/");
+});
+
+test("Application, bookmark and Offer paths preserve their three distinct gateway prefixes", () => {
+  assert.deepEqual(APPLICATION_API_ROUTES, {
+    collection: "/applications/",
+    bookmarks: "/applications/bookmarks",
+    offers: "/offers/",
+  });
+  assert.equal(applicationResourceRoute("application-id", "cv/download-url"), "/applications/application-id/cv/download-url");
+  assert.equal(recruiterDashboardRoute(), "/applications/stats");
+  assert.equal(offerResponseRoute("offer-id"), "/offers/offer-id/respond");
+  assert.doesNotMatch(offerResponseRoute("offer-id"), /^\/applications\//);
 });
 
 test("canonical UUID v4 accepts lowercase only", () => {
