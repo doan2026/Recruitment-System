@@ -40,6 +40,7 @@ import { isEvaluationAlreadyExists, normalizeEvaluationDraft } from "./applicati
 import { APPLICATION_API_ROUTES, applicationResourceRoute, offerResponseRoute, recruiterDashboardRoute } from "./applicationApiRoutes";
 import { assertChatResponseSession } from "./aiChatSession";
 import { appendAiChatExchange, createAiChatConversation } from "./aiChatConversation";
+import { isAiChatSessionBusy, withAiChatSessionLock } from "./aiChatSessionLock";
 import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, validateRecruiterApplicationFilters, type RecruiterApplicationFilterDraft } from "./recruiterApplicationTable";
 import {
   normalizeInvitationEmail,
@@ -145,6 +146,25 @@ test("AI chat reset rebuilds display state because the backend exposes no histor
   assert.equal(changed.length, 3);
   assert.deepEqual(reset, first);
   assert.notEqual(reset, first);
+});
+
+test("AI chat permits only one in-flight request for each canonical session", async () => {
+  const sessionId = "018f47a2-6f4d-4b7d-8c91-ff02d770a944";
+  let release!: () => void;
+  const first = withAiChatSessionLock(sessionId, () => new Promise<string>((resolve) => { release = () => resolve("done"); }));
+  await assert.rejects(
+    withAiChatSessionLock(sessionId, async () => "duplicate"),
+    (error: unknown) => isAiChatSessionBusy(error),
+  );
+  release();
+  assert.equal(await first, "done");
+  assert.equal(await withAiChatSessionLock(sessionId, async () => "retry"), "retry");
+});
+
+test("AI chat recognizes only the exact 409 session-busy contract for manual retry", () => {
+  assert.equal(isAiChatSessionBusy(new ApiClientError({ code: "CHAT_SESSION_BUSY", status: 409 })), true);
+  assert.equal(isAiChatSessionBusy(new ApiClientError({ code: "CHAT_SESSION_BUSY", status: 503 })), false);
+  assert.equal(isAiChatSessionBusy(new ApiClientError({ code: "APPLICATION_CHANGED_CONCURRENTLY", status: 409 })), false);
 });
 
 test("query and body allowlists reject unknown fields", () => {
