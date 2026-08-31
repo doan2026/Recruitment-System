@@ -33,6 +33,7 @@ import { OFFER_ATTACHMENT_SUPPORT, emptyOfferAttachment, normalizeOfferAttachmen
 import { candidateApplicationActions, recruiterApplicationActions, validateRecruiterApplicationStatus } from "./applicationStateMachine";
 import { applicationCooldownView } from "./applicationCooldown";
 import { activeJobsMetricView, bookmarkCardView, dashboardWarningView } from "./applicationDegradedStates";
+import { AI_MATCH_POLL_DELAY_MS, aiMatchNotReadyView } from "./aiMatchRecovery";
 import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, validateRecruiterApplicationFilters, type RecruiterApplicationFilterDraft } from "./recruiterApplicationTable";
 import {
   normalizeInvitationEmail,
@@ -464,6 +465,24 @@ test("dashboard degradation preserves Application metrics and masks unavailable 
   assert.equal(activeJobsMetricView({ count: 7, available: true }).value, "7");
   assert.match(dashboardWarningView("JOB_SERVICE_UNAVAILABLE"), /thống kê hồ sơ/);
   assert.doesNotMatch(dashboardWarningView("UNKNOWN_DOWNSTREAM"), /UNKNOWN_DOWNSTREAM/);
+});
+
+test("AI match not-ready is pollable business readiness, never an optimistic conflict", () => {
+  const reasons = [
+    "CV_EMBEDDING_NOT_FOUND",
+    "JOB_EMBEDDING_NOT_FOUND",
+    "CV_AND_JOB_EMBEDDINGS_NOT_FOUND",
+    "EMBEDDING_MODEL_MISMATCH",
+  ];
+  const views = reasons.map((reason) => aiMatchNotReadyView(new ApiClientError({
+    code: "AI_MATCH_NOT_READY",
+    status: 409,
+    details: { reason },
+  })));
+  assert.ok(views.every((view) => view?.message && view.pollDelayMs === AI_MATCH_POLL_DELAY_MS));
+  assert.equal(new Set(views.map((view) => view?.message)).size, reasons.length);
+  assert.equal(aiMatchNotReadyView(new ApiClientError({ code: "APPLICATION_CHANGED_CONCURRENTLY", status: 409 })), null);
+  assert.equal(aiMatchNotReadyView(new ApiClientError({ code: "AI_MATCH_NOT_READY", status: 503 })), null);
 });
 
 test("Retry-After drives one bounded automatic retry before manual recovery", () => {
