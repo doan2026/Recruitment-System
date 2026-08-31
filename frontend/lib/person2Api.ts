@@ -11,6 +11,7 @@ import type { CompanyCreateValues } from "./companyForm";
 import type { RecruiterJobPayload } from "./jobForm";
 import type { PublicJobSearchFilters } from "./publicJobSearch";
 import type { CandidateRecommendationEmptyReason } from "./candidateRecommendation";
+import type { RecruiterApplicationQuery } from "./recruiterApplicationTable";
 import {
   buildApplicationStatusCommand,
   buildApplicationWithdrawCommand,
@@ -200,6 +201,14 @@ interface BackendApplicationListItem {
   appliedAt: string;
   updatedAt: string;
   version?: number;
+}
+
+interface BackendRecruiterApplicationPage {
+  items: BackendApplicationListItem[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
 }
 
 export interface ApplicationTransitionResult {
@@ -956,16 +965,49 @@ export async function submitCandidateApplication(
   return { ...response, data: toApplication(response.data) };
 }
 
-export async function getApplicationsByJob(jobId: string, signal?: AbortSignal): Promise<ApiEnvelope<CandidateApplication[]>> {
-  if (isDemoPerson2Api) return normalizeDemo(demo.getApplicationsByJob(jobId));
-  assertCanonicalUuidV4(jobId, "jobId");
-  const response = await requestApi<{ items: BackendApplicationListItem[] }>(API_PATHS.applications, {
+export async function getRecruiterApplications(
+  query: RecruiterApplicationQuery,
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<CandidateApplication[]>> {
+  if (isDemoPerson2Api) {
+    let items = [...demo.applications];
+    if (query.jobId) items = items.filter((item) => item.jobId === query.jobId);
+    if (query.status) items = items.filter((item) => item.status === query.status);
+    if (query.appliedFrom) items = items.filter((item) => Date.parse(item.createdAt) >= Date.parse(query.appliedFrom!));
+    if (query.appliedTo) items = items.filter((item) => Date.parse(item.createdAt) <= Date.parse(query.appliedTo!));
+    items.sort((left, right) => query.sort === "APPLIED_AT_ASC"
+      ? left.createdAt.localeCompare(right.createdAt)
+      : query.sort === "MATCH_SCORE_DESC"
+        ? (right.matchScore ?? -1) - (left.matchScore ?? -1)
+        : right.createdAt.localeCompare(left.createdAt));
+    const start = query.page * query.size;
+    const pageItems = items.slice(start, start + query.size);
+    return { data: pageItems, meta: { page: query.page, size: query.size, total: items.length, totalPages: Math.ceil(items.length / query.size) } };
+  }
+  if (query.jobId) assertCanonicalUuidV4(query.jobId, "jobId");
+  const response = await requestApi<BackendRecruiterApplicationPage>(API_PATHS.applications, {
     privateData: true,
     signal,
-    query: { job_id: jobId, page: 0, size: 100 },
-    allowedQueryKeys: ["job_id", "page", "size"],
+    query: {
+      job_id: query.jobId,
+      status: query.status,
+      appliedFrom: query.appliedFrom,
+      appliedTo: query.appliedTo,
+      skills: query.skills,
+      sort: query.sort,
+      page: query.page,
+      size: query.size,
+    },
+    allowedQueryKeys: ["job_id", "status", "appliedFrom", "appliedTo", "skills", "sort", "page", "size"],
   });
-  return { ...response, data: response.data.items.map(toApplication) };
+  return {
+    data: response.data.items.map(toApplication),
+    meta: { page: response.data.page, size: response.data.size, total: response.data.totalElements, totalPages: response.data.totalPages },
+  };
+}
+
+export async function getApplicationsByJob(jobId: string, signal?: AbortSignal): Promise<ApiEnvelope<CandidateApplication[]>> {
+  return getRecruiterApplications({ jobId, sort: "APPLIED_AT_DESC", page: 0, size: 100 }, signal);
 }
 
 export async function getApplicationDetail(

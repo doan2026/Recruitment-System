@@ -1,11 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { ApiClientError, toUserMessage } from "../lib/apiClient";
 import { recruiterApplicationActions, validateRecruiterApplicationStatus } from "../lib/applicationStateMachine";
-import { changeApplicationStatus, getApplicationsByJob, type CandidateApplication } from "../lib/person2Api";
+import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, validateRecruiterApplicationFilters, type RecruiterApplicationFilterDraft } from "../lib/recruiterApplicationTable";
+import { changeApplicationStatus, getRecruiterApplications, type CandidateApplication } from "../lib/person2Api";
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./ui";
+
+const DEFAULT_FILTERS: RecruiterApplicationFilterDraft = {
+  status: "ALL",
+  appliedFrom: "",
+  appliedTo: "",
+  skills: "",
+  sort: "APPLIED_AT_DESC",
+  size: 20,
+};
 
 export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
   const [applications, setApplications] = useState<CandidateApplication[]>([]);
@@ -17,15 +27,49 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
   const [rejectionReasons, setRejectionReasons] = useState<Record<string, string>>({});
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [reloadKey, setReloadKey] = useState(0);
+  const [filterDraft, setFilterDraft] = useState<RecruiterApplicationFilterDraft>(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState<RecruiterApplicationFilterDraft>(DEFAULT_FILTERS);
+  const [filterError, setFilterError] = useState("");
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [driftNotice, setDriftNotice] = useState("");
+  const expectedTotalRef = useRef<number | null>(null);
+  const seenPageIdsRef = useRef<Map<number, Set<string>>>(new Map());
 
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
     setLoading(true);
     setLoadError("");
-    getApplicationsByJob(jobId, controller.signal)
+    const query = normalizeRecruiterApplicationQuery(jobId, filters, page);
+    getRecruiterApplications(query, controller.signal)
       .then((response) => {
-        if (active) setApplications(response.data);
+        if (!active) return;
+        const actualTotal = Number(response.meta?.total ?? response.data.length);
+        const actualTotalPages = Math.max(1, Number(response.meta?.totalPages ?? 1));
+        const currentIds = response.data.map((application) => application.id);
+        const seenOnOtherPages = new Set(
+          [...seenPageIdsRef.current.entries()]
+            .filter(([seenPage]) => seenPage !== page)
+            .flatMap(([, ids]) => [...ids]),
+        );
+        if (shouldRestartOffsetApplications({ page, expectedTotal: expectedTotalRef.current, actualTotal, seenIds: seenOnOtherPages, currentIds })) {
+          expectedTotalRef.current = null;
+          seenPageIdsRef.current = new Map();
+          setDriftNotice("Danh sách vừa có hồ sơ mới hoặc thay đổi giữa các trang. CareerHub đã quay về trang đầu để tránh bỏ sót/trùng dữ liệu.");
+          setPage(0);
+          return;
+        }
+        if (page === 0) {
+          expectedTotalRef.current = actualTotal;
+          seenPageIdsRef.current = new Map([[0, new Set(currentIds)]]);
+        } else {
+          seenPageIdsRef.current.set(page, new Set(currentIds));
+        }
+        setApplications(response.data);
+        setTotal(actualTotal);
+        setTotalPages(actualTotalPages);
       })
       .catch((reason: unknown) => {
         if (active && !(reason instanceof ApiClientError && reason.code === "REQUEST_CANCELLED")) {
@@ -39,7 +83,33 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
       active = false;
       controller.abort();
     };
-  }, [jobId, reloadKey]);
+  }, [filters, jobId, page, reloadKey]);
+
+  function applyFilters(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const validationError = validateRecruiterApplicationFilters(filterDraft);
+    if (validationError) {
+      setFilterError(validationError);
+      return;
+    }
+    setFilterError("");
+    setDriftNotice("");
+    expectedTotalRef.current = null;
+    seenPageIdsRef.current = new Map();
+    setPage(0);
+    setFilters({ ...filterDraft });
+  }
+
+  function resetFilters() {
+    const defaults = { ...DEFAULT_FILTERS };
+    setFilterDraft(defaults);
+    setFilters(defaults);
+    setFilterError("");
+    setDriftNotice("");
+    expectedTotalRef.current = null;
+    seenPageIdsRef.current = new Map();
+    setPage(0);
+  }
 
   async function moveStatus(application: CandidateApplication, targetStatus: CandidateApplication["status"]) {
     if (pendingApplicationId) return;
@@ -70,6 +140,7 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
         notes: targetStatus === "REJECTED" ? reason?.trim() : item.notes,
       } : item));
       setActionStatus(`Đã chuyển hồ sơ sang ${response.data.toStatus}.`);
+      setReloadKey((value) => value + 1);
     } catch (requestError: unknown) {
       setActionError(toUserMessage(requestError));
       if (requestError instanceof ApiClientError && requestError.code === "APPLICATION_CHANGED_CONCURRENTLY") {
@@ -84,8 +155,19 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
     <section className="panel">
       <div className="section-head row-between">
         <div><h2>Pipeline hồ sơ</h2><p className="help">Action được suy từ trạng thái backend; mọi mutation dùng optimistic version hiện tại.</p></div>
-        {applications.length ? <span className="badge">{applications.length} hồ sơ</span> : null}
+        {total ? <span className="badge">{total} hồ sơ</span> : null}
       </div>
+      <form className="toolbar application-filter-toolbar" aria-label="Bộ lọc hồ sơ ứng tuyển" onSubmit={applyFilters} noValidate>
+        <div className="field"><label className="label" htmlFor="application-status-filter">Trạng thái</label><select id="application-status-filter" className="select" value={filterDraft.status} onChange={(event) => setFilterDraft((current) => ({ ...current, status: event.target.value as RecruiterApplicationFilterDraft["status"] }))}><option value="ALL">Tất cả</option><option value="APPLIED">APPLIED</option><option value="REVIEWING">REVIEWING</option><option value="INTERVIEW">INTERVIEW</option><option value="OFFER">OFFER</option><option value="HIRED">HIRED</option><option value="REJECTED">REJECTED</option><option value="WITHDRAWN">WITHDRAWN</option></select></div>
+        <div className="field"><label className="label" htmlFor="application-from">Nộp từ ngày</label><input id="application-from" className="input" type="date" value={filterDraft.appliedFrom} onChange={(event) => setFilterDraft((current) => ({ ...current, appliedFrom: event.target.value }))} /></div>
+        <div className="field"><label className="label" htmlFor="application-to">Nộp đến ngày</label><input id="application-to" className="input" type="date" value={filterDraft.appliedTo} onChange={(event) => setFilterDraft((current) => ({ ...current, appliedTo: event.target.value }))} /></div>
+        <div className="field"><label className="label" htmlFor="application-skills">Kỹ năng</label><input id="application-skills" className="input" value={filterDraft.skills} placeholder="React, Java" onChange={(event) => setFilterDraft((current) => ({ ...current, skills: event.target.value }))} /></div>
+        <div className="field"><label className="label" htmlFor="application-sort">Sắp xếp</label><select id="application-sort" className="select" value={filterDraft.sort} onChange={(event) => setFilterDraft((current) => ({ ...current, sort: event.target.value as RecruiterApplicationFilterDraft["sort"] }))}><option value="APPLIED_AT_DESC">Mới nộp trước</option><option value="APPLIED_AT_ASC">Cũ nộp trước</option><option value="MATCH_SCORE_DESC">Match score cao</option></select></div>
+        <div className="field"><label className="label" htmlFor="application-size">Số dòng</label><select id="application-size" className="select" value={filterDraft.size} onChange={(event) => setFilterDraft((current) => ({ ...current, size: Number(event.target.value) }))}><option value="10">10</option><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></div>
+        <div className="btn-group"><button className="btn btn-primary" type="submit" disabled={loading}>Áp dụng</button><button className="btn" type="button" disabled={loading} onClick={resetFilters}>Xóa lọc</button></div>
+      </form>
+      {filterError ? <p className="form-error" role="alert">{filterError}</p> : null}
+      {driftNotice ? <p className="notice" role="status">{driftNotice}</p> : null}
       {actionStatus ? <p className="notice notice-success" role="status">{actionStatus}</p> : null}
       {actionError ? <p className="notice notice-danger" role="alert"><strong>Chưa đổi được trạng thái.</strong> {actionError}</p> : null}
       {loadError ? <ErrorState message={loadError} onRetry={() => setReloadKey((value) => value + 1)} /> : null}
@@ -122,6 +204,13 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
           );
         })}
       </div>
+      {!loadError && total > 0 ? (
+        <nav className="btn-group pagination-actions" aria-label="Phân trang hồ sơ ứng tuyển">
+          <button className="btn" type="button" disabled={loading || page === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>Trang trước</button>
+          <span className="badge badge-muted" role="status">Trang {page + 1}/{totalPages}</span>
+          <button className="btn" type="button" disabled={loading || page + 1 >= totalPages} onClick={() => setPage((current) => current + 1)}>Trang sau</button>
+        </nav>
+      ) : null}
     </section>
   );
 }
