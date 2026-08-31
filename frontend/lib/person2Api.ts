@@ -31,6 +31,7 @@ import { assertChatResponseSession } from "./aiChatSession";
 import { withAiChatSessionLock } from "./aiChatSessionLock";
 import { normalizeAiChatMessage } from "./aiChatMessage";
 import { normalizeAiChatAnswer } from "./aiChatResponse";
+import { PERSON2_AI_PUBLIC_ROUTES, recruiterCandidateRecommendationsRoute } from "./person2AiPublicRoutes";
 import * as demo from "./demoData";
 
 export type {
@@ -357,7 +358,7 @@ export async function sendAiChatMessage(
       };
     }
 
-    const response = await requestApi<BackendAiChatReply>(API_PATHS.aiChat, {
+    const response = await requestApi<BackendAiChatReply>(PERSON2_AI_PUBLIC_ROUTES.chat, {
       method: "POST",
       privateData: true,
       signal,
@@ -1452,7 +1453,7 @@ export async function getRecommendationsForCandidate(
       },
     };
   }
-  const response = await requestApi<JobRecommendationResult>(API_PATHS.jobRecommended, {
+  const response = await requestApi<JobRecommendationResult>(PERSON2_AI_PUBLIC_ROUTES.candidateJobRecommendations, {
     privateData: true,
     signal,
     query: { limit: options.limit ?? 10, cursor: options.cursor },
@@ -1522,9 +1523,8 @@ export async function getRecruiterCandidateRecommendations(
       meta: null,
     };
   }
-  assertCanonicalUuidV4(jobId, "jobId");
   const response = await requestApi<RecruiterCandidateRecommendationResult>(
-    `${API_PATHS.jobs}${jobId}/recommended-candidates`,
+    recruiterCandidateRecommendationsRoute(jobId),
     {
       privateData: true,
       signal,

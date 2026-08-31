@@ -46,6 +46,7 @@ import { classifyAiChatBackpressure, runAiChatWithBusyRetry } from "./aiChatBack
 import { classifyAiChatFeatureState } from "./aiChatFeatureState";
 import { normalizeAiChatMessage, validateAiChatMessage } from "./aiChatMessage";
 import { normalizeAiChatAnswer, presentAiChatResponse } from "./aiChatResponse";
+import { assertPerson2AiPublicRoute, PERSON2_AI_PUBLIC_ROUTES, recruiterCandidateRecommendationsRoute } from "./person2AiPublicRoutes";
 import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, validateRecruiterApplicationFilters, type RecruiterApplicationFilterDraft } from "./recruiterApplicationTable";
 import {
   normalizeInvitationEmail,
@@ -335,6 +336,31 @@ test("AI chat rejects unsafe or unbounded response bodies before rendering", () 
   assert.throws(() => normalizeAiChatAnswer("   "), (error: unknown) => error instanceof ApiClientError && error.code === "INVALID_API_RESPONSE");
   assert.throws(() => normalizeAiChatAnswer("unsafe\u0000answer"), (error: unknown) => error instanceof ApiClientError && error.code === "INVALID_API_RESPONSE");
   assert.throws(() => normalizeAiChatAnswer("x".repeat(8_001)), (error: unknown) => error instanceof ApiClientError && error.code === "INVALID_API_RESPONSE");
+});
+
+test("Person 2 AI consumers route only through chat and public Job recommendation APIs", () => {
+  assert.equal(PERSON2_AI_PUBLIC_ROUTES.chat, "/ai/chat");
+  assert.equal(PERSON2_AI_PUBLIC_ROUTES.candidateJobRecommendations, "/jobs/recommended");
+  assert.equal(
+    recruiterCandidateRecommendationsRoute("018f47a2-6f4d-4b7d-8c91-ff02d770a944"),
+    "/jobs/018f47a2-6f4d-4b7d-8c91-ff02d770a944/recommended-candidates",
+  );
+});
+
+test("Person 2 FE rejects every internal AI provider route variant", () => {
+  for (const path of [
+    "/ai/match",
+    "/ai/match/",
+    "/ai/recommend/jobs",
+    "/ai/recommend/jobs?limit=3",
+    "/ai/recommend/candidates",
+    "/ai/recommend/candidates#private",
+  ]) {
+    assert.throws(
+      () => assertPerson2AiPublicRoute(path),
+      (error: unknown) => error instanceof ApiClientError && error.code === "AI_PUBLIC_ROUTE_REQUIRED",
+    );
+  }
 });
 
 test("query and body allowlists reject unknown fields", () => {

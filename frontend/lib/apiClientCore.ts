@@ -291,6 +291,7 @@ export function normalizeError(code: string): string {
     CHAT_MESSAGE_TOO_MANY_BYTES: "Tin nhắn vượt quá 8.000 byte UTF-8.",
     CHAT_MESSAGE_CONTROL_CHARACTER: "Tin nhắn chứa ký tự điều khiển không được hỗ trợ.",
     CHAT_MESSAGE_TOO_LONG: "Tin nhắn không được vượt quá 2.000 ký tự.",
+    AI_PUBLIC_ROUTE_REQUIRED: "FE chỉ được gọi các API AI công khai qua Gateway.",
     SESSION_ACCOUNT_REQUIRED: "Không thể thiết lập phiên vì thiếu định danh tài khoản.",
     UNKNOWN_REQUEST_FIELD: "Dữ liệu gửi đi chứa trường không được API hỗ trợ.",
     JOB_SEARCH_CURSOR_STALE: "Danh sách việc làm đã thay đổi. Hãy tải lại từ đầu.",
