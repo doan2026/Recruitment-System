@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { PageHeader, StatusBadge } from "../../components/ui";
 import { createChatSessionId, toUserMessage } from "../../lib/apiClient";
 import { appendAiChatExchange, createAiChatConversation, type AiChatMessage } from "../../lib/aiChatConversation";
+import { isAiChatSessionBusy } from "../../lib/aiChatSessionLock";
 import { sendAiChatMessage } from "../../lib/person2Api";
 
 export default function AiAssistantPage() {
@@ -12,6 +13,7 @@ export default function AiAssistantPage() {
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const [sessionBusy, setSessionBusy] = useState(false);
   const exchangeSequence = useRef(0);
 
   useEffect(() => {
@@ -23,6 +25,7 @@ export default function AiAssistantPage() {
     setMessages(createAiChatConversation());
     setDraft("");
     setError("");
+    setSessionBusy(false);
     exchangeSequence.current = 0;
   }
 
@@ -34,6 +37,7 @@ export default function AiAssistantPage() {
 
     setPending(true);
     setError("");
+    setSessionBusy(false);
     try {
       const response = await sendAiChatMessage(activeSessionId, message);
       exchangeSequence.current += 1;
@@ -45,7 +49,12 @@ export default function AiAssistantPage() {
       ));
       setDraft("");
     } catch (reason: unknown) {
-      setError(toUserMessage(reason));
+      if (isAiChatSessionBusy(reason)) {
+        setSessionBusy(true);
+        setError("Phiên đang xử lý một tin nhắn khác. Hãy đợi rồi bấm Thử lại; hệ thống không tự gửi lại để tránh ghi trùng lịch sử.");
+      } else {
+        setError(toUserMessage(reason));
+      }
     } finally {
       setPending(false);
     }
@@ -76,7 +85,7 @@ export default function AiAssistantPage() {
           <form className="chat-composer" noValidate onSubmit={sendMessage}>
             <label className="sr-only" htmlFor="ai-chat-message">Tin nhắn cho trợ lý nghề nghiệp</label>
             <textarea id="ai-chat-message" className="textarea resize-none" rows={3} value={draft} disabled={!sessionId || pending} placeholder="Hỏi về tìm việc hoặc quy trình ứng tuyển…" onChange={(event) => setDraft(event.target.value)} />
-            <button className="btn btn-primary" type="submit" disabled={!sessionId || pending || !draft.trim()}>{pending ? "Đang gửi…" : "Gửi tin nhắn"}</button>
+            <button className="btn btn-primary" type="submit" disabled={!sessionId || pending || !draft.trim()}>{pending ? "Đang gửi…" : sessionBusy ? "Thử lại" : "Gửi tin nhắn"}</button>
           </form>
         </section>
         <aside className="panel">
