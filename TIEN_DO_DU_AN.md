@@ -186,7 +186,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - **Công nghệ:** Next.js 14, React 18, TypeScript.
 - **Chức năng chính:** auth UI; hồ sơ/CV; công ty; job search/detail; apply/bookmark; recruiter pipeline/offer/dashboard; interview/video/chat/notification; admin console.
 - **Phụ thuộc:** API Gateway và hợp đồng API của toàn bộ backend.
-- **Trạng thái:** 🟡 React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter `demo|gateway` đã nối các read flow, cập nhật Company và tạo Company qua Gateway; các nền tảng safe error, conflict/transient recovery và private session boundary có unit test. `404 COMPANY_NOT_FOUND` đã thành onboarding thay vì lỗi. Auth UI thật, các mutation còn lại và E2E vẫn pending; P16.N2 hiện 27/52.
+- **Trạng thái:** 🟡 React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter `demo|gateway` đã nối các read flow, cập nhật Company và tạo Company qua Gateway; các nền tảng safe error, conflict/transient recovery và private session boundary có unit test. `404 COMPANY_NOT_FOUND` đã thành onboarding thay vì lỗi. Auth UI thật, các mutation còn lại và E2E vẫn pending; P16.N2 hiện 28/52.
 
 ## T14 — Tích hợp, kiểm thử và vận hành
 
@@ -1336,7 +1336,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [ ] Admin dashboard, company/job approval, user/report management và export.
 - [ ] Loading/error/empty state, responsive UI, accessibility và E2E test.
 
-### P16.N2 — FE tiêu thụ bốn service của Người 2 (27/52 tích hợp API thật; baseline UI đã có)
+### P16.N2 — FE tiêu thụ bốn service của Người 2 (28/52 tích hợp API thật; baseline UI đã có)
 
 > Bổ sung ngày 30/08/2026 theo yêu cầu. Đây là danh sách chi tiết task FE **chưa làm**, nhưng **chỉ giới hạn ở phần tiêu thụ bốn service của Người 2** (Company, Job & Search, Application, AI chatbot). FE của Auth, Profile, Media, Interview, Notification, Admin và Chat **không** nằm trong danh sách này. Bản thân việc code FE vẫn **thuộc Người 3** — mục này ghi ra để thấy backend của Người 2 đang chờ FE làm những gì, không phải chuyển việc sang Người 2.
 >
@@ -1374,6 +1374,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [x] Thêm pagination recommendation theo `nextCursor`: adapter gửi cursor/limit, UI append khử trùng và có IntersectionObserver kèm nút fallback; chỉ `source=AI` cùng cursor khác null mới bật tải thêm, PREFERENCES/LATEST luôn ép cursor null và ẩn điều khiển; stale continuation vẫn restart trang đầu đúng một lần; 51/51 unit test PASS.
 - [x] Thêm route recruiter `/recruiter/jobs/[jobId]` để xem gợi ý ứng viên: render candidate card/điểm/skills; đủ sáu empty reason với nội dung và CTA riêng; response HTTP 200 có mảng rỗng được coi là trạng thái nghiệp vụ bình thường, không rơi vào error state; 52/52 unit test PASS.
 - [x] Bảo vệ endpoint gợi ý ứng viên bằng debounce 300 ms và request lock: UI vô hiệu thao tác lặp trong lúc chờ; lỗi 429 được nhận theo HTTP status nên chịu được cả body gateway/service, đọc `Retry-After` từ header hoặc `details.retryAfterSeconds`, đếm ngược và chỉ tự thử lại một lần; 54/54 unit test PASS.
+- [x] Hoàn thiện bảng recruiter cho hợp đồng `GET /jobs/mine` trả toàn bộ mảng: tìm kiếm NFKC, lọc status, ba kiểu sắp xếp, cỡ trang 5/10/20 và điều hướng trang đều chạy trên bản sao dữ liệu ở client, không phát request mới hoặc mutate response gốc; 56/56 unit test PASS.
 - [ ] Nối các màn trên với API Gateway/Auth session thật, hoàn thiện error mapping/409/429/503 và thêm component/E2E test trước khi đóng checkbox endpoint bên dưới.
 >
 > Danh sách bám theo **48 endpoint user-facing có thật**, khảo sát trực tiếp từ code controller và đối chiếu với `infra/nginx/nginx.conf` — không suy đoán từ tài liệu.
@@ -1416,7 +1417,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [x] Chỉ bật cuộn vô hạn cho gợi ý việc làm khi `source = AI`: ở chế độ fallback `nextCursor` **luôn null**, phải ẩn nút "xem thêm".
 - [x] Màn gợi ý ứng viên cho một tin: xử lý đủ tập lý do rỗng — `NO_DISCOVERABLE_CANDIDATES` (chưa ai bật đồng ý, cổng consent nằm ở Profile Service), `JOB_EMBEDDING_NOT_FOUND`/`JOB_EMBEDDING_INACTIVE` (tin chưa vector hoá, gợi người dùng chờ), `NO_ACTIVE_CV_EMBEDDINGS`, `EMBEDDING_MODEL_MISMATCH`, `NO_MATCHING_CV_EMBEDDINGS`. **Danh sách rỗng vẫn là HTTP 200**, không được coi là lỗi.
 - [x] Debounce + khoá bấm lại cho `/jobs/:id/recommended-candidates`: nginx giới hạn 30 req/phút mỗi IP và trả JSON **của gateway** kèm `Retry-After: 60` — bộ xử lý lỗi phải chịu được cả body của gateway lẫn body của service.
-- [ ] Bảng quản lý tin của recruiter: `GET /jobs/mine` trả **toàn bộ mảng**, FE phải tự phân trang/lọc/sắp xếp phía client.
+- [x] Bảng quản lý tin của recruiter: `GET /jobs/mine` trả **toàn bộ mảng**, FE phải tự phân trang/lọc/sắp xếp phía client.
 - [ ] Phân biệt phạm vi theo vai trò công ty mà API **không trả tường minh**: OWNER thấy mọi tin của công ty, MEMBER chỉ thấy tin mình tạo và sẽ nhận `403 JOB_ACCESS_DENIED` khi thao tác lên tin của người khác.
 - [ ] Màn admin duyệt tin (`GET /jobs/pending` + `approve`/`reject`): hàng đợi **bị cắt cứng ở 50 bản ghi, không có cursor** — phải cảnh báo admin khi hàng đợi có thể đang bị cắt bớt.
 - [ ] Trang vận hành reindex Elasticsearch (`POST /jobs/reindex`, `GET /jobs/reindex/failures`, `POST /jobs/reindex/failures/retry`): xem dead letter và replay. Thuộc console admin.
