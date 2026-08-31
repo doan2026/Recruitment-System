@@ -28,6 +28,7 @@ import {
   nextApplicationVersion,
   nextOfferVersions,
 } from "./applicationVersioning";
+import { offerResponseRecoveryView } from "./offerResponseRecovery";
 import {
   normalizeInvitationEmail,
   validateInvitationEmail,
@@ -339,6 +340,22 @@ test("mutation responses become the only source for the next command versions", 
     () => nextApplicationVersion({ version: Number.NaN }),
     (error: unknown) => error instanceof ApiClientError && error.code === "INVALID_EXPECTED_VERSION",
   );
+});
+
+test("the four Offer 409 outcomes expose distinct recovery messages and actions", () => {
+  const codes = [
+    "OFFER_EXPIRED",
+    "OFFER_ALREADY_RESPONDED",
+    "OFFER_CHANGED_CONCURRENTLY",
+    "APPLICATION_CHANGED_CONCURRENTLY",
+  ];
+  const views = codes.map((code) => offerResponseRecoveryView(new ApiClientError({ code, status: 409 })));
+
+  assert.equal(views.every(Boolean), true);
+  assert.equal(new Set(views.map((view) => view?.title)).size, 4);
+  assert.equal(new Set(views.map((view) => view?.action.label)).size, 4);
+  assert.equal(offerResponseRecoveryView(new ApiClientError({ code: "OFFER_EXPIRED", status: 400 })), null);
+  assert.equal(offerResponseRecoveryView(new ApiClientError({ code: "UNKNOWN", status: 409 })), null);
 });
 
 test("Retry-After drives one bounded automatic retry before manual recovery", () => {
