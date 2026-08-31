@@ -259,6 +259,7 @@ export function normalizeError(code: string): string {
     OFFER_CHANGED_CONCURRENTLY: "Offer vừa được cập nhật. Hãy tải lại trước khi phản hồi.",
     APPLICATION_CHANGED_CONCURRENTLY: "Hồ sơ vừa thay đổi. Hãy tải lại trước khi tiếp tục.",
     JOB_STATE_CHANGED: "Trạng thái tin tuyển dụng vừa thay đổi. Hãy tải lại và so sánh trước khi tiếp tục.",
+    JOB_ACCESS_DENIED: "Bạn không có quyền thao tác với tin tuyển dụng này. Danh sách sẽ được đồng bộ lại.",
     JOB_SEARCH_PAGE_TOO_DEEP: "Kết quả quá sâu. Hãy lọc hẹp hơn hoặc chuyển sang tải thêm.",
     MEDIA_UPLOAD_RATE_LIMITED: "Bạn tải file quá nhiều lần. Hãy chờ rồi thử lại.",
     MEDIA_PROVIDER_UPLOAD_FAILED: "Nhà cung cấp chưa nhận file. Hãy xin chữ ký mới rồi thử lại.",

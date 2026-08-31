@@ -35,6 +35,7 @@ import {
 import { isRejectedRecruiterJob, nextRecruiterJobStatus, recruiterJobActionLabel, recruiterJobActions, recruiterJobEditLabel } from "./jobLifecycle";
 import { normalizeJobSkills, normalizeRecruiterJobForm, validateRecruiterJobForm, type RecruiterJobFormValues } from "./jobForm";
 import { buildRecruiterJobTable, type RecruiterJobTableRow } from "./recruiterJobTable";
+import { isRecruiterJobAccessDenied, recruiterJobScopeView } from "./recruiterJobAccess";
 import { isOffsetWindowTooDeep, mergePublicJobPage, normalizePublicJobSearch, publicJobSearchScope, validatePublicJobSearch } from "./publicJobSearch";
 import { cursorRestartView } from "./cursorRecovery";
 import { canLoadMoreRecommendations, jobDataSourceView, mergeRecommendationPage, recommendationFallbackView, recommendationSourceView } from "./recommendationPresentation";
@@ -667,6 +668,18 @@ test("recruiter Job table clamps an outdated page after client filters change", 
   assert.equal(result.page, 1);
   assert.equal(result.from, 1);
   assert.equal(result.to, 1);
+});
+
+test("recruiter Job scope explains the backend list boundary for OWNER and MEMBER", () => {
+  assert.match(recruiterJobScopeView("OWNER").description, /mọi tin/);
+  assert.match(recruiterJobScopeView("MEMBER").description, /do bạn tạo/);
+  assert.notEqual(recruiterJobScopeView("OWNER").label, recruiterJobScopeView("MEMBER").label);
+});
+
+test("only exact JOB_ACCESS_DENIED 403 triggers a recruiter Job scope refresh", () => {
+  assert.equal(isRecruiterJobAccessDenied(new ApiClientError({ code: "JOB_ACCESS_DENIED", status: 403 })), true);
+  assert.equal(isRecruiterJobAccessDenied(new ApiClientError({ code: "COMPANY_OWNER_REQUIRED", status: 403 })), false);
+  assert.equal(isRecruiterJobAccessDenied(new ApiClientError({ code: "JOB_ACCESS_DENIED", status: 409 })), false);
 });
 
 const validJobForm: RecruiterJobFormValues = {
