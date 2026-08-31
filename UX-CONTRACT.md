@@ -57,7 +57,7 @@
 - Candidate search: form chỉ áp criteria sau submit; giữ `q/location/salary/skills/experience/jobType/sort/limit` xuyên suốt cursor chain, append khử trùng theo id; đổi criteria/mode/limit xóa cursor. OFFSET dừng trước cửa sổ 10.000 và cho chuyển CURSOR hoặc focus về filter.
 - Public Company search: giữ signed cursor trong memory, khóa `q`/`limit` khi đang tải chuỗi và kết thúc theo `hasMore`; không hiển thị `total`/số trang.
 - Public Company detail: `logoUrl=null` dùng initials placeholder; media chỉ lấy từ public response, giữ `sortOrder`, có empty state và không optimistic-insert media vừa confirm.
-- Recommendation: load-more chỉ khi source AI có `nextCursor`.
+- Recommendation: mỗi card ghi nhãn + mô tả nguồn AI/PREFERENCES/LATEST. Sáu fallback Candidate có nội dung và CTA riêng; NO_ACTIVE_CV dẫn sang route quản lý CV thuộc Profile UI, năm nhánh còn lại chủ động reload recommendation và khóa CTA khi pending.
 - URL state: vẫn pending; adapter đã hỗ trợ API Gateway thật nhưng filter hiện giữ local state.
 - Empty/no-results/error/loading: state riêng, không đổi footprint bất ngờ.
 - Back/scroll restoration: route detail quay về owning list; hoàn thiện khi nối URL filter thật.
@@ -75,6 +75,7 @@
 | Search | Nhập từ khóa | list loader | cùng route | result count | clear/retry | search/list heading | P16.N2 Search |
 | Public Job pagination | Áp dụng filter / đổi mode / tải thêm | giữ list cũ khi continuation | cùng route | tổng OFFSET hoặc số đã tải CURSOR | lỗi quá sâu có CTA đổi mode/lọc hẹp | filter lỗi đầu tiên hoặc list | P16.N2 Job Search |
 | Cursor stale recovery | Backend báo stale search/recommendation | giữ list cũ, restart tối đa một lần | cùng route | thông báo mềm + snapshot mới | stale lặp lại mới thành error state | đầu vùng kết quả | P16.N2 Job Search |
+| Recommendation fallback | CTA theo fallback reason | khóa retry trong khi tải | cùng route hoặc quản lý CV | source/reason mới từ response | giữ kết quả dự phòng + safe error | fallback card | P16.N2 Recommendation |
 | Public company cursor search | Nhập từ khóa / tải thêm | khóa `q`/`limit` trong cursor chain | `/companies` | append theo `hasMore` | retry hoặc tìm kiếm mới | ô tìm kiếm / list heading | P16.N2 Company Search |
 | Invite company member | OWNER nhập email | khóa submit | ở hồ sơ công ty | hiện token một lần để copy | giữ email + safe error; clipboard fallback | token rồi email input | P16.N2 Company Member |
 | Accept company invitation | Recruiter dán token | khóa submit | route nhận lời mời | membership + CTA mở công ty | CTA riêng theo 404/410/409/403/401 | error action hoặc success heading | P16.N2 Company Member |
