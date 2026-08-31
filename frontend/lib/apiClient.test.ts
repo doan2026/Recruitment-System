@@ -32,6 +32,7 @@ import {
   normalizeCompanyMediaLibrary,
   validateCompanyMediaLibrary,
 } from "./companyMediaLibrary";
+import { mergePublicCompanyPage, shouldLockCompanySearch } from "./companyPublicSearch";
 import {
   companyVerificationView,
   isInvalidResubmissionTransition,
@@ -445,4 +446,24 @@ test("company media library reorder always rewrites contiguous sortOrder", () =>
     [{ fileId: "c", sortOrder: 0 }, { fileId: "a", sortOrder: 1 }, { fileId: "b", sortOrder: 2 }],
   );
   assert.deepEqual(normalizeCompanyMediaLibrary(original).map((item) => item.sortOrder), [0, 1, 2]);
+});
+
+test("public company cursor pages append without exposing duplicates", () => {
+  const company = (id: string) => ({
+    id, name: id, slug: id, industry: "Tech", size: "10", address: "HN", logoUrl: null,
+  });
+  assert.deepEqual(
+    mergePublicCompanyPage([company("a"), company("b")], [company("b"), company("c")], true).map((item) => item.id),
+    ["a", "b", "c"],
+  );
+  assert.deepEqual(
+    mergePublicCompanyPage([company("a")], [company("z")], false).map((item) => item.id),
+    ["z"],
+  );
+});
+
+test("public company criteria stay locked for the entire cursor chain", () => {
+  assert.equal(shouldLockCompanySearch(true, null), true);
+  assert.equal(shouldLockCompanySearch(false, "opaque.signed-cursor"), true);
+  assert.equal(shouldLockCompanySearch(false, null), false);
 });

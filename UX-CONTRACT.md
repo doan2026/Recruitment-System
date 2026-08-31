@@ -55,6 +55,7 @@
 
 - Recruiter-owned `/jobs/mine`: client filter/page because API trả toàn bộ mảng.
 - Candidate search: offset hoặc cursor đúng hợp đồng backend; đổi filter xóa cursor.
+- Public Company search: giữ signed cursor trong memory, khóa `q`/`limit` khi đang tải chuỗi và kết thúc theo `hasMore`; không hiển thị `total`/số trang.
 - Recommendation: load-more chỉ khi source AI có `nextCursor`.
 - URL state: vẫn pending; adapter đã hỗ trợ API Gateway thật nhưng filter hiện giữ local state.
 - Empty/no-results/error/loading: state riêng, không đổi footprint bất ngờ.
@@ -69,6 +70,7 @@
 | Edit company | Lưu thay đổi; legal change ở VERIFIED mở dialog | khóa submit/dialog action | ở company | badge theo response + status inline | hủy giữ draft; 409 reload/merge | dialog/form | P16.N2 Company |
 | Resubmit company verification | Gửi lại để xác minh | khóa nút, giữ trạng thái hiện tại | ở company | badge PENDING + status inline | 409 tải resource đúng một lần, không retry mutation | block trạng thái xác minh | P16.N2 Company |
 | Search | Nhập từ khóa | list loader | cùng route | result count | clear/retry | search/list heading | P16.N2 Search |
+| Public company cursor search | Nhập từ khóa / tải thêm | khóa `q`/`limit` trong cursor chain | `/companies` | append theo `hasMore` | retry hoặc tìm kiếm mới | ô tìm kiếm / list heading | P16.N2 Company Search |
 | Replace-all media | Kéo thả/xóa rồi lưu | khóa editor khi PUT | ở company | reload library từ response | giữ draft + safe error | library heading | P16.N2 Company media |
 | Upload | Chọn file / xin chữ ký | khóa action theo step | ở company | confirm rồi attach fileId | kiểm policy, xin signature mới, giữ confirmed file để retry attach | bước hiện tại | P16.N2 Media handshake |
 | Cancel/back | Hủy / Quay lại | none | owning list | none | dirty guard pending | originating context | P16.N2 |

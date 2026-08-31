@@ -60,6 +60,16 @@ interface BackendCompany {
   updatedAt: string;
 }
 
+export interface PublicCompanySummary {
+  id: string;
+  name: string;
+  slug: string;
+  industry: string;
+  size: string;
+  address: string;
+  logoUrl: string | null;
+}
+
 interface BackendJob {
   id: string;
   companyId: string;
@@ -392,6 +402,30 @@ export async function updateCompany(
     maxRetries: 0,
   });
   return { ...response, data: toCompany(response.data) };
+}
+
+export async function searchPublicCompanies(search: {
+  q?: string;
+  limit: number;
+  cursor?: string | null;
+}, signal?: AbortSignal): Promise<ApiEnvelope<PublicCompanySummary[]>> {
+  if (isDemoPerson2Api) {
+    const normalized = search.q?.trim().toLocaleLowerCase("vi-VN") ?? "";
+    const items = demo.companies
+      .filter((company) => !normalized || company.name.toLocaleLowerCase("vi-VN").includes(normalized))
+      .slice(0, search.limit)
+      .map((company) => ({
+        id: company.id, name: company.name, slug: company.shortName,
+        industry: "Công nghệ", size: "51-200", address: "Hà Nội",
+        logoUrl: company.media.logo?.url ?? null,
+      }));
+    return { data: items, meta: { limit: search.limit, hasMore: false, nextCursor: null } };
+  }
+  return requestApi<PublicCompanySummary[]>(API_PATHS.companySearch, {
+    signal,
+    query: { q: search.q, limit: search.limit, cursor: search.cursor },
+    allowedQueryKeys: ["q", "limit", "cursor"],
+  });
 }
 
 export async function getPublicJobs(search: {
