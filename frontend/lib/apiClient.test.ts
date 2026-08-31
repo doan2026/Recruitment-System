@@ -33,6 +33,7 @@ import {
   withoutRemovedMember,
 } from "./companyMembership";
 import { isRejectedRecruiterJob, nextRecruiterJobStatus, recruiterJobActionLabel, recruiterJobActions, recruiterJobEditLabel } from "./jobLifecycle";
+import { normalizeJobSkills, normalizeRecruiterJobForm, validateRecruiterJobForm, type RecruiterJobFormValues } from "./jobForm";
 import {
   normalizeCompanyCreate,
   validateCompanyCreate,
@@ -605,4 +606,44 @@ test("rejected recruiter Jobs expose review feedback and a specific edit action"
   assert.equal(isRejectedRecruiterJob("PENDING_APPROVAL", "Góp ý cũ"), false);
   assert.equal(recruiterJobEditLabel("DRAFT", "Bổ sung mô tả"), "Sửa theo góp ý");
   assert.equal(recruiterJobEditLabel("DRAFT"), "Sửa tin");
+});
+
+const validJobForm: RecruiterJobFormValues = {
+  title: "Frontend Developer",
+  description: "Xây dựng sản phẩm web.",
+  requirements: "Có kinh nghiệm React.",
+  benefits: "Bảo hiểm và ngân sách học tập.",
+  salaryMin: "18000000",
+  salaryMax: "25000000",
+  isNegotiable: false,
+  location: "Hà Nội",
+  jobType: "FULL_TIME",
+  experienceYears: "2",
+  quantity: "3",
+  skills: "React, TypeScript",
+  deadline: "2026-09-02",
+};
+
+test("Job form validates the backend deadline, salary and skill invariants", () => {
+  const now = new Date("2026-08-31T23:30:00+07:00");
+  assert.deepEqual(validateRecruiterJobForm(validJobForm, now), {});
+  assert.equal(validateRecruiterJobForm({ ...validJobForm, deadline: "2026-08-31" }, now).deadline, "Hạn nộp phải sau hôm nay.");
+  assert.ok(validateRecruiterJobForm({ ...validJobForm, salaryMin: "", salaryMax: "0" }, now).salary);
+  assert.ok(validateRecruiterJobForm({ ...validJobForm, salaryMin: "30", salaryMax: "20" }, now).salary);
+  assert.ok(validateRecruiterJobForm({ ...validJobForm, skills: " ,　, " }, now).skills);
+  assert.ok(validateRecruiterJobForm({ ...validJobForm, skills: Array.from({ length: 51 }, (_, index) => `skill-${index}`).join(",") }, now).skills);
+});
+
+test("negotiable Job payload omits salaries and normalizes unique skills", () => {
+  const payload = normalizeRecruiterJobForm({
+    ...validJobForm,
+    isNegotiable: true,
+    salaryMin: "100",
+    salaryMax: "200",
+    skills: " React, react, ＴｙｐｅＳｃｒｉｐｔ , ",
+  });
+  assert.equal("salaryMin" in payload, false);
+  assert.equal("salaryMax" in payload, false);
+  assert.deepEqual(payload.skills, ["React", "TypeScript"]);
+  assert.deepEqual(normalizeJobSkills("Vue, vue, React"), ["Vue", "React"]);
 });

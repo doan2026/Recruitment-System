@@ -66,7 +66,7 @@
 
 | Operation | Trigger | Pending | Success destination | Success feedback | Failure recovery | Focus outcome | Source ref |
 |---|---|---|---|---|---|---|---|
-| Create job | Lưu bản nháp | khóa submit | ở form/list | status inline | giữ dữ liệu + lỗi field | field lỗi đầu tiên | P16.N2 Job |
+| Create job | Lưu bản nháp | khóa submit | ở form/list | status DRAFT từ response + CTA kiểm tra | giữ dữ liệu + lỗi field/safe API error | field lỗi đầu tiên | P16.N2 Job |
 | Job lifecycle | Gửi admin duyệt / Đóng tin | khóa action theo job | recruiter list | dùng status từ response | giữ row + safe error | action status | P16.N2 Job |
 | Edit rejected job | Sửa theo góp ý / Lưu và gửi admin duyệt | khóa form; PUT rồi PATCH tuần tự | edit route | status PENDING_APPROVAL từ response | PUT đã thành công thì chỉ retry PATCH; không lưu lặp | lỗi đầu tiên hoặc action gửi lại | P16.N2 Job |
 | Create company | Empty-state CTA | khóa submit | company profile | badge PENDING | giữ form + safe error | field lỗi đầu tiên | P16.N2 Company |
@@ -113,8 +113,9 @@
 
 ## Validation
 
-- Baseline dùng manual typed state; schema library sẽ được chọn khi form/API mở rộng.
+- Company dùng typed state; Job dùng `jobForm.ts` làm validator/normalizer dùng chung cho create/edit và bám trực tiếp `CreateJobDto`.
 - Validate khi submit, sau đó khi sửa field đang lỗi.
+- Job so deadline với ngày UTC như backend, omit cả hai salary field khi negotiable, NFKC/trim/khử trùng skills trước khi áp giới hạn 1–50 và gửi request.
 - Form dùng `noValidate`, lỗi text + `aria-invalid` + `aria-describedby`, focus lỗi đầu tiên.
 - Không hiển thị raw backend message; ánh xạ theo `code`.
 

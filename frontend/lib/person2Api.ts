@@ -8,6 +8,7 @@ import {
   selectContractFields,
 } from "./apiClient";
 import type { CompanyCreateValues } from "./companyForm";
+import type { RecruiterJobPayload } from "./jobForm";
 import type {
   CompanyMediaAssetType,
   CompanyMediaUploadCapability,
@@ -133,7 +134,8 @@ interface BackendJob {
   currency?: string;
   location: string;
   jobType: string;
-  experienceYears?: number;
+  experienceYears: number;
+  quantity: number;
   skills: string[];
   deadline: string;
   status?: Job["status"];
@@ -142,20 +144,7 @@ interface BackendJob {
   updatedAt?: string;
 }
 
-export interface RecruiterJobUpdateInput {
-  title: string;
-  description: string;
-  requirements: string;
-  benefits: string;
-  salaryMin?: number;
-  salaryMax?: number;
-  isNegotiable: boolean;
-  currency: "VND";
-  location: string;
-  jobType: "FULL_TIME" | "PART_TIME" | "CONTRACT";
-  skills: string[];
-  deadline: string;
-}
+export type RecruiterJobUpdateInput = RecruiterJobPayload;
 
 interface JobSearchResult {
   items: BackendJob[];
@@ -243,6 +232,8 @@ function toJob(value: BackendJob, source: JobDataSource = "POSTGRESQL"): Job {
     companyId: value.companyId,
     title: value.title,
     level: value.experienceYears === undefined ? "Không yêu cầu" : `${value.experienceYears}+ năm`,
+    experienceYears: value.experienceYears,
+    quantity: value.quantity,
     type: toJobType(value.jobType),
     location: value.location,
     department: "Chưa phân loại",
@@ -708,6 +699,57 @@ export async function getRecruiterJobs(signal?: AbortSignal): Promise<ApiEnvelop
   return { ...response, data: response.data.map((item) => toJob(item)) };
 }
 
+export async function createRecruiterJob(
+  values: RecruiterJobPayload,
+  signal?: AbortSignal,
+): Promise<ApiEnvelope<Job>> {
+  if (isDemoPerson2Api) {
+    const now = new Date().toISOString();
+    return {
+      data: {
+        id: `job-draft-${Date.now()}`,
+        companyId: "cmp-techvision",
+        title: values.title,
+        level: `${values.experienceYears}+ năm`,
+        experienceYears: values.experienceYears,
+        quantity: values.quantity,
+        type: values.jobType === "FULL_TIME" ? "FULLTIME" : values.jobType === "PART_TIME" ? "PARTTIME" : "CONTRACT",
+        location: values.location,
+        department: "Chưa phân loại",
+        salaryMin: values.salaryMin ?? 0,
+        salaryMax: values.salaryMax ?? null,
+        currency: "VND",
+        isNegotiable: values.isNegotiable,
+        description: values.description,
+        requirements: toList(values.requirements),
+        responsibilities: [],
+        benefits: toList(values.benefits),
+        skills: values.skills,
+        status: "DRAFT",
+        deadline: values.deadline,
+        source: "POSTGRESQL",
+        ownerName: "Nhà tuyển dụng",
+        aggregateVersion: 1,
+        createdAt: now,
+        updatedAt: now,
+      },
+      meta: null,
+    };
+  }
+  const body = selectContractFields(values as unknown as Record<string, unknown>, [
+    "title", "description", "requirements", "benefits", "salaryMin", "salaryMax",
+    "isNegotiable", "currency", "location", "jobType", "experienceYears", "quantity", "skills", "deadline",
+  ]);
+  const response = await requestApi<BackendJob>(API_PATHS.jobs, {
+    method: "POST",
+    body,
+    privateData: true,
+    signal,
+    maxRetries: 0,
+  });
+  return { ...response, data: toJob(response.data) };
+}
+
 export async function getRecruiterJob(jobId: string, signal?: AbortSignal): Promise<ApiEnvelope<Job>> {
   if (!isDemoPerson2Api) assertCanonicalUuidV4(jobId, "jobId");
   const response = await getRecruiterJobs(signal);
@@ -728,6 +770,9 @@ export async function updateRecruiterJob(
       data: {
         ...job,
         title: values.title,
+        level: `${values.experienceYears}+ năm`,
+        experienceYears: values.experienceYears,
+        quantity: values.quantity,
         description: values.description,
         requirements: toList(values.requirements),
         benefits: toList(values.benefits),
@@ -746,7 +791,7 @@ export async function updateRecruiterJob(
   assertCanonicalUuidV4(jobId, "jobId");
   const body = selectContractFields(values as unknown as Record<string, unknown>, [
     "title", "description", "requirements", "benefits", "salaryMin", "salaryMax",
-    "isNegotiable", "currency", "location", "jobType", "skills", "deadline",
+    "isNegotiable", "currency", "location", "jobType", "experienceYears", "quantity", "skills", "deadline",
   ]);
   const response = await requestApi<BackendJob>(`${API_PATHS.jobs}${jobId}`, {
     method: "PUT",
