@@ -70,7 +70,7 @@ export function ConflictRecoveryPanel<TDraft, TServer>({
       </div>
 
       <p className="help">
-        Chọn giữ bản của bạn chỉ cập nhật dữ liệu nền. Hãy kiểm tra lại form và bấm “Lưu thay đổi” để gửi lần nữa.
+        Chọn giữ bản của bạn chỉ cập nhật dữ liệu nền. Hãy kiểm tra lại dữ liệu và chủ động thực hiện lại thao tác để gửi lần nữa.
       </p>
       <div className="btn-group">
         <button className="btn btn-primary" type="button" onClick={onKeepDraft}>

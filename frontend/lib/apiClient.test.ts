@@ -47,6 +47,8 @@ import { classifyAiChatFeatureState } from "./aiChatFeatureState";
 import { normalizeAiChatMessage, validateAiChatMessage } from "./aiChatMessage";
 import { normalizeAiChatAnswer, presentAiChatResponse } from "./aiChatResponse";
 import { assertPerson2AiPublicRoute, PERSON2_AI_PUBLIC_ROUTES, recruiterCandidateRecommendationsRoute } from "./person2AiPublicRoutes";
+import { APPLICATION_CONFLICT_FIELDS, JOB_CONFLICT_FIELDS, type ApplicationConflictDraft } from "./person2ConflictFields";
+import type { CandidateApplication, Job } from "./demoData";
 import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, validateRecruiterApplicationFilters, type RecruiterApplicationFilterDraft } from "./recruiterApplicationTable";
 import {
   normalizeInvitationEmail,
@@ -588,6 +590,41 @@ test("non-optimistic 409 errors are not routed through reload and compare", asyn
     (reason: unknown) => reason === error,
   );
   assert.equal(reloaded, false);
+});
+
+test("Job conflict snapshot compares the retained form against one authoritative reload", async () => {
+  let reloads = 0;
+  const localDraft = { title: "Backend mới", location: "Hà Nội", jobType: "FULL_TIME", deadline: "2026-12-31", isNegotiable: true, salaryMin: "", salaryMax: "", experienceYears: "3", quantity: "2", skills: "Java, Kafka", description: "Mô tả mới", requirements: "Java", benefits: "Bảo hiểm" } as const;
+  const server = { title: "Backend cũ", location: "Hà Nội", type: "FULLTIME", deadline: "2026-12-31T00:00:00Z", isNegotiable: true, salaryMin: 0, salaryMax: null, skills: ["Java"], description: "Mô tả cũ", aggregateVersion: 8 } as unknown as Job;
+  const snapshot = await prepareConflictSnapshot({
+    error: new ApiClientError({ code: "JOB_STATE_CHANGED", status: 409 }),
+    localDraft: { ...localDraft },
+    localVersion: 7,
+    reload: async () => { reloads += 1; return server; },
+    serverVersion: (value) => value.aggregateVersion,
+    fields: JOB_CONFLICT_FIELDS,
+  });
+  assert.equal(reloads, 1);
+  assert.equal(snapshot.serverVersion, 8);
+  assert.equal(snapshot.fields.find((field) => field.key === "title")?.changed, true);
+  assert.equal(snapshot.fields.find((field) => field.key === "location")?.changed, false);
+});
+
+test("Application conflict snapshot retains intent and expected version without replaying it", async () => {
+  const localDraft: ApplicationConflictDraft = { intent: "Chuyển hồ sơ sang INTERVIEW", targetStatus: "INTERVIEW", note: "", applicationVersion: 4 };
+  const server = { id: "app-1", status: "REVIEWING", version: 5 } as CandidateApplication;
+  const snapshot = await prepareConflictSnapshot({
+    error: new ApiClientError({ code: "APPLICATION_CHANGED_CONCURRENTLY", status: 409 }),
+    localDraft,
+    localVersion: 4,
+    reload: async () => server,
+    serverVersion: (value) => value.version,
+    fields: APPLICATION_CONFLICT_FIELDS,
+  });
+  assert.equal(snapshot.localDraft.intent, "Chuyển hồ sơ sang INTERVIEW");
+  assert.equal(snapshot.server.status, "REVIEWING");
+  assert.equal(snapshot.serverVersion, 5);
+  assert.equal(snapshot.fields.find((field) => field.key === "version")?.changed, true);
 });
 
 test("every Application write command carries its latest expected version", () => {

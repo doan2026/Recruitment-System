@@ -4,9 +4,12 @@ import Link from "next/link";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { ApiClientError, toUserMessage } from "../lib/apiClient";
 import { aiMatchNotReadyView } from "../lib/aiMatchRecovery";
+import { prepareConflictSnapshot, type ConflictSnapshot } from "../lib/conflictRecovery";
+import { APPLICATION_CONFLICT_FIELDS, type ApplicationConflictDraft } from "../lib/person2ConflictFields";
 import { recruiterApplicationActions, validateRecruiterApplicationStatus } from "../lib/applicationStateMachine";
 import { normalizeRecruiterApplicationQuery, shouldRestartOffsetApplications, validateRecruiterApplicationFilters, type RecruiterApplicationFilterDraft } from "../lib/recruiterApplicationTable";
-import { changeApplicationStatus, getRecruiterApplications, refreshApplicationMatchScore, type CandidateApplication } from "../lib/person2Api";
+import { changeApplicationStatus, getApplicationDetail, getRecruiterApplications, refreshApplicationMatchScore, type CandidateApplication } from "../lib/person2Api";
+import { ConflictRecoveryPanel } from "./ConflictRecoveryPanel";
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./ui";
 import { RecruiterCvAccess } from "./RecruiterCvAccess";
 import { RecruiterEvaluation } from "./RecruiterEvaluation";
@@ -38,6 +41,7 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
   const [totalPages, setTotalPages] = useState(1);
   const [driftNotice, setDriftNotice] = useState("");
   const [matchStates, setMatchStates] = useState<Record<string, { message: string; polling: boolean }>>({});
+  const [conflict, setConflict] = useState<ConflictSnapshot<ApplicationConflictDraft, CandidateApplication> | null>(null);
   const expectedTotalRef = useRef<number | null>(null);
   const seenPageIdsRef = useRef<Map<number, Set<string>>>(new Map());
   const applicationsRef = useRef<CandidateApplication[]>([]);
@@ -126,6 +130,29 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
     setPage(0);
   }
 
+  async function openApplicationConflict(
+    error: unknown,
+    application: CandidateApplication,
+    localDraft: ApplicationConflictDraft,
+  ): Promise<boolean> {
+    try {
+      const snapshot = await prepareConflictSnapshot({
+        error,
+        localDraft,
+        localVersion: application.version,
+        reload: async () => (await getApplicationDetail(application.id)).data,
+        serverVersion: (server) => server.version,
+        fields: APPLICATION_CONFLICT_FIELDS,
+      });
+      setApplications((current) => current.map((item) => item.id === application.id ? snapshot.server : item));
+      setConflict(snapshot);
+      setActionError("");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function moveStatus(application: CandidateApplication, targetStatus: CandidateApplication["status"]) {
     if (pendingApplicationId) return;
     const reason = rejectionReasons[application.id];
@@ -157,10 +184,13 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
       setActionStatus(`Đã chuyển hồ sơ sang ${response.data.toStatus}.`);
       setReloadKey((value) => value + 1);
     } catch (requestError: unknown) {
-      setActionError(toUserMessage(requestError));
-      if (requestError instanceof ApiClientError && requestError.code === "APPLICATION_CHANGED_CONCURRENTLY") {
-        setReloadKey((value) => value + 1);
-      }
+      const recovered = await openApplicationConflict(requestError, application, {
+        intent: `Chuyển hồ sơ sang ${targetStatus}`,
+        targetStatus,
+        note: targetStatus === "REJECTED" ? reason?.trim() ?? "" : "",
+        applicationVersion: application.version,
+      });
+      if (!recovered) setActionError(toUserMessage(requestError));
     } finally {
       setPendingApplicationId(null);
     }
@@ -208,10 +238,13 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
           matchPollTimersRef.current.set(application.id, timer);
         }
       } else {
-        setActionError(toUserMessage(requestError));
-        if (requestError instanceof ApiClientError && requestError.code === "APPLICATION_CHANGED_CONCURRENTLY") {
-          setReloadKey((value) => value + 1);
-        }
+        const recovered = await openApplicationConflict(requestError, application, {
+          intent: "Làm mới match score",
+          targetStatus: application.status,
+          note: "",
+          applicationVersion: application.version,
+        });
+        if (!recovered) setActionError(toUserMessage(requestError));
       }
     } finally {
       setPendingApplicationId(null);
@@ -235,6 +268,22 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
       </form>
       {filterError ? <p className="form-error" role="alert">{filterError}</p> : null}
       {driftNotice ? <p className="notice" role="status">{driftNotice}</p> : null}
+      {conflict ? (
+        <ConflictRecoveryPanel
+          resourceName="Hồ sơ ứng tuyển"
+          snapshot={conflict}
+          onKeepDraft={() => {
+            if (conflict.localDraft.note) setRejectionReasons((current) => ({ ...current, [conflict.server.id]: conflict.localDraft.note }));
+            setConflict(null);
+            setActionStatus("Đã giữ ý định trên bản Application mới nhất. Hãy kiểm tra trạng thái rồi chủ động chọn lại thao tác; CareerHub chưa tự gửi lại.");
+          }}
+          onUseServer={() => {
+            setRejectionReasons((current) => { const next = { ...current }; delete next[conflict.server.id]; return next; });
+            setConflict(null);
+            setActionStatus("Đã dùng trạng thái Application mới nhất từ server.");
+          }}
+        />
+      ) : null}
       {actionStatus ? <p className="notice notice-success" role="status">{actionStatus}</p> : null}
       {actionError ? <p className="notice notice-danger" role="alert"><strong>Chưa đổi được trạng thái.</strong> {actionError}</p> : null}
       {loadError ? <ErrorState message={loadError} onRetry={() => setReloadKey((value) => value + 1)} /> : null}
