@@ -6,6 +6,8 @@ export type CandidateRecommendationEmptyReason =
   | "EMBEDDING_MODEL_MISMATCH"
   | "NO_MATCHING_CV_EMBEDDINGS";
 
+export const CANDIDATE_RECOMMENDATION_DEBOUNCE_MS = 300;
+
 export interface CandidateRecommendationEmptyView {
   title: string;
   description: string;
