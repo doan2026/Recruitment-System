@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { RecruiterApplicationPipeline } from "../../../../components/RecruiterApplicationPipeline";
 import { TransientRecoveryState } from "../../../../components/TransientRecoveryState";
 import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../../components/ui";
 import { ApiClientError, toUserMessage } from "../../../../lib/apiClient";
@@ -110,6 +111,8 @@ export default function RecruiterJobPipelinePage() {
         description="Ứng viên gợi ý chỉ đến từ tập đã bật consent khám phá và có dữ liệu AI tương thích."
         action={<div className="btn-group"><StatusBadge tone={job.status === "PUBLISHED" ? "success" : "warning"}>{job.status}</StatusBadge><Link className="btn" href="/recruiter/jobs">Về danh sách tin</Link></div>}
       />
+
+      <RecruiterApplicationPipeline jobId={job.id} />
 
       <section className="panel">
         <div className="section-head row-between">

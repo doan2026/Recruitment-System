@@ -127,7 +127,7 @@ export interface CandidateApplication {
   jobTitle: string;
   companyName: string;
   status: ApplicationStatus;
-  version: number;
+  version: number | null;
   offerVersion?: number;
   matchScore?: number;
   createdAt: string;

@@ -29,6 +29,7 @@ import {
   nextOfferVersions,
 } from "./applicationVersioning";
 import { offerResponseRecoveryView } from "./offerResponseRecovery";
+import { candidateApplicationActions, recruiterApplicationActions, validateRecruiterApplicationStatus } from "./applicationStateMachine";
 import {
   normalizeInvitationEmail,
   validateInvitationEmail,
@@ -356,6 +357,30 @@ test("the four Offer 409 outcomes expose distinct recovery messages and actions"
   assert.equal(new Set(views.map((view) => view?.action.label)).size, 4);
   assert.equal(offerResponseRecoveryView(new ApiClientError({ code: "OFFER_EXPIRED", status: 400 })), null);
   assert.equal(offerResponseRecoveryView(new ApiClientError({ code: "UNKNOWN", status: 409 })), null);
+});
+
+test("Application state machine exposes only backend-valid recruiter commands", () => {
+  assert.deepEqual(recruiterApplicationActions("APPLIED").filter((action) => action.kind === "STATUS").map((action) => action.status), ["REVIEWING", "REJECTED"]);
+  assert.deepEqual(recruiterApplicationActions("REVIEWING").filter((action) => action.kind === "STATUS").map((action) => action.status), ["INTERVIEW", "REJECTED"]);
+  assert.equal(recruiterApplicationActions("INTERVIEW").some((action) => action.kind === "SEND_OFFER"), true);
+  assert.deepEqual(recruiterApplicationActions("INTERVIEW").filter((action) => action.kind === "STATUS").map((action) => action.status), ["REJECTED"]);
+  assert.deepEqual(recruiterApplicationActions("HIRED"), []);
+  assert.deepEqual(recruiterApplicationActions("WITHDRAWN"), []);
+});
+
+test("candidate actions withdraw only active applications and route OFFER decisions separately", () => {
+  for (const status of ["APPLIED", "REVIEWING", "INTERVIEW", "OFFER"] as const) {
+    assert.equal(candidateApplicationActions(status).some((action) => action.kind === "WITHDRAW"), true);
+  }
+  assert.equal(candidateApplicationActions("OFFER").some((action) => action.kind === "RESPOND_OFFER"), true);
+  assert.deepEqual(candidateApplicationActions("HIRED"), []);
+  assert.deepEqual(candidateApplicationActions("REJECTED"), []);
+});
+
+test("Application rejection requires a reason and invalid transitions fail before request", () => {
+  assert.match(validateRecruiterApplicationStatus("APPLIED", "REJECTED", "") ?? "", /lý do/);
+  assert.equal(validateRecruiterApplicationStatus("APPLIED", "REJECTED", "Không phù hợp"), null);
+  assert.match(validateRecruiterApplicationStatus("APPLIED", "INTERVIEW") ?? "", /không hợp lệ/);
 });
 
 test("Retry-After drives one bounded automatic retry before manual recovery", () => {
