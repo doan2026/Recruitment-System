@@ -30,6 +30,7 @@ import type {
 import { assertChatResponseSession } from "./aiChatSession";
 import { withAiChatSessionLock } from "./aiChatSessionLock";
 import { normalizeAiChatMessage } from "./aiChatMessage";
+import { normalizeAiChatAnswer } from "./aiChatResponse";
 import * as demo from "./demoData";
 
 export type {
@@ -367,7 +368,7 @@ export async function sendAiChatMessage(
       ...response,
       data: {
         sessionId: assertChatResponseSession(canonicalSessionId, response.data.session_id),
-        answer: response.data.answer,
+        answer: normalizeAiChatAnswer(response.data.answer),
       },
     };
   });

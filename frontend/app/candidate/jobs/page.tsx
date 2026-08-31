@@ -377,7 +377,7 @@ export default function CandidateJobsPage() {
           )}
         </section>
 
-        <section className="panel">
+        <section className="panel" id="suitable-jobs" tabIndex={-1}>
           <h2>Gợi ý phù hợp</h2>
           <p className="help">Mỗi thẻ ghi rõ nguồn xếp hạng. Khi dùng dữ liệu dự phòng, lý do và hành động phục hồi được hiển thị riêng.</p>
           {recommendationRestartNotice ? <p className="notice" role="status">{recommendationRestartNotice}</p> : null}
