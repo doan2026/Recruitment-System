@@ -6,7 +6,8 @@ import { TransientRecoveryState } from "../../../components/TransientRecoverySta
 import { EmptyState, LoadingState, Metric, PageHeader, StatusBadge } from "../../../components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import { isRejectedRecruiterJob, recruiterJobActionLabel, recruiterJobActions, recruiterJobEditLabel, type RecruiterJobAction } from "../../../lib/jobLifecycle";
-import { closeRecruiterJob, getRecruiterJobs, submitJobForApproval, type Job, type JobStatus } from "../../../lib/person2Api";
+import { closeRecruiterJob, getCurrentCompanyMembership, getRecruiterJobs, submitJobForApproval, type CompanyMemberRole, type Job, type JobStatus } from "../../../lib/person2Api";
+import { isRecruiterJobAccessDenied, recruiterJobScopeView } from "../../../lib/recruiterJobAccess";
 import { buildRecruiterJobTable, type RecruiterJobSort } from "../../../lib/recruiterJobTable";
 
 export default function RecruiterJobsPage() {
@@ -17,6 +18,9 @@ export default function RecruiterJobsPage() {
   const [sort, setSort] = useState<RecruiterJobSort>("UPDATED_DESC");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [membershipRole, setMembershipRole] = useState<CompanyMemberRole | null>(null);
+  const [membershipLoading, setMembershipLoading] = useState(true);
+  const [membershipError, setMembershipError] = useState("");
   const [loadError, setLoadError] = useState<unknown>(null);
   const [failureCount, setFailureCount] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
@@ -24,6 +28,30 @@ export default function RecruiterJobsPage() {
   const [actionError, setActionError] = useState("");
   const [actionStatus, setActionStatus] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    setMembershipLoading(true);
+    setMembershipError("");
+    getCurrentCompanyMembership(controller.signal)
+      .then((response) => {
+        if (active) setMembershipRole(response.data.memberRole);
+      })
+      .catch((reason: unknown) => {
+        if (active && !(reason instanceof ApiClientError && reason.code === "REQUEST_CANCELLED")) {
+          setMembershipRole(null);
+          setMembershipError(toUserMessage(reason));
+        }
+      })
+      .finally(() => {
+        if (active) setMembershipLoading(false);
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [reloadKey]);
 
   useEffect(() => {
     let active = true;
@@ -71,6 +99,7 @@ export default function RecruiterJobsPage() {
       setActionStatus(action === "SUBMIT_FOR_APPROVAL" ? "Đã gửi tin cho admin duyệt." : "Đã đóng tin tuyển dụng.");
     } catch (reason: unknown) {
       setActionError(toUserMessage(reason));
+      if (isRecruiterJobAccessDenied(reason)) setReloadKey((value) => value + 1);
     } finally {
       setPendingJobId(null);
     }
@@ -85,6 +114,13 @@ export default function RecruiterJobsPage() {
         <Metric label="Chờ duyệt" value={String(jobs.filter((job) => job.status === "PENDING_APPROVAL").length)} detail="Đã gửi admin" />
         <Metric label="Hồ sơ mới" value="24" detail="7 ngày gần nhất" />
       </section>
+
+      {membershipLoading ? <p className="notice" role="status">Đang xác định phạm vi tin theo vai trò công ty…</p> : null}
+      {!membershipLoading && membershipRole ? (() => {
+        const scope = recruiterJobScopeView(membershipRole);
+        return <p className={`notice notice-${scope.tone}`} role="status"><StatusBadge tone={scope.tone}>{scope.label}</StatusBadge> {scope.description}</p>;
+      })() : null}
+      {!membershipLoading && membershipError ? <p className="notice notice-warning" role="alert"><strong>Chưa xác định được phạm vi vai trò.</strong> {membershipError}</p> : null}
 
       <section className="toolbar" aria-label="Bộ lọc tin tuyển dụng">
         <div className="field search-field">
@@ -154,7 +190,7 @@ export default function RecruiterJobsPage() {
                   </td>
                   <td><StatusBadge tone={job.status === "PUBLISHED" ? "success" : job.status === "DRAFT" ? "neutral" : job.status === "EXPIRED" ? "danger" : "warning"}>{job.status}</StatusBadge></td>
                   <td>{new Date(job.deadline).toLocaleDateString("vi-VN")}</td>
-                  <td>{job.ownerName}<div className="help">{job.memberRole ?? "MEMBER"}</div></td>
+                  <td>{job.ownerName}<div className="help">Người tạo tin</div></td>
                   <td><div className="btn-group">
                     <Link className="btn btn-ghost" href={`/recruiter/jobs/${job.id}`}>Pipeline</Link>
                     {job.status === "DRAFT" ? <Link className={isRejectedRecruiterJob(job.status, job.rejectionReason) ? "btn btn-warning" : "btn btn-ghost"} href={`/recruiter/jobs/${job.id}/edit`}>{recruiterJobEditLabel(job.status, job.rejectionReason)}</Link> : null}
