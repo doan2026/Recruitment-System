@@ -179,7 +179,17 @@ Run migrations from this directory:
 alembic upgrade head
 ```
 
-The container runs the same command before Uvicorn starts. PostgreSQL must use
+Root Compose runs this command in the one-shot `ai-migrate` service, after
+PostgreSQL is healthy. The `ai-service` command is overridden to start only
+Uvicorn and requires `ai-migrate` to complete successfully; both embedding
+workers still wait for API readiness. This removes competing startup
+migrators when scaling API replicas in the same Compose project.
+
+The standalone runtime image retains its migrate-then-Uvicorn default for
+compatibility. Outside root Compose, provide an equivalent single migration
+job and override the API command when deploying multiple replicas. Do not
+start multiple migration jobs against the same database concurrently.
+PostgreSQL must use
 the pgvector image/extension and `DATABASE_URL` must be a normal libpq URL,
 without Prisma's unsupported `?schema=ai` query parameter. Revision
 `20260829_06` builds the CV HNSW with `CREATE INDEX CONCURRENTLY` and removes a
@@ -772,8 +782,13 @@ base requirements with the pinned Anthropic SDK, `PyJWT[crypto]` and Redis
 client. The dedicated `worker` image remains lean and installs only the
 CPU-specific dependencies in `requirements-ml.txt`; it does not inherit the
 chat/JWT/Redis stack. Neither image requires CUDA. Both run as non-root users.
-The API applies Alembic migrations before starting Uvicorn, and the root
-Compose worker waits for API readiness before starting ingestion.
+Root Compose applies Alembic through `ai-migrate` before starting Uvicorn;
+the workers wait for API readiness before starting ingestion. A failed
+migration prevents API/worker startup instead of racing another replica.
+The migrator has no published port and `restart: "no"`; exit code 0 is its
+expected successful state, not an unhealthy service. Deploy changed images
+with Compose `up --build` so its dependency gate is evaluated; do not bypass
+the gate with `--no-deps` or use `restart` to apply a schema upgrade.
 
 ## Tests
 

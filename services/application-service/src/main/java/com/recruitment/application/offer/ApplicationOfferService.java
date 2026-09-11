@@ -15,6 +15,7 @@ import com.recruitment.application.pipeline.ApplicationHistoryWriter;
 import com.recruitment.application.pipeline.ApplicationPipelineRepository;
 import com.recruitment.application.repository.ApplicationEventOutboxRepository;
 import com.recruitment.application.repository.OfferRepository;
+import com.recruitment.application.tracking.TrackingViewerRole;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.net.URI;
@@ -31,6 +32,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 
 @Service
 public class ApplicationOfferService {
@@ -90,6 +92,31 @@ public class ApplicationOfferService {
         this.objectMapper = objectMapper;
         this.clock = clock;
         this.topic = topic;
+    }
+
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public OfferResponse get(
+        UUID offerId, UUID viewerId, TrackingViewerRole viewerRole,
+        String authorization
+    ) {
+        OfferEntity offer = findOffer(offerId);
+        ApplicationEntity application = findApplication(offer.getApplicationId());
+        if (viewerRole == TrackingViewerRole.CANDIDATE) {
+            if (!application.getCandidateId().equals(viewerId)) {
+                throw new BusinessException(
+                    "OFFER_ACCESS_DENIED", "You cannot view this offer",
+                    HttpStatus.FORBIDDEN
+                );
+            }
+        } else if (viewerRole == TrackingViewerRole.RECRUITER) {
+            authorizeRecruiter(application, viewerId, authorization);
+        } else {
+            throw new BusinessException(
+                "OFFER_ACCESS_DENIED", "You cannot view this offer",
+                HttpStatus.FORBIDDEN
+            );
+        }
+        return OfferResponse.current(offer, application);
     }
 
     @Transactional

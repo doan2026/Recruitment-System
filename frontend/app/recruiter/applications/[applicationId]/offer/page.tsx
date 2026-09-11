@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
+import { ConfirmationDialog } from "../../../../../components/ConfirmationDialog";
 import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../../../components/ui";
 import { ApiClientError, toUserMessage } from "../../../../../lib/apiClient";
 import { OFFER_ATTACHMENT_SUPPORT } from "../../../../../lib/offerAttachment";
@@ -23,10 +24,14 @@ export default function RecruiterSendOfferPage() {
   const [submitError, setSubmitError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [confirmSend, setConfirmSend] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
+    setLoading(true);
+    setLoadError("");
     getApplicationDetail(applicationId, controller.signal)
       .then((response) => {
         if (active) {
@@ -44,11 +49,11 @@ export default function RecruiterSendOfferPage() {
       active = false;
       controller.abort();
     };
-  }, [applicationId]);
+  }, [applicationId, reloadKey]);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!application || submitting) return;
+  async function submit(event?: FormEvent<HTMLFormElement>, confirmed = false) {
+    event?.preventDefault();
+    if (!application || submitting || submitted) return;
     const numericSalary = Number(salary);
     if (application.status !== "INTERVIEW") {
       setFormError("Chỉ hồ sơ đang ở INTERVIEW mới có thể nhận Offer.");
@@ -62,11 +67,17 @@ export default function RecruiterSendOfferPage() {
       setFormError("Nhập đủ mức lương, ngày bắt đầu, vị trí và hạn phản hồi hợp lệ.");
       return;
     }
+    if (!/^\d{1,15}(?:\.\d{1,2})?$/.test(salary.trim()) || startDate < new Date().toISOString().slice(0, 10)) {
+      setFormError("Lương có tối đa 2 chữ số thập phân; ngày bắt đầu không được ở quá khứ.");
+      document.getElementById("offer-salary")?.focus();
+      return;
+    }
     const expiresInstant = new Date(expiresAt);
     if (Number.isNaN(expiresInstant.getTime()) || expiresInstant.getTime() <= Date.now()) {
       setFormError("Hạn phản hồi phải ở tương lai.");
       return;
     }
+    if (!confirmed) { setConfirmSend(true); return; }
     setSubmitting(true);
     setFormError("");
     setSubmitError("");
@@ -82,32 +93,40 @@ export default function RecruiterSendOfferPage() {
       setApplication((current) => current ? { ...current, status: response.data.applicationStatus, version: response.data.applicationVersion } : current);
       setSubmitted(true);
     } catch (reason: unknown) {
-      setSubmitError(toUserMessage(reason));
+      if (reason instanceof ApiClientError && (reason.code === "APPLICATION_CHANGED_CONCURRENTLY" || reason.code === "INVALID_APPLICATION_TRANSITION")) {
+        try {
+          const latest = await getApplicationDetail(application.id);
+          setApplication(latest.data);
+          setSubmitError("Hồ sơ vừa thay đổi. Đã tải trạng thái mới và giữ bản Offer bạn nhập; hãy kiểm tra trước khi chủ động gửi lại.");
+        } catch (reloadError: unknown) { setSubmitError(toUserMessage(reloadError)); }
+      } else setSubmitError(toUserMessage(reason));
     } finally {
       setSubmitting(false);
+      setConfirmSend(false);
     }
   }
 
   if (loading) return <main><LoadingState label="Đang tải hồ sơ để soạn Offer" /></main>;
-  if (loadError || !application) return <main><ErrorState message={loadError || "Không tìm thấy hồ sơ ứng tuyển."} /></main>;
+  if (loadError || !application) return <main><ErrorState message={loadError || "Không tìm thấy hồ sơ ứng tuyển."} onRetry={() => setReloadKey((value) => value + 1)} /></main>;
 
   return (
     <main>
-      <PageHeader eyebrow="RECRUITER · OFFER" title="Soạn Offer" description="Offer là lệnh riêng; không dùng endpoint đổi trạng thái để chuyển INTERVIEW thành OFFER." action={<Link className="btn" href={`/recruiter/jobs/${application.jobId}`}>Về pipeline</Link>} />
+      <ConfirmationDialog open={confirmSend} title="Gửi Offer cho ứng viên?" description={`Thư mời cho vị trí “${position}” với mức lương ${salary} sẽ được gửi và hồ sơ chuyển sang bước chờ phản hồi.`} confirmLabel="Gửi Offer" pending={submitting} onConfirm={() => { void submit(undefined, true); }} onCancel={() => setConfirmSend(false)} />
+      <PageHeader eyebrow="RECRUITER · OFFER" title="Soạn Offer" description="Gửi thư mời sau vòng phỏng vấn và chờ ứng viên phản hồi." action={<Link className="btn" href={`/recruiter/jobs/${application.jobId}`}>Về pipeline</Link>} />
       {submitted ? (
         <section className="panel">
-          <EmptyState title="Đã gửi Offer" description="Application đã chuyển sang OFFER bằng response authoritative từ backend." />
-          <div className="btn-group"><StatusBadge tone="success">Version {application.version}</StatusBadge><Link className="btn btn-primary" href={`/recruiter/jobs/${application.jobId}`}>Xem pipeline</Link></div>
+          <EmptyState title="Đã gửi Offer" description="Hồ sơ đã chuyển sang bước chờ ứng viên phản hồi thư mời." />
+          <div className="btn-group"><StatusBadge tone="success">Đang chờ phản hồi</StatusBadge><Link className="btn btn-primary" href={`/recruiter/jobs/${application.jobId}`}>Xem pipeline</Link></div>
         </section>
       ) : (
         <form className="panel form-stack" onSubmit={submit} noValidate>
           <div className="section-head row-between"><div><h2>{application.candidateName}</h2><p className="help">{application.jobTitle}</p></div><StatusBadge tone={application.status === "INTERVIEW" ? "success" : "warning"}>{application.status}</StatusBadge></div>
           <div className="form-grid">
-            <div className="field"><label className="label" htmlFor="offer-salary">Mức lương</label><input id="offer-salary" className="input" type="number" min="0.01" step="0.01" value={salary} onChange={(event) => setSalary(event.target.value)} /></div>
-            <div className="field"><label className="label" htmlFor="offer-start-date">Ngày bắt đầu</label><input id="offer-start-date" className="input" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} /></div>
-            <div className="field"><label className="label" htmlFor="offer-position">Vị trí</label><input id="offer-position" className="input" maxLength={200} value={position} onChange={(event) => setPosition(event.target.value)} /></div>
-            <div className="field"><label className="label" htmlFor="offer-expires">Hạn phản hồi</label><input id="offer-expires" className="input" type="datetime-local" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} /></div>
-            <div className="field span-2"><label className="label" htmlFor="offer-note">Ghi chú</label><textarea id="offer-note" className="textarea resize-none" maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} /></div>
+            <div className="field"><label className="label" htmlFor="offer-salary">Mức lương</label><input id="offer-salary" className="input" type="number" min="0.01" step="0.01" disabled={submitting} value={salary} onChange={(event) => setSalary(event.target.value)} /></div>
+            <div className="field"><label className="label" htmlFor="offer-start-date">Ngày bắt đầu</label><input id="offer-start-date" className="input" type="date" disabled={submitting} value={startDate} onChange={(event) => setStartDate(event.target.value)} /></div>
+            <div className="field"><label className="label" htmlFor="offer-position">Vị trí</label><input id="offer-position" className="input" maxLength={200} disabled={submitting} value={position} onChange={(event) => setPosition(event.target.value)} /></div>
+            <div className="field"><label className="label" htmlFor="offer-expires">Hạn phản hồi</label><input id="offer-expires" className="input" type="datetime-local" disabled={submitting} value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} /></div>
+            <div className="field span-2"><label className="label" htmlFor="offer-note">Ghi chú</label><textarea id="offer-note" className="textarea resize-none" maxLength={2000} disabled={submitting} value={note} onChange={(event) => setNote(event.target.value)} /></div>
             <div className="field span-2">
               <label className="label" htmlFor="offer-file">File Offer (tùy chọn)</label>
               <input id="offer-file" className="input" type="file" accept="application/pdf,.pdf" disabled aria-describedby="offer-file-support" />

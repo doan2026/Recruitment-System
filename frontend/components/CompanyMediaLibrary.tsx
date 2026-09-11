@@ -48,6 +48,7 @@ export function CompanyMediaLibrary({ company, onCompanyChange }: {
     setStatus("");
     try {
       const response = await updateCompany(company.id, {
+        expectedVersion: company.aggregateVersion,
         media: normalizeCompanyMediaLibrary(items).map(({ fileId, type, sortOrder }) => ({ fileId, type, sortOrder })),
         removeLogo: removeLogo || undefined,
       });

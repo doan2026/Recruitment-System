@@ -16,9 +16,14 @@ public record ApplicationListItemResponse(
     ApplicationSource source,
     BigDecimal matchScore,
     Instant appliedAt,
-    Instant updatedAt
+    Instant updatedAt,
+    UUID offerId
 ) {
     static ApplicationListItemResponse from(ApplicationEntity application) {
+        return from(application, null);
+    }
+
+    static ApplicationListItemResponse from(ApplicationEntity application, UUID offerId) {
         return new ApplicationListItemResponse(
             application.getId(),
             application.getJobId(),
@@ -28,7 +33,8 @@ public record ApplicationListItemResponse(
             application.getSource(),
             application.getMatchScore(),
             application.getAppliedAt(),
-            application.getUpdatedAt()
+            application.getUpdatedAt(),
+            offerId
         );
     }
 }

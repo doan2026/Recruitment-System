@@ -70,6 +70,11 @@ interface BackendCompany {
   id: string;
   name: string;
   slug?: string;
+  description?: string;
+  industry?: string;
+  size?: string;
+  address?: string;
+  website?: string | null;
   taxCode: string;
   logo?: { fileId: string; url: string } | null;
   media?: Array<{ fileId: string; url: string; type: "IMAGE" | "VIDEO"; sortOrder: number }>;
@@ -158,11 +163,12 @@ interface BackendJob {
   deadline: string;
   status?: Job["status"];
   rejectionReason?: string | null;
+  aggregateVersion?: number;
   createdAt?: string;
   updatedAt?: string;
 }
 
-export type RecruiterJobUpdateInput = RecruiterJobPayload;
+export type RecruiterJobUpdateInput = RecruiterJobPayload & { expectedVersion: number };
 
 interface JobSearchResult {
   items: BackendJob[];
@@ -207,6 +213,9 @@ interface BackendApplicationListItem {
   appliedAt: string;
   updatedAt: string;
   version?: number;
+  offerId?: string | null;
+  coverLetter?: string | null;
+  timeline?: CandidateApplication["timeline"];
 }
 
 interface BackendRecruiterApplicationPage {
@@ -391,7 +400,8 @@ function toList(value: string | string[] | undefined): string[] {
 function toJobType(value: string): Job["type"] {
   if (value === "FULL_TIME") return "FULLTIME";
   if (value === "PART_TIME") return "PARTTIME";
-  return "CONTRACT";
+  if (value === "REMOTE" || value === "INTERNSHIP") return value;
+  throw new ApiClientError({ code: "INVALID_API_RESPONSE" });
 }
 
 function toCompany(value: BackendCompany): Company {
@@ -400,6 +410,11 @@ function toCompany(value: BackendCompany): Company {
     name: value.name,
     shortName: value.slug || value.name,
     taxCode: value.taxCode,
+    description: value.description,
+    industry: value.industry,
+    size: value.size,
+    address: value.address,
+    website: value.website,
     ownerName: "Đang đồng bộ thành viên",
     aggregateVersion: value.aggregateVersion,
     verificationStatus: value.verifiedStatus,
@@ -431,7 +446,7 @@ function toJob(value: BackendJob, source: JobDataSource = "POSTGRESQL"): Job {
     department: "Chưa phân loại",
     salaryMin: toNumber(value.salaryMin) ?? 0,
     salaryMax: toNumber(value.salaryMax),
-    currency: "VND",
+    currency: value.currency ?? "VND",
     isNegotiable: value.isNegotiable,
     description: value.description,
     requirements: toList(value.requirements),
@@ -442,7 +457,7 @@ function toJob(value: BackendJob, source: JobDataSource = "POSTGRESQL"): Job {
     deadline: value.deadline,
     source,
     ownerName: value.createdBy || value.companyName || "Nhà tuyển dụng",
-    aggregateVersion: 0,
+    aggregateVersion: value.aggregateVersion ?? 0,
     rejectionReason: value.rejectionReason ?? undefined,
     createdAt: value.createdAt ?? value.updatedAt ?? new Date(0).toISOString(),
     updatedAt: value.updatedAt ?? value.createdAt ?? new Date(0).toISOString(),
@@ -453,13 +468,16 @@ function toApplication(value: BackendApplicationListItem): CandidateApplication 
   return {
     id: value.id,
     candidateId: value.candidateId ?? "",
-    candidateName: "Ứng viên",
+    candidateName: value.candidateId ? `Ứng viên ${value.candidateId.slice(0, 8)}` : "Ứng viên",
     email: "",
     jobId: value.jobId,
     jobTitle: value.jobTitle,
     companyName: "Doanh nghiệp tuyển dụng",
     status: value.status,
     version: value.version ?? null,
+    offerId: value.offerId,
+    coverLetter: value.coverLetter,
+    timeline: value.timeline,
     matchScore: value.matchScore ?? undefined,
     createdAt: value.appliedAt,
   };
@@ -596,6 +614,12 @@ export async function confirmCompanyMediaUpload(
 }
 
 export interface UpdateCompanyInput {
+  expectedVersion: number;
+  description?: string;
+  industry?: string;
+  size?: string;
+  address?: string;
+  website?: string | null;
   name?: string;
   taxCode?: string;
   logo?: { fileId: string };
@@ -609,20 +633,32 @@ export async function updateCompany(
   signal?: AbortSignal,
 ): Promise<ApiEnvelope<Company>> {
   const body = selectContractFields({
+    expectedVersion: input.expectedVersion,
+    description: input.description,
+    industry: input.industry,
+    size: input.size,
+    address: input.address,
+    website: input.website,
     name: input.name,
     taxCode: input.taxCode,
     logo: input.logo,
     media: input.media,
     removeLogo: input.removeLogo,
-  }, ["name", "taxCode", "logo", "media", "removeLogo"]);
+  }, ["expectedVersion", "description", "industry", "size", "address", "website", "name", "taxCode", "logo", "media", "removeLogo"]);
   if (isDemoPerson2Api) {
     const current = (await normalizeDemo(demo.getCompany())).data;
+    if (input.expectedVersion !== current.aggregateVersion) throw new ApiClientError({ code: "COMPANY_UPDATE_CONFLICT", status: 409 });
     const nameChanged = body.name !== undefined && body.name !== current.name;
     const taxCodeChanged = body.taxCode !== undefined && body.taxCode !== current.taxCode;
     const needsReview = current.verificationStatus === "VERIFIED" && (nameChanged || taxCodeChanged);
     return {
       data: {
         ...current,
+        description: input.description ?? current.description,
+        industry: input.industry ?? current.industry,
+        size: input.size ?? current.size,
+        address: input.address ?? current.address,
+        website: input.website === undefined ? current.website : input.website,
         name: typeof body.name === "string" ? body.name : current.name,
         taxCode: typeof body.taxCode === "string" ? body.taxCode : current.taxCode,
         media: {
@@ -913,12 +949,12 @@ export async function createRecruiterJob(
         level: `${values.experienceYears}+ năm`,
         experienceYears: values.experienceYears,
         quantity: values.quantity,
-        type: values.jobType === "FULL_TIME" ? "FULLTIME" : values.jobType === "PART_TIME" ? "PARTTIME" : "CONTRACT",
+        type: toJobType(values.jobType),
         location: values.location,
         department: "Chưa phân loại",
         salaryMin: values.salaryMin ?? 0,
         salaryMax: values.salaryMax ?? null,
-        currency: "VND",
+        currency: values.currency,
         isNegotiable: values.isNegotiable,
         description: values.description,
         requirements: toList(values.requirements),
@@ -980,9 +1016,11 @@ export async function updateRecruiterJob(
         salaryMax: values.salaryMax ?? null,
         isNegotiable: values.isNegotiable,
         location: values.location,
-        type: values.jobType === "FULL_TIME" ? "FULLTIME" : values.jobType === "PART_TIME" ? "PARTTIME" : "CONTRACT",
+        type: toJobType(values.jobType),
         skills: values.skills,
         deadline: values.deadline,
+        currency: values.currency,
+        aggregateVersion: values.expectedVersion + 1,
         updatedAt: new Date().toISOString(),
       },
       meta: null,
@@ -990,7 +1028,7 @@ export async function updateRecruiterJob(
   }
   assertCanonicalUuidV4(jobId, "jobId");
   const body = selectContractFields(values as unknown as Record<string, unknown>, [
-    "title", "description", "requirements", "benefits", "salaryMin", "salaryMax",
+    "expectedVersion", "title", "description", "requirements", "benefits", "salaryMin", "salaryMax",
     "isNegotiable", "currency", "location", "jobType", "experienceYears", "quantity", "skills", "deadline",
   ]);
   const response = await requestApi<BackendJob>(`${API_PATHS.jobs}${jobId}`, {
@@ -1473,6 +1511,7 @@ export async function getRecommendationsForCandidate(
     })),
     meta: {
       source: response.data.source,
+      fallbackReason: response.data.fallbackReason,
       nextCursor: response.data.nextCursor,
       hasMore: response.data.source === "AI" && response.data.nextCursor !== null,
     },
@@ -1542,6 +1581,53 @@ export async function getRecruiterCandidateRecommendations(
 export async function getOffer(id: string, signal?: AbortSignal): Promise<ApiEnvelope<Offer | null>> {
   if (isDemoPerson2Api) return normalizeDemo(demo.getOffer(id));
   assertCanonicalUuidV4(id, "offerId");
-  if (signal?.aborted) throw new ApiClientError({ code: "REQUEST_CANCELLED" });
-  throw new ApiClientError({ code: "OFFER_READ_UNAVAILABLE", status: 501 });
+  const response = await requestApi<ApplicationOfferMutationResult>(`${API_PATHS.offers}${id}`, { privateData: true, signal });
+  const value = response.data;
+  return { ...response, data: {
+    id: value.id, applicationId: value.applicationId, candidateName: "Ứng viên",
+    jobTitle: value.position, salary: String(value.salary),
+    offerVersion: value.version, applicationVersion: value.applicationVersion,
+    status: value.status === "SENT" ? "PENDING_CANDIDATE_RESPONSE" : value.status,
+    expiresAt: value.expiresAt, fileId: value.fileId ?? undefined, fileUrl: value.fileUrl ?? undefined,
+    startDate: value.startDate, note: value.note, responseNote: value.responseNote,
+    applicationStatus: value.applicationStatus,
+  } };
+}
+
+export async function getApplicationEvaluations(applicationId: string, signal?: AbortSignal): Promise<ApiEnvelope<ApplicationEvaluationResult[]>> {
+  if (isDemoPerson2Api) return { data: [], meta: null };
+  assertCanonicalUuidV4(applicationId, "applicationId");
+  return requestApi<ApplicationEvaluationResult[]>(applicationResourceRoute(applicationId, "evaluations"), { privateData: true, signal });
+}
+
+export interface ActiveCandidateCv {
+  id: string;
+  title: string;
+  type: "UPLOAD" | "ONLINE";
+  isDefault: boolean;
+  createdAt: string;
+}
+
+export async function getActiveCandidateCvs(signal?: AbortSignal): Promise<ApiEnvelope<ActiveCandidateCv[]>> {
+  if (isDemoPerson2Api) return { data: [
+    { id: "cv-frontend-01", title: "CV Frontend Senior", type: "UPLOAD", isDefault: true, createdAt: new Date(0).toISOString() },
+    { id: "cv-frontend-02", title: "CV Frontend Junior", type: "ONLINE", isDefault: false, createdAt: new Date(0).toISOString() },
+  ], meta: null };
+  return requestApi<ActiveCandidateCv[]>("/profile/cvs", { privateData: true, signal });
+}
+
+export async function saveCandidateBookmark(jobId: string, signal?: AbortSignal): Promise<ApiEnvelope<CandidateBookmark>> {
+  if (isDemoPerson2Api) return { data: { id: `bookmark-${jobId}`, jobId, createdAt: new Date().toISOString(), job: null }, meta: null };
+  assertCanonicalUuidV4(jobId, "jobId");
+  return requestApi<CandidateBookmark>(APPLICATION_API_ROUTES.bookmarks, {
+    method: "POST", privateData: true, signal, body: { jobId }, maxRetries: 0,
+  });
+}
+
+export async function removeCandidateBookmark(jobId: string, signal?: AbortSignal): Promise<ApiEnvelope<void>> {
+  if (isDemoPerson2Api) return { data: undefined, meta: null };
+  assertCanonicalUuidV4(jobId, "jobId");
+  return requestApi<void>(`${APPLICATION_API_ROUTES.bookmarks}/${jobId}`, {
+    method: "DELETE", privateData: true, signal, maxRetries: 0,
+  });
 }

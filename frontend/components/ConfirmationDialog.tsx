@@ -63,9 +63,6 @@ export function ConfirmationDialog({
         <p className="eyebrow">CẦN BẠN XÁC NHẬN</p>
         <h2 id={titleId}>{title}</h2>
         <p id={descriptionId}>{description}</p>
-        <div className="notice notice-warning">
-          Sau khi lưu, hồ sơ phải được Admin xác minh lại trước khi tiếp tục ở trạng thái đã duyệt.
-        </div>
         <div className="btn-group confirmation-dialog-actions">
           <button
             className="btn btn-primary"
@@ -77,7 +74,7 @@ export function ConfirmationDialog({
             {pending ? "Đang lưu…" : confirmLabel}
           </button>
           <button ref={cancelRef} className="btn" type="button" disabled={pending} onClick={cancel}>
-            Quay lại chỉnh sửa
+            Quay lại
           </button>
         </div>
       </div>

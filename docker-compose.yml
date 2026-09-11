@@ -441,6 +441,19 @@ services:
     expose:
       - "3001"
 
+  # Run migrations once; API replicas and workers never start before success.
+  ai-migrate:
+    build:
+      context: ./services/ai-service
+      target: runtime
+    env_file:
+      - ./services/ai-service/.env
+    command: [ "alembic", "upgrade", "head" ]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   ai-service:
     build:
       context: ./services/ai-service
@@ -451,10 +464,14 @@ services:
       INTERNAL_API_KEY_JOB_SEARCH: ${AI_INTERNAL_API_KEY_JOB_SEARCH:?AI_INTERNAL_API_KEY_JOB_SEARCH is required}
       INTERNAL_API_KEY_JOB_SEARCH_CANDIDATES: ${AI_INTERNAL_API_KEY_JOB_SEARCH_CANDIDATES:?AI_INTERNAL_API_KEY_JOB_SEARCH_CANDIDATES is required}
       INTERNAL_API_KEY_METRICS: ${AI_INTERNAL_API_KEY_METRICS:?AI_INTERNAL_API_KEY_METRICS is required}
+    # Override the image startup command: migrations belong to ai-migrate.
+    command: [ "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000" ]
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
+      ai-migrate:
+        condition: service_completed_successfully
     expose:
       - "8000"
     healthcheck:
@@ -506,9 +523,16 @@ services:
     build:
       context: ./frontend
       args:
-        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
+        # NEXT_PUBLIC values are compiled into the browser bundle.
+        NEXT_PUBLIC_API_BASE_URL: /api
+        NEXT_PUBLIC_API_MODE: gateway
     env_file:
       - ./frontend/.env
+    environment:
+      # Keep runtime consistent even when frontend/.env is set to local demo.
+      NEXT_PUBLIC_API_BASE_URL: /api
+      NEXT_PUBLIC_API_MODE: gateway
+      API_INTERNAL_BASE_URL: http://api-gateway
     restart: unless-stopped
     ports:
       - "3000:3000"

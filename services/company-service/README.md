@@ -2,6 +2,22 @@
 
 This NestJS service owns company profiles and company membership data.
 
+## Optimistic profile updates
+
+Every `PUT /companies/:id`, including media attachment, replacement and removal,
+must send `expectedVersion` from the `aggregateVersion` returned by the last
+profile read or successful write. Company versions start at **0**. Missing,
+non-integer and negative versions return `400`; a stale snapshot returns
+`409 COMPANY_UPDATE_CONFLICT` before upload/reference side effects. Reload the
+profile, preserve the draft and ask the user to reconcile before sending a new
+version. A version-only body is not an update.
+
+Unit tests preload Prisma and restore the test-process environment so the
+generated client cannot inject local `.env` values into fixture configuration.
+The application also skips dotenv loading under `NODE_ENV=test`; explicit test
+environment variables remain available. Production dotenv handling is unchanged.
+
+
 ## Metrics and SLO measurement
 
 Availability and latency SLOs need numbers that outlive a single request, and

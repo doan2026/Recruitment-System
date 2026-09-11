@@ -1,5 +1,5 @@
 export type PublicJobSearchSort = "RELEVANCE" | "NEWEST" | "SALARY_DESC";
-export type PublicJobTypeFilter = "" | "FULL_TIME" | "PART_TIME" | "CONTRACT";
+export type PublicJobTypeFilter = "" | "FULL_TIME" | "PART_TIME" | "REMOTE" | "INTERNSHIP";
 
 export interface PublicJobSearchForm {
   q: string;
@@ -36,6 +36,7 @@ export const emptyPublicJobSearchForm: PublicJobSearchForm = {
 
 export function validatePublicJobSearch(values: PublicJobSearchForm): Record<string, string> {
   const errors: Record<string, string> = {};
+  if (!["", "FULL_TIME", "PART_TIME", "REMOTE", "INTERNSHIP"].includes(values.jobType)) errors.jobType = "Chọn hình thức tuyển dụng hợp lệ.";
   const salaryMin = values.salaryMin.trim() ? Number(values.salaryMin) : undefined;
   const salaryMax = values.salaryMax.trim() ? Number(values.salaryMax) : undefined;
   if (

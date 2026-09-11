@@ -5,13 +5,26 @@ import { useEffect, useState } from "react";
 import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import { bookmarkCardView } from "../../../lib/applicationDegradedStates";
-import { getCandidateBookmarks, type CandidateBookmark } from "../../../lib/person2Api";
+import { getCandidateBookmarks, removeCandidateBookmark, type CandidateBookmark } from "../../../lib/person2Api";
 
 export default function CandidateBookmarksPage() {
   const [bookmarks, setBookmarks] = useState<CandidateBookmark[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [status, setStatus] = useState("");
+
+  async function remove(jobId: string) {
+    if (removing) return;
+    setRemoving(jobId); setError(""); setStatus("");
+    try {
+      await removeCandidateBookmark(jobId);
+      setBookmarks((items) => items.filter((item) => item.jobId !== jobId));
+      setStatus("Đã bỏ lưu việc làm.");
+    } catch (reason) { setError(toUserMessage(reason)); }
+    finally { setRemoving(null); }
+  }
 
   useEffect(() => {
     let active = true;
@@ -45,6 +58,7 @@ export default function CandidateBookmarksPage() {
         action={<Link className="btn" href="/candidate/jobs">Tìm thêm việc</Link>}
       />
       {error ? <ErrorState message={error} onRetry={() => setReloadKey((value) => value + 1)} /> : null}
+      {status ? <p className="notice notice-success" role="status">{status}</p> : null}
       {loading ? <LoadingState label="Đang tải việc làm đã lưu" /> : null}
       {!loading && !error && bookmarks.length === 0 ? (
         <EmptyState title="Chưa lưu việc làm" description="Những tin bạn đánh dấu sẽ xuất hiện ở đây." href="/candidate/jobs" action="Khám phá việc làm" />
@@ -73,6 +87,7 @@ export default function CandidateBookmarksPage() {
                 </div>
               ) : null}
               <div className="btn-group">
+                <button className="btn" type="button" disabled={removing !== null} aria-busy={removing === bookmark.jobId} onClick={() => void remove(bookmark.jobId)}>{removing === bookmark.jobId ? "Đang bỏ lưu…" : "Bỏ lưu"}</button>
                 {canOpen ? <Link className="btn btn-primary" href={`/candidate/jobs/${bookmark.jobId}`}>Xem việc làm</Link> : null}
                 {!view.available ? <button className="btn" type="button" onClick={() => setReloadKey((value) => value + 1)}>Thử đồng bộ lại</button> : null}
               </div>

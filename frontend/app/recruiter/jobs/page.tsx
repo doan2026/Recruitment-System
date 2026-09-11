@@ -112,7 +112,7 @@ export default function RecruiterJobsPage() {
         <Metric label="Tổng tin" value={String(jobs.length)} detail="Trong công ty" />
         <Metric label="Đang tuyển" value={String(jobs.filter((job) => job.status === "PUBLISHED").length)} detail="Công khai" />
         <Metric label="Chờ duyệt" value={String(jobs.filter((job) => job.status === "PENDING_APPROVAL").length)} detail="Đã gửi admin" />
-        <Metric label="Hồ sơ mới" value="24" detail="7 ngày gần nhất" />
+        <Metric label="Bản nháp" value={String(jobs.filter((job) => job.status === "DRAFT").length)} detail="Chưa gửi duyệt" />
       </section>
 
       {membershipLoading ? <p className="notice" role="status">Đang xác định phạm vi tin theo vai trò công ty…</p> : null}
@@ -193,7 +193,7 @@ export default function RecruiterJobsPage() {
                   <td>{job.ownerName}<div className="help">Người tạo tin</div></td>
                   <td><div className="btn-group">
                     <Link className="btn btn-ghost" href={`/recruiter/jobs/${job.id}`}>Pipeline</Link>
-                    {job.status === "DRAFT" ? <Link className={isRejectedRecruiterJob(job.status, job.rejectionReason) ? "btn btn-warning" : "btn btn-ghost"} href={`/recruiter/jobs/${job.id}/edit`}>{recruiterJobEditLabel(job.status, job.rejectionReason)}</Link> : null}
+                    {["DRAFT", "PENDING_APPROVAL", "PUBLISHED"].includes(job.status) ? <Link className={isRejectedRecruiterJob(job.status, job.rejectionReason) ? "btn btn-warning" : "btn btn-ghost"} href={`/recruiter/jobs/${job.id}/edit`}>{job.status === "DRAFT" ? recruiterJobEditLabel(job.status, job.rejectionReason) : "Sửa tin"}</Link> : null}
                     {recruiterJobActions(job.status).map((action) => <button key={action} className={action === "CLOSE" ? "btn btn-warning" : "btn btn-secondary"} type="button" disabled={pendingJobId === job.id} aria-busy={pendingJobId === job.id} onClick={() => { void runJobAction(job, action); }}>{pendingJobId === job.id ? "Đang xử lý…" : recruiterJobActionLabel(action)}</button>)}
                   </div></td>
                 </tr>

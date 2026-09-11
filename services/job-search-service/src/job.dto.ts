@@ -1,6 +1,6 @@
 import { JobStatus, JobType } from '@prisma/client';
-import { Type } from 'class-transformer';
-import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { Transform, Type } from 'class-transformer';
+import { ApiProperty, ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -21,21 +21,25 @@ export class CreateJobDto {
   @ApiProperty({ minLength: 2, maxLength: 200 })
   @IsString()
   @Length(2, 200)
+  @Transform(({ value }) => typeof value === 'string' ? value.normalize('NFKC').trim() : value)
   title!: string;
 
   @ApiProperty()
   @IsString()
   @Length(1, 20000)
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
   description!: string;
 
   @ApiProperty()
   @IsString()
   @Length(1, 20000)
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
   requirements!: string;
 
   @ApiProperty()
   @IsString()
   @Length(1, 20000)
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
   benefits!: string;
 
   @ApiPropertyOptional()
@@ -65,6 +69,7 @@ export class CreateJobDto {
   @ApiProperty({ maxLength: 255 })
   @IsString()
   @Length(1, 255)
+  @Transform(({ value }) => typeof value === 'string' ? value.normalize('NFKC').trim() : value)
   location!: string;
 
   @ApiProperty({ enum: JobType })
@@ -95,7 +100,19 @@ export class CreateJobDto {
   deadline!: string;
 }
 
-export class UpdateJobDto extends PartialType(CreateJobDto) {}
+export class UpdateJobDto extends PartialType(OmitType(CreateJobDto, ['currency'] as const)) {
+  @ApiPropertyOptional({ minLength: 3, maxLength: 3 })
+  @IsOptional()
+  @IsString()
+  @Length(3, 3)
+  currency?: string;
+
+  @ApiProperty({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })
+  @IsInt()
+  @Min(1)
+  @Max(Number.MAX_SAFE_INTEGER)
+  expectedVersion!: number;
+}
 
 export class RejectJobDto {
   @ApiProperty({ minLength: 3, maxLength: 1000 })
@@ -105,6 +122,7 @@ export class RejectJobDto {
 }
 
 export class JobDto {
+  @ApiProperty({ minimum: 1 }) aggregateVersion!: number;
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ format: 'uuid' }) companyId!: string;
   @ApiProperty({ format: 'uuid' }) createdBy!: string;

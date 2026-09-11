@@ -13,6 +13,21 @@ function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, headers: corsHeaders, body: JSON.stringify(body) });
 }
 
+
+async function login(page: Page, role: "CANDIDATE" | "RECRUITER", returnTo: string) {
+  await page.route(`${gatewayOrigin}/auth/login`, (route) => json(route, {
+    data: {
+      tokenType: "Bearer", accessToken: "gateway-test-access", refreshToken: "gateway-test-refresh",
+      user: { id: "5795c0de-7908-4ab5-9bed-4c4f1cf9c214", email: "test@example.test", role },
+    }, meta: null,
+  }));
+  await page.goto(`/login?returnTo=${encodeURIComponent(returnTo)}`);
+  await page.getByLabel("Email", { exact: true }).fill("test@example.test");
+  await page.getByLabel("Mật khẩu", { exact: true }).fill("fixture-password");
+  await page.getByRole("button", { name: "Đăng nhập", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(returnTo.replace(/[.*+?^${}()|[\]\\]/g, "\\async function expectNoDocumentOverflow") + "$"));
+}
+
 async function expectNoDocumentOverflow(page: Page) {
   await expect.poll(() => page.evaluate(() => (
     document.documentElement.scrollWidth - document.documentElement.clientWidth
@@ -76,15 +91,7 @@ test("Company search maps a Gateway failure safely and never renders the raw ser
   expect(attempts).toBeGreaterThanOrEqual(2);
 });
 
-test("Job search and recommendations preserve their distinct Gateway contracts", async ({ context, page }) => {
-  await context.addCookies([{
-    name: "careerhub_session",
-    value: "http-only-session-fixture",
-    domain: "127.0.0.1",
-    path: "/",
-    httpOnly: true,
-    sameSite: "Lax",
-  }]);
+test("Job search and recommendations preserve their distinct Gateway contracts", async ({ page }) => {
   const backendJob = {
     id: "2795c0de-7908-4ab5-9bed-4c4f1cf9c211",
     companyId: "3795c0de-7908-4ab5-9bed-4c4f1cf9c212",
@@ -98,6 +105,8 @@ test("Job search and recommendations preserve their distinct Gateway contracts",
     isNegotiable: false,
     location: "Hà Nội",
     jobType: "FULL_TIME",
+    currency: "VND",
+    aggregateVersion: 1,
     experienceYears: 3,
     quantity: 2,
     skills: ["Java", "Kafka"],
@@ -127,7 +136,7 @@ test("Job search and recommendations preserve their distinct Gateway contracts",
     });
   });
 
-  await page.goto("/candidate/jobs");
+  await login(page, "CANDIDATE", "/candidate/jobs");
 
   await expect(page.getByRole("heading", { name: "Việc làm công khai" })).toBeVisible();
   await expect(page.getByText("Backend Engineer", { exact: true })).toHaveCount(2);
@@ -162,6 +171,8 @@ test("Job edit keeps the local draft after one authoritative 409 reload and neve
     isNegotiable: false,
     location: "Hà Nội",
     jobType: "FULL_TIME",
+    currency: "VND",
+    aggregateVersion: 1,
     experienceYears: 3,
     quantity: 2,
     skills: ["Java", "Kafka"],
@@ -180,6 +191,7 @@ test("Job edit keeps the local draft after one authoritative 409 reload and neve
     await json(route, {
       data: [{
         ...baseJob,
+        aggregateVersion: conflictTriggered ? 2 : 1,
         title: conflictTriggered ? "Backend phía server" : baseJob.title,
         updatedAt: conflictTriggered ? "2026-08-31T00:00:00.000Z" : baseJob.updatedAt,
       }],
@@ -196,7 +208,7 @@ test("Job edit keeps the local draft after one authoritative 409 reload and neve
     await json(route, { data: { ...baseJob, status: "PENDING_APPROVAL" }, meta: null });
   });
 
-  await page.goto(`/recruiter/jobs/${jobId}/edit`);
+  await login(page, "RECRUITER", `/recruiter/jobs/${jobId}/edit`);
   const titleInput = page.getByRole("textbox", { name: "Tên vị trí" });
   await expect(titleInput).toHaveValue("Backend ban đầu");
   await titleInput.fill("Backend do tôi sửa");
@@ -215,15 +227,7 @@ test("Job edit keeps the local draft after one authoritative 409 reload and neve
   await expectNoDocumentOverflow(page);
 });
 
-test("Application tracking reloads authoritative version before withdraw", async ({ context, page }) => {
-  await context.addCookies([{
-    name: "careerhub_session",
-    value: "http-only-session-fixture",
-    domain: "127.0.0.1",
-    path: "/",
-    httpOnly: true,
-    sameSite: "Lax",
-  }]);
+test("Application tracking reloads authoritative version before withdraw", async ({ page }) => {
   const applicationId = "4795c0de-7908-4ab5-9bed-4c4f1cf9c213";
   const application = {
     id: applicationId,
@@ -259,7 +263,7 @@ test("Application tracking reloads authoritative version before withdraw", async
     });
   });
 
-  await page.goto("/candidate/applications");
+  await login(page, "CANDIDATE", "/candidate/applications");
   await expect(page.getByText("Phiên bản tải khi thao tác", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "Rút hồ sơ" }).click();
 
@@ -270,19 +274,11 @@ test("Application tracking reloads authoritative version before withdraw", async
   expect(Object.keys(sentWithdraw).sort()).toEqual(["expectedVersion", "note"]);
   expect(sentWithdraw.expectedVersion).toBe(7);
   expect(privateListHeaders["cache-control"]).toBe("no-store");
-  expect(privateListHeaders.cookie).toContain("careerhub_session=http-only-session-fixture");
+  expect(privateListHeaders.authorization).toBe("Bearer gateway-test-access");
   await expectNoDocumentOverflow(page);
 });
 
-test("AI chat sends the exact private Gateway contract and renders the answer as text", async ({ context, page }) => {
-  await context.addCookies([{
-    name: "careerhub_session",
-    value: "http-only-session-fixture",
-    domain: "127.0.0.1",
-    path: "/",
-    httpOnly: true,
-    sameSite: "Lax",
-  }]);
+test("AI chat sends the exact private Gateway contract and renders the answer as text", async ({ page }) => {
 
   let requestBody: Record<string, unknown> | null = null;
   let privateHeaders: Record<string, string> = {};
@@ -300,7 +296,7 @@ test("AI chat sends the exact private Gateway contract and renders the answer as
     });
   });
 
-  await page.goto("/ai");
+  await login(page, "CANDIDATE", "/ai");
   await expect(page.getByText("Session sẵn sàng")).toBeVisible();
   await page.getByLabel("Tin nhắn cho trợ lý nghề nghiệp").fill("Gợi ý việc phù hợp cho tôi");
   await page.getByRole("button", { name: "Gửi tin nhắn" }).click();
@@ -313,7 +309,7 @@ test("AI chat sends the exact private Gateway contract and renders the answer as
   expect(sentBody.session_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   expect(privateHeaders["cache-control"]).toBe("no-store");
   expect(privateHeaders.pragma).toBe("no-cache");
-  expect(privateHeaders.cookie).toContain("careerhub_session=http-only-session-fixture");
+  expect(privateHeaders.authorization).toBe("Bearer gateway-test-access");
   await expectNoDocumentOverflow(page);
 });
 
@@ -328,7 +324,7 @@ test("AI chat honors 429 Retry-After without replaying the message", async ({ pa
     });
   });
 
-  await page.goto("/ai");
+  await login(page, "CANDIDATE", "/ai");
   await expect(page.getByText("Session sẵn sàng")).toBeVisible();
   const composer = page.getByLabel("Tin nhắn cho trợ lý nghề nghiệp");
   await composer.fill("Gợi ý việc phù hợp cho tôi");

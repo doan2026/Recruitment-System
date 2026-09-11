@@ -7,4 +7,5 @@ module.exports = {
   },
   collectCoverageFrom: ['**/*.ts', '!**/*.spec.ts'],
   testEnvironment: 'node',
+  setupFiles: ['<rootDir>/../test/unit-env.setup.js'],
 };

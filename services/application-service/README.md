@@ -18,9 +18,11 @@ routes discard client-supplied internal identity headers.
 | `POST /{applicationId}/match-score/refresh` | `POST /applications/{applicationId}/match-score/refresh` | RECRUITER |
 | `PATCH /{applicationId}/status` | `PATCH /applications/{applicationId}/status` | RECRUITER |
 | `POST /{applicationId}/evaluation` | `POST /applications/{applicationId}/evaluation` | RECRUITER |
+| `GET /{applicationId}/evaluations` | `GET /applications/{applicationId}/evaluations` | RECRUITER |
 | `GET /{applicationId}/cv` | `GET /applications/{applicationId}/cv` | RECRUITER |
 | `POST /{applicationId}/cv/download-url` | `POST /applications/{applicationId}/cv/download-url` | RECRUITER |
 | `POST /{applicationId}/offer` | `POST /applications/{applicationId}/offer` | RECRUITER |
+| `GET /offers/{offerId}` | `GET /offers/{offerId}` | CANDIDATE, RECRUITER |
 | `PATCH /offers/{offerId}/respond` | `PATCH /offers/{offerId}/respond` | CANDIDATE |
 | `PATCH /{applicationId}/withdraw` | `PATCH /applications/{applicationId}/withdraw` | CANDIDATE |
 | `POST, GET /bookmarks` | `POST, GET /applications/bookmarks` | CANDIDATE |
@@ -325,6 +327,12 @@ criteria must contain 1 to 20 entries and the optional note is limited to 2,000
 characters. Evaluation data is deliberately absent from every Candidate
 response DTO.
 
+Recruiters can read persisted evaluations with
+`GET /applications/{applicationId}/evaluations`. Current Company membership
+is checked on every read; MEMBER and OWNER in the same company receive a
+creation-time/ID ordered array (empty when no evaluation exists). Candidate and
+ADMIN roles cannot read this endpoint. Responses are private and no-store.
+
 ```json
 {
   "score": 85.5,
@@ -345,6 +353,17 @@ must be supplied together; `fileUrl` must be an absolute HTTP(S) URL. The
 service currently validates and stores this reference, while canonical file
 metadata and ownership verification remain dependent on the internal File
 Service contract tracked in P09.
+
+Authorized Application detail, Candidate `/my` items and Recruiter list items
+now include nullable `offerId`, allowing navigation without a Notification
+handoff. `GET /offers/{offerId}` returns the stored terms/status plus `version`
+(the Offer version), `applicationVersion` and `applicationStatus` from one
+repeatable-read snapshot. The owning Candidate or a current company
+MEMBER/OWNER can read; all responses use `Cache-Control: private, no-store`
+and `Vary: Authorization`. Reload this endpoint before responding and after
+a version conflict; never reconstruct versions from a notification or local
+defaults. A lapsed Offer may still be `SENT` until its expiry scan, but
+`expiresAt` remains authoritative and the respond endpoint rejects it.
 
 Only the Candidate who owns the application can respond. The request carries
 `ACCEPTED` or `DECLINED`, `expectedOfferVersion`, and
@@ -473,6 +492,16 @@ sends `application-events` with a stable `event_id` and exponential retry. The
 canonical v1 JSON Schema and producer fixtures live under
 `contracts/events/`.
 
+Flyway V11 derives `aggregate_version` from the event payload and indexes
+pending rows per aggregate. Each publisher transaction claims only an
+aggregate's earliest unpublished event with `FOR UPDATE SKIP LOCKED`.
+Predecessors in backoff or claimed by another replica block their successors;
+other aggregates continue independently. Canonical order uses aggregate
+version rather than wall-clock timestamps; pending legacy events without a
+version drain first by creation timestamp/ID. Delivery remains at-least-once:
+an acknowledged send followed by DB rollback is replayed with the same
+`event_id`, so consumers must retain event-ID deduplication.
+
 ```json
 {
   "schema_version": 1,
@@ -525,9 +554,30 @@ child-row protection, exact `ANY` filtering, combined filters, company
 isolation, legacy/empty-snapshot behavior, and deterministic tied-value
 pagination. V9 coverage verifies legacy backfill, runtime cancellation,
 transaction rollback, and accept/decline races against reject/withdraw while
-keeping the v1 event contract unchanged. The verified Application Service
-suite passes 286 unit/WebMvc/security tests and 71 PostgreSQL/Kafka integration
-tests.
+keeping the v1 event contract unchanged. The earlier recorded baseline was
+286 unit/WebMvc/security tests and 71 PostgreSQL/Kafka integration tests.
+For the 2026-09-10 read-flow/outbox change, `mvn package` passed all 324
+unit/WebMvc/security tests and built the executable jar; the six isolated
+PostgreSQL tests below also passed. The complete Docker/Kafka integration
+profile was not rerun in that validation.
+
+### Disposable PostgreSQL outbox regression gate
+
+`ApplicationOutboxOrderingPostgresIT` additionally exercises the real V11
+migration and repository locks without a Docker daemon. It requires a separate
+local PostgreSQL test cluster with user `person2_test` and a disposable
+`person2_outbox_test` database. Its URL guard rejects project database names;
+the test truncates only that fixture's outbox table. Kafka delivery is mocked
+to force failures while PostgreSQL transactions and concurrency are real.
+
+```bash
+APPLICATION_OUTBOX_TEST_URL='jdbc:postgresql://127.0.0.1:55487/person2_outbox_test' \
+  mvn -Dtest=ApplicationOutboxOrderingPostgresIT test
+```
+
+The cases cover version order despite tied/skewed timestamps, per-aggregate
+backoff, legacy rows, concurrent replicas, failure/retry ordering and rollback
+replay. This is not a deployed Kafka or whole-system E2E claim.
 
 ## Job Service internal contract gate
 

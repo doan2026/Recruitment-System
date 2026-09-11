@@ -133,7 +133,7 @@ integrationDescribe('Job transactional event outbox', () => {
       RECRUITER_ID,
       'Bearer integration',
       created.id,
-      { location: 'Da Nang' },
+      { expectedVersion: created.aggregateVersion, location: 'Da Nang' },
     );
 
     expect(updated.location).toBe('Da Nang');
@@ -157,7 +157,7 @@ integrationDescribe('Job transactional event outbox', () => {
         RECRUITER_ID,
         'Bearer integration',
         created.id,
-        { description: 'This mutation must roll back' },
+        { expectedVersion: updated.aggregateVersion, description: 'This mutation must roll back' },
       ),
     ).rejects.toThrow('forced outbox failure');
 
@@ -176,8 +176,8 @@ integrationDescribe('Job transactional event outbox', () => {
       events,
     );
     const concurrentUpdates: UpdateJobDto[] = [
-      { title: 'Backend Engineer A' },
-      { title: 'Backend Engineer B' },
+      { expectedVersion: updated.aggregateVersion, title: 'Backend Engineer A' },
+      { expectedVersion: updated.aggregateVersion, title: 'Backend Engineer B' },
     ];
     const results = await Promise.allSettled(
       concurrentUpdates.map((dto) =>

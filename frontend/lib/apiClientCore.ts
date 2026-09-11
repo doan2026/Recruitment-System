@@ -85,6 +85,8 @@ export interface ApiRequestOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   privateData?: boolean;
+  authRecovery?: boolean;
+  attachAccessToken?: boolean;
   maxRetries?: number;
   fetcher?: typeof fetch;
 }
@@ -97,6 +99,7 @@ const MAX_RETRY_DELAY_MS = 2_000;
 let accessToken: string | null = null;
 let sessionAccountId: string | null = null;
 let sessionRevision = 0;
+let anonymousSessionInvalidated = false;
 const sessionListeners = new Set<(revision: number) => void>();
 
 export interface ApiSessionRefreshResult {
@@ -107,7 +110,7 @@ export interface ApiSessionRefreshResult {
 export type ApiSessionRefresher = () => Promise<ApiSessionRefreshResult | null>;
 
 let sessionRefresher: ApiSessionRefresher | null = null;
-let sessionRefreshFlight: Promise<boolean> | null = null;
+let sessionRefreshFlight: { revision: number; promise: Promise<boolean> } | null = null;
 
 function publishSessionRevision(): void {
   sessionRevision += 1;
@@ -127,6 +130,7 @@ export function setApiSession({
   const identityChanged = normalizedAccountId !== sessionAccountId;
   accessToken = normalizedToken;
   sessionAccountId = normalizedAccountId;
+  anonymousSessionInvalidated = false;
   if (identityChanged) publishSessionRevision();
 }
 
@@ -140,12 +144,15 @@ export function setApiAccessToken(token: string | null): void {
   if (normalized === accessToken) return;
   accessToken = normalized;
   sessionAccountId = null;
+  anonymousSessionInvalidated = false;
   publishSessionRevision();
 }
 
 export function clearApiSession(): void {
+  if (!accessToken && !sessionAccountId && anonymousSessionInvalidated) return;
   accessToken = null;
   sessionAccountId = null;
+  anonymousSessionInvalidated = true;
   publishSessionRevision();
 }
 
@@ -166,24 +173,26 @@ export function configureApiSessionRefresh(refresher: ApiSessionRefresher | null
   sessionRefresher = refresher;
 }
 
-async function refreshApiSession(expectedAccountId: string | null): Promise<boolean> {
-  if (!sessionRefresher) return false;
-  if (!sessionRefreshFlight) {
-    sessionRefreshFlight = (async () => {
+async function refreshApiSession(expectedAccountId: string | null, expectedRevision: number): Promise<boolean> {
+  const refresher = sessionRefresher;
+  if (!refresher) return false;
+  if (!sessionRefreshFlight || sessionRefreshFlight.revision !== expectedRevision) {
+    const flight = { revision: expectedRevision, promise: Promise.resolve(false) };
+    flight.promise = (async () => {
       try {
-        const refreshed = await sessionRefresher?.();
+        const refreshed = await refresher();
         const accountId = refreshed?.accountId.trim() ?? "";
-        if (!refreshed || !accountId || (expectedAccountId !== null && accountId !== expectedAccountId)) return false;
+        if (!refreshed || !accountId || sessionRevision !== expectedRevision
+          || (expectedAccountId !== null && accountId !== expectedAccountId)) return false;
         setApiSession({ token: refreshed.token, accountId });
         return true;
-      } catch {
-        return false;
-      }
+      } catch { return false; }
     })().finally(() => {
-      sessionRefreshFlight = null;
+      if (sessionRefreshFlight === flight) sessionRefreshFlight = null;
     });
+    sessionRefreshFlight = flight;
   }
-  return sessionRefreshFlight;
+  return sessionRefreshFlight.promise;
 }
 
 export function isCanonicalUuidV4(value: string): boolean {
@@ -319,7 +328,10 @@ export function normalizeError(code: string): string {
     COMPANY_MEDIA_UPLOAD_INTENT_INVALID: "Phiên tải media không còn hợp lệ. Hãy xin chữ ký mới.",
     COMPANY_MEDIA_UPLOAD_INTENT_CONFLICT: "Phiên tải media đã thay đổi. Hãy chọn lại file và xin chữ ký mới.",
     COMPANY_MEDIA_UPLOAD_CONFIRM_CONFLICT: "Trạng thái file đã thay đổi. Hãy tải lại hồ sơ trước khi tiếp tục.",
-    OFFER_READ_UNAVAILABLE: "Offer chỉ được mở từ thông báo vì Application API chưa có endpoint đọc offer.",
+    HTTP_401: "Phiên đăng nhập không còn hợp lệ. Hãy đăng nhập lại.",
+    HTTP_403: "Bạn không có quyền thực hiện thao tác này.",
+    INVALID_CREDENTIALS: "Email hoặc mật khẩu không đúng.",
+    ACCOUNT_LOCKED: "Tài khoản đang bị khóa. Hãy liên hệ quản trị viên.",
   };
   return messages[code] ?? "Không thể hoàn tất yêu cầu. Hãy thử lại.";
 }
@@ -333,7 +345,9 @@ export function toNoStoreHeaders(): Record<string, string> {
 }
 
 function apiBaseUrl(): string {
-  const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ?? "";
+  const configured = (typeof window === "undefined"
+    ? process.env.API_INTERNAL_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL
+    : process.env.NEXT_PUBLIC_API_BASE_URL)?.trim() ?? "";
   if (!configured && typeof window === "undefined") {
     throw new ApiClientError({ code: "API_BASE_URL_REQUIRED" });
   }
@@ -404,7 +418,8 @@ export async function requestApi<T>(
   if (options.privateData) {
     Object.entries(toNoStoreHeaders()).forEach(([key, value]) => headers.set(key, value));
   }
-  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+  if (options.attachAccessToken === false) headers.delete("Authorization");
+  else if (accessToken && options.privateData) headers.set("Authorization", `Bearer ${accessToken}`);
   if (options.body !== undefined) headers.set("Content-Type", "application/json");
 
   const query = buildQuery(options.query, options.allowedQueryKeys);
@@ -415,9 +430,16 @@ export async function requestApi<T>(
   let transientAttempt = 0;
   let authRefreshAttempted = false;
   const requestAccountId = sessionAccountId;
+  const requestRevision = sessionRevision;
+
+  const assertCurrentSession = () => {
+    if (controller.signal.aborted) throw new ApiClientError({ code: timedOut ? "TIMEOUT" : "REQUEST_CANCELLED" });
+    if (options.privateData && requestRevision !== sessionRevision) throw new ApiClientError({ code: "REQUEST_CANCELLED" });
+  };
 
   try {
     for (;;) {
+      assertCurrentSession();
       let response: Response;
       try {
         response = await fetcher(url, {
@@ -435,8 +457,13 @@ export async function requestApi<T>(
         throw new ApiClientError({ code: "NETWORK_ERROR" });
       }
 
+      if (options.privateData && requestRevision !== sessionRevision) {
+        throw new ApiClientError({ code: "REQUEST_CANCELLED" });
+      }
       const payload = await readPayload(response);
+      assertCurrentSession();
       if (response.ok) {
+        if (response.status === 204) return { data: undefined as T, meta: null };
         if (!isEnvelope(payload)) {
           throw new ApiClientError({ code: "INVALID_API_RESPONSE", status: response.status });
         }
@@ -456,15 +483,19 @@ export async function requestApi<T>(
         details: errorPayload.details,
         retryAfterSeconds,
       });
-      if (response.status === 401) {
+      if (response.status === 401 && options.privateData && options.authRecovery !== false) {
         if (options.privateData && !authRefreshAttempted) {
           authRefreshAttempted = true;
-          if (await refreshApiSession(requestAccountId)) {
+          const refreshed = await refreshApiSession(requestAccountId, requestRevision);
+          // A failed refresh from an old account must not log out a newer one.
+          if (!refreshed) assertCurrentSession();
+          if (refreshed) {
             if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
             else headers.delete("Authorization");
             continue;
           }
         }
+        assertCurrentSession();
         clearApiSession();
         throw apiError;
       }

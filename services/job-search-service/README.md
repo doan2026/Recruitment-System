@@ -30,6 +30,27 @@ Creating a job always stores `DRAFT`. Company membership and VERIFIED status
 are resolved through `GET /companies/by-user/:userId` with the caller JWT.
 OWNER manages every company job; MEMBER only manages jobs they created.
 
+## Optimistic job updates
+
+Every `PUT /jobs/:id` must include `expectedVersion` from the last returned
+`aggregateVersion`. Job versions start at **1** and are now returned in public
+and recruiter Job DTOs as well as create/update/lifecycle responses. Missing or
+invalid versions return `400`; a stale browser snapshot returns
+`409 JOB_STATE_CHANGED` before mutation, indexing intent or outbox creation.
+Reload, reconcile the draft and explicitly submit the new version; do not silently
+retry a stale form. A version-only body is rejected as `EMPTY_UPDATE`.
+
+Partial updates preserve currency when omitted. Required content is normalized
+and checked for non-blank values before persistence, so accepted jobs produce
+valid AI event text. Normal CRUD and recommendation membership lookups use the
+same bounded, strict Company response validation and fail closed on malformed
+membership instead of broadening the Job query scope.
+
+Unit tests preload Prisma and restore the test-process environment to prevent
+local `.env` from overriding fixture configuration. `NODE_ENV=test` also disables
+application dotenv loading; production environment behavior is unchanged.
+
+
 ## Metrics and SLO measurement
 
 Availability and latency SLOs need numbers that outlive a single request, and

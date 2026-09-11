@@ -67,7 +67,7 @@ import { isRejectedRecruiterJob, nextRecruiterJobStatus, recruiterJobActionLabel
 import { normalizeJobSkills, normalizeRecruiterJobForm, validateRecruiterJobForm, type RecruiterJobFormValues } from "./jobForm";
 import { buildRecruiterJobTable, type RecruiterJobTableRow } from "./recruiterJobTable";
 import { isRecruiterJobAccessDenied, recruiterJobScopeView } from "./recruiterJobAccess";
-import { isOffsetWindowTooDeep, mergePublicJobPage, normalizePublicJobSearch, publicJobSearchScope, validatePublicJobSearch } from "./publicJobSearch";
+import { emptyPublicJobSearchForm, isOffsetWindowTooDeep, mergePublicJobPage, normalizePublicJobSearch, publicJobSearchScope, validatePublicJobSearch } from "./publicJobSearch";
 import { cursorRestartView } from "./cursorRecovery";
 import { canLoadMoreRecommendations, jobDataSourceView, mergeRecommendationPage, recommendationFallbackView, recommendationSourceView } from "./recommendationPresentation";
 import { CANDIDATE_RECOMMENDATION_DEBOUNCE_MS, candidateRecommendationEmptyView, type CandidateRecommendationEmptyReason } from "./candidateRecommendation";
@@ -594,8 +594,8 @@ test("non-optimistic 409 errors are not routed through reload and compare", asyn
 
 test("Job conflict snapshot compares the retained form against one authoritative reload", async () => {
   let reloads = 0;
-  const localDraft = { title: "Backend mới", location: "Hà Nội", jobType: "FULL_TIME", deadline: "2026-12-31", isNegotiable: true, salaryMin: "", salaryMax: "", experienceYears: "3", quantity: "2", skills: "Java, Kafka", description: "Mô tả mới", requirements: "Java", benefits: "Bảo hiểm" } as const;
-  const server = { title: "Backend cũ", location: "Hà Nội", type: "FULLTIME", deadline: "2026-12-31T00:00:00Z", isNegotiable: true, salaryMin: 0, salaryMax: null, skills: ["Java"], description: "Mô tả cũ", aggregateVersion: 8 } as unknown as Job;
+  const localDraft = { currency: "USD", title: "Backend mới", location: "Hà Nội", jobType: "FULL_TIME", deadline: "2026-12-31", isNegotiable: true, salaryMin: "", salaryMax: "", experienceYears: "3", quantity: "2", skills: "Java, Kafka", description: "Mô tả mới", requirements: "Java", benefits: "Bảo hiểm" } as const;
+  const server = { currency: "USD", title: "Backend cũ", location: "Hà Nội", type: "FULLTIME", deadline: "2026-12-31T00:00:00Z", isNegotiable: true, salaryMin: 0, salaryMax: null, skills: ["Java"], description: "Mô tả cũ", aggregateVersion: 8 } as unknown as Job;
   const snapshot = await prepareConflictSnapshot({
     error: new ApiClientError({ code: "JOB_STATE_CHANGED", status: 409 }),
     localDraft: { ...localDraft },
@@ -1220,6 +1220,7 @@ test("only exact JOB_ACCESS_DENIED 403 triggers a recruiter Job scope refresh", 
 });
 
 const validJobForm: RecruiterJobFormValues = {
+  currency: "VND",
   title: "Frontend Developer",
   description: "Xây dựng sản phẩm web.",
   requirements: "Có kinh nghiệm React.",
@@ -1343,4 +1344,23 @@ test("every recruiter candidate empty reason is a normal 200-state with contextu
   assert.ok(views.every((view) => view.title && view.description && view.actionLabel));
   assert.match(candidateRecommendationEmptyView("NO_DISCOVERABLE_CANDIDATES").description, /consent|Profile Service/i);
   assert.equal(candidateRecommendationEmptyView("NO_MATCHING_CV_EMBEDDINGS").action, "EDIT_JOB");
+});
+
+
+test("Job form preserves all backend types and rejects the removed CONTRACT type", () => {
+  for (const jobType of ["FULL_TIME", "PART_TIME", "REMOTE", "INTERNSHIP"] as const) {
+    const form = { ...validJobForm, jobType, currency: "USD" };
+    assert.equal(validateRecruiterJobForm(form, new Date("2026-09-01T00:00:00Z")).jobType, undefined);
+    assert.equal(normalizeRecruiterJobForm(form).jobType, jobType);
+    assert.equal(normalizeRecruiterJobForm(form).currency, "USD");
+  }
+  assert.ok(validateRecruiterJobForm({ ...validJobForm, jobType: "CONTRACT" as RecruiterJobFormValues["jobType"] }).jobType);
+});
+
+test("Job search accepts REMOTE and INTERNSHIP without changing their wire values", () => {
+  for (const jobType of ["REMOTE", "INTERNSHIP"] as const) {
+    const form = { ...emptyPublicJobSearchForm, jobType };
+    assert.deepEqual(validatePublicJobSearch(form), {});
+    assert.equal(normalizePublicJobSearch(form).jobType, jobType);
+  }
 });

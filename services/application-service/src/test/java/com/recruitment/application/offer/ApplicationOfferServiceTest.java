@@ -25,6 +25,7 @@ import com.recruitment.application.pipeline.ApplicationHistoryWriter;
 import com.recruitment.application.pipeline.ApplicationPipelineRepository;
 import com.recruitment.application.repository.ApplicationEventOutboxRepository;
 import com.recruitment.application.repository.OfferRepository;
+import com.recruitment.application.tracking.TrackingViewerRole;
 import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.time.Clock;
@@ -146,6 +147,63 @@ class ApplicationOfferServiceTest {
             eq(0L),
             eq(NOW)
         )).thenReturn(1);
+    }
+
+    @Test
+    void candidateReadsTermsAndBothCurrentVersionsAfterReload() {
+        when(application.getStatus()).thenReturn(ApplicationStatus.OFFER);
+        when(application.getVersion()).thenReturn(9L);
+        when(offer.getVersion()).thenReturn(2L);
+        OfferResponse result = service.get(
+            offerId, candidateId, TrackingViewerRole.CANDIDATE, AUTHORIZATION
+        );
+        assertThat(result.id()).isEqualTo(offerId);
+        assertThat(result.salary()).isEqualByComparingTo("25000000.00");
+        assertThat(result.version()).isEqualTo(2L);
+        assertThat(result.applicationVersion()).isEqualTo(9L);
+        assertThat(result.applicationStatus()).isEqualTo(ApplicationStatus.OFFER);
+        verify(companies, never()).getRecruiterMembership(any(), any());
+    }
+
+    @Test
+    void otherCandidateCannotReadOffer() {
+        assertBusinessException(
+            () -> service.get(offerId, UUID.randomUUID(),
+                TrackingViewerRole.CANDIDATE, AUTHORIZATION),
+            "OFFER_ACCESS_DENIED", HttpStatus.FORBIDDEN
+        );
+    }
+
+    @ParameterizedTest
+    @EnumSource(CompanyMemberRole.class)
+    void companyRecruiterCanReadEvenTerminalOffer(CompanyMemberRole role) {
+        when(companies.getRecruiterMembership(recruiterId, AUTHORIZATION))
+            .thenReturn(new RecruiterCompanyMembership(companyId, role));
+        when(offer.getStatus()).thenReturn(OfferStatus.EXPIRED);
+        assertThat(service.get(
+            offerId, recruiterId, TrackingViewerRole.RECRUITER, AUTHORIZATION
+        ).status()).isEqualTo(OfferStatus.EXPIRED);
+    }
+
+    @Test
+    void otherCompanyRecruiterCannotReadOffer() {
+        when(companies.getRecruiterMembership(recruiterId, AUTHORIZATION))
+            .thenReturn(new RecruiterCompanyMembership(UUID.randomUUID(), CompanyMemberRole.OWNER));
+        assertBusinessException(
+            () -> service.get(offerId, recruiterId,
+                TrackingViewerRole.RECRUITER, AUTHORIZATION),
+            "APPLICATION_ACCESS_DENIED", HttpStatus.FORBIDDEN
+        );
+    }
+
+    @Test
+    void missingOfferReadReturnsNotFound() {
+        when(offers.findById(offerId)).thenReturn(Optional.empty());
+        assertBusinessException(
+            () -> service.get(offerId, candidateId,
+                TrackingViewerRole.CANDIDATE, AUTHORIZATION),
+            "OFFER_NOT_FOUND", HttpStatus.NOT_FOUND
+        );
     }
 
     @ParameterizedTest

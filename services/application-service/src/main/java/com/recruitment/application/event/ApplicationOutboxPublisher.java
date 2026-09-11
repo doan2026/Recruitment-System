@@ -50,10 +50,7 @@ public class ApplicationOutboxPublisher {
     public void publishPending() {
         Instant now = clock.instant();
         List<ApplicationEventOutboxEntity> events =
-            outbox
-                .findTop100ByPublishedAtIsNullAndNextAttemptAtLessThanEqualOrderByCreatedAtAsc(
-                    now
-                );
+            outbox.lockNextPublishableBatch(now);
         for (ApplicationEventOutboxEntity event : events) {
             try {
                 kafka.send(

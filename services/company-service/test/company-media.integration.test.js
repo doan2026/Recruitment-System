@@ -311,6 +311,13 @@ const token = (userId, role = 'RECRUITER') =>
   );
 
 const call = async (method, path, { userId, body, headers } = {}) => {
+  // Existing media scenarios model a client loading its current profile before PUT.
+  // An explicit expectedVersion is preserved so stale-version tests can supply one.
+  if (method === 'PUT' && body && !Object.hasOwn(body, 'expectedVersion')) {
+    const snapshot = await call('GET', '/me', { userId });
+    assert.equal(snapshot.status, 200, JSON.stringify(snapshot.body));
+    body = { ...body, expectedVersion: snapshot.body.data.aggregateVersion };
+  }
   const response = await fetch(baseUrl + path, {
     method,
     headers: {

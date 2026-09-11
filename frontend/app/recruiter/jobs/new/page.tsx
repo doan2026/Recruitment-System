@@ -75,7 +75,8 @@ export default function CreateJobPage() {
           <select id="jobType" className="select" disabled={!!createdJob} value={values.jobType} onChange={(event) => change("jobType", event.target.value as RecruiterJobFormValues["jobType"])}>
             <option value="FULL_TIME">Toàn thời gian</option>
             <option value="PART_TIME">Bán thời gian</option>
-            <option value="CONTRACT">Hợp đồng</option>
+            <option value="REMOTE">Làm việc từ xa</option>
+            <option value="INTERNSHIP">Thực tập</option>
           </select>
         </div>
         <div className="field">
@@ -96,6 +97,11 @@ export default function CreateJobPage() {
         <div className="field">
           <span className="label">Chính sách lương</span>
           <label className="row"><input type="checkbox" disabled={!!createdJob} checked={values.isNegotiable} onChange={(event) => change("isNegotiable", event.target.checked)} /> Thỏa thuận khi phỏng vấn</label>
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="currency">Đơn vị tiền tệ</label>
+          <input id="currency" className="input" maxLength={3} value={values.currency} disabled={submitting || !!createdJob} onChange={(event) => change("currency", event.target.value.toUpperCase())} aria-invalid={attempted && !!errors.currency} aria-describedby={attempted && errors.currency ? "currency-error" : "currency-help"} />
+          {attempted && errors.currency ? <span id="currency-error" className="form-error">{errors.currency}</span> : <span id="currency-help" className="help">Mã tiền tệ, ví dụ VND hoặc USD.</span>}
         </div>
         {!values.isNegotiable ? (
           <>

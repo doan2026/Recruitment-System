@@ -4,6 +4,10 @@ import com.recruitment.application.api.BusinessException;
 import com.recruitment.application.client.CompanyClient;
 import com.recruitment.application.client.RecruiterCompanyMembership;
 import com.recruitment.application.domain.ApplicationEntity;
+import com.recruitment.application.domain.OfferEntity;
+import com.recruitment.application.repository.OfferRepository;
+import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -15,23 +19,35 @@ public class ApplicationTrackingService {
     private final ApplicationTrackingRepository applications;
     private final ApplicationTimelineRepository history;
     private final CompanyClient companies;
+    private final OfferRepository offers;
 
     public ApplicationTrackingService(
         ApplicationTrackingRepository applications,
         ApplicationTimelineRepository history,
-        CompanyClient companies
+        CompanyClient companies,
+        OfferRepository offers
     ) {
         this.applications = applications;
         this.history = history;
         this.companies = companies;
+        this.offers = offers;
     }
 
     @Transactional(readOnly = true)
     public List<ApplicationListItemResponse> listMine(UUID candidateId) {
-        return applications
-            .findAllByCandidateIdOrderByAppliedAtDesc(candidateId)
-            .stream()
-            .map(ApplicationListItemResponse::from)
+        List<ApplicationEntity> mine =
+            applications.findAllByCandidateIdOrderByAppliedAtDesc(candidateId);
+        if (mine.isEmpty()) return List.of();
+        Map<UUID, UUID> offerIds = offers.findReferencesByApplicationIdIn(
+            mine.stream().map(ApplicationEntity::getId).toList()
+        ).stream().collect(Collectors.toMap(
+            OfferRepository.OfferReference::getApplicationId,
+            OfferRepository.OfferReference::getId
+        ));
+        return mine.stream()
+            .map(application -> ApplicationListItemResponse.from(
+                application, offerIds.get(application.getId())
+            ))
             .toList();
     }
 
@@ -51,7 +67,8 @@ public class ApplicationTrackingService {
         authorize(application, viewerId, viewerRole, authorization);
         return ApplicationDetailResponse.from(
             application,
-            history.findTimeline(applicationId)
+            history.findTimeline(applicationId),
+            offers.findByApplicationId(applicationId).map(OfferEntity::getId).orElse(null)
         );
     }
 

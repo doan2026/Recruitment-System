@@ -287,7 +287,14 @@ export class JobService {
     jobId: string,
     dto: UpdateJobDto,
   ): Promise<JobDto> {
-    if (!Object.keys(dto).length) {
+    if (!Number.isSafeInteger(dto.expectedVersion) || dto.expectedVersion < 1) {
+      throw new ApiException(
+        'INVALID_EXPECTED_VERSION',
+        'expectedVersion must be a positive safe integer',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (!Object.entries(dto).some(([key, value]) => key !== 'expectedVersion' && value !== undefined)) {
       throw new ApiException(
         'EMPTY_UPDATE',
         'At least one job field must be provided',
@@ -302,6 +309,13 @@ export class JobService {
       where: { id: jobId },
     });
     this.requireManagePermission(current, company, recruiterId);
+    if (current.aggregateVersion !== dto.expectedVersion) {
+      throw new ApiException(
+        'JOB_STATE_CHANGED',
+        'Job changed since it was loaded; reload before saving',
+        HttpStatus.CONFLICT,
+      );
+    }
     if (
       current.status === JobStatus.CLOSED ||
       current.status === JobStatus.EXPIRED
@@ -361,7 +375,7 @@ export class JobService {
         const result = await transaction.job.updateMany({
           where: {
             id: jobId,
-            aggregateVersion: current.aggregateVersion,
+            aggregateVersion: dto.expectedVersion,
           },
           data: {
             ...data,
@@ -679,6 +693,26 @@ export class JobService {
   }
 
   private validateAndMap(dto: CreateJobDto) {
+    for (const [field, minimum, maximum] of [
+      ['title', 2, 200],
+      ['description', 1, 20000],
+      ['requirements', 1, 20000],
+      ['benefits', 1, 20000],
+      ['location', 1, 255],
+    ] as const) {
+      const value = dto[field];
+      const normalized = typeof value === 'string'
+        ? (field === 'title' || field === 'location' ? value.normalize('NFKC') : value).trim()
+        : '';
+      if (normalized.length < minimum || normalized.length > maximum) {
+        throw new ApiException(
+          'INVALID_JOB_CONTENT',
+          `${field} must contain ${minimum} to ${maximum} non-blank characters`,
+          HttpStatus.BAD_REQUEST,
+          { field },
+        );
+      }
+    }
     const deadline = new Date(dto.deadline + 'T00:00:00.000Z');
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
@@ -742,6 +776,7 @@ export class JobService {
 
   private toDto(job: Job): JobDto {
     return {
+      aggregateVersion: job.aggregateVersion,
       id: job.id,
       companyId: job.companyId,
       createdBy: job.createdBy,

@@ -18,10 +18,17 @@ public record RecruiterApplicationItemResponse(
     BigDecimal matchScore,
     Instant appliedAt,
     Instant updatedAt,
-    long version
+    long version,
+    UUID offerId
 ) {
     static RecruiterApplicationItemResponse from(
         ApplicationEntity application
+    ) {
+        return from(application, null);
+    }
+
+    static RecruiterApplicationItemResponse from(
+        ApplicationEntity application, UUID offerId
     ) {
         return new RecruiterApplicationItemResponse(
             application.getId(),
@@ -34,7 +41,8 @@ public record RecruiterApplicationItemResponse(
             application.getMatchScore(),
             application.getAppliedAt(),
             application.getUpdatedAt(),
-            application.getVersion()
+            application.getVersion(),
+            offerId
         );
     }
 }
