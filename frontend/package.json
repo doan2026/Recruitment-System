@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "test": "npm run test:api",
-    "test:api": "tsc -p tsconfig.api-test.json && node --test .test-dist/apiClient.test.js",
+    "test:api": "tsc -p tsconfig.api-test.json && node --test .test-dist/*.test.js",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit"
   },

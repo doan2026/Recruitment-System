@@ -453,6 +453,7 @@ describe('CompanyService', () => {
     ).rejects.toMatchObject({ code: 'COMPANY_OWNER_REQUIRED' });
     await expect(
       service.update(RECRUITER_ID, COMPANY_ID, {
+        expectedVersion: 0,
         logo: { fileId: LOGO_FILE_ID },
       }),
     ).rejects.toMatchObject({ code: 'COMPANY_OWNER_REQUIRED' });
@@ -718,7 +719,7 @@ describe('CompanyService', () => {
       }),
     );
 
-    await service.update(RECRUITER_ID, COMPANY_ID, {
+    await service.update(RECRUITER_ID, COMPANY_ID, { expectedVersion: 7,
       logo: { fileId: LOGO_FILE_ID },
       media: [
         { fileId: IMAGE_FILE_ID, type: CompanyMediaType.IMAGE },
@@ -825,10 +826,10 @@ describe('CompanyService', () => {
       }),
     );
 
-    await service.update(RECRUITER_ID, COMPANY_ID, {
+    await service.update(RECRUITER_ID, COMPANY_ID, { expectedVersion: 4,
       logo: { fileId: LOGO_FILE_ID },
     });
-    await service.update(RECRUITER_ID, COMPANY_ID, {
+    await service.update(RECRUITER_ID, COMPANY_ID, { expectedVersion: 4,
       logo: { fileId: LOGO_FILE_ID },
     });
 
@@ -859,6 +860,7 @@ describe('CompanyService', () => {
 
     await expect(
       service.update(RECRUITER_ID, COMPANY_ID, {
+        expectedVersion: 0,
         logo: { fileId: LOGO_FILE_ID },
       }),
     ).rejects.toMatchObject({ code: 'MEDIA_FILE_MISMATCH' });
@@ -911,6 +913,7 @@ describe('CompanyService', () => {
 
     await expect(
       service.update(RECRUITER_ID, COMPANY_ID, {
+        expectedVersion: 0,
         media: [
           { fileId: IMAGE_FILE_ID, type: CompanyMediaType.IMAGE },
           { fileId: VIDEO_FILE_ID, type: CompanyMediaType.VIDEO },
@@ -956,6 +959,7 @@ describe('CompanyService', () => {
 
     await expect(
       service.update(RECRUITER_ID, COMPANY_ID, {
+        expectedVersion: 0,
         media: [
           { fileId: IMAGE_FILE_ID, type: CompanyMediaType.IMAGE },
           { fileId: VIDEO_FILE_ID, type: CompanyMediaType.VIDEO },
@@ -1005,6 +1009,7 @@ describe('CompanyService', () => {
 
     await expect(
       service.update(RECRUITER_ID, COMPANY_ID, {
+        expectedVersion: 2,
         logo: { fileId: LOGO_FILE_ID },
       }),
     ).rejects.toMatchObject({
@@ -1062,7 +1067,7 @@ describe('CompanyService', () => {
       ),
     );
 
-    await service.update(RECRUITER_ID, COMPANY_ID, {
+    await service.update(RECRUITER_ID, COMPANY_ID, { expectedVersion: 3,
       logo: { fileId: LOGO_FILE_ID },
       media: [],
     });
@@ -1127,6 +1132,7 @@ describe('CompanyService', () => {
 
     await expect(
       service.update(RECRUITER_ID, COMPANY_ID, {
+        expectedVersion: 10,
         logo: { fileId: LOGO_FILE_ID },
       }),
     ).rejects.toMatchObject({ code: 'COMPANY_UPDATE_CONFLICT' });
@@ -1152,6 +1158,30 @@ describe('CompanyService', () => {
     expect(mediaOperations.kick).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects a stale browser snapshot before any media side effect', async () => {
+    prisma.companyMember.findUnique.mockResolvedValue(
+      ownerMembership(companyRecord({ aggregateVersion: 5 })),
+    );
+    await expect(service.update(RECRUITER_ID, COMPANY_ID, {
+      expectedVersion: 4,
+      logo: { fileId: LOGO_FILE_ID },
+    })).rejects.toMatchObject({ code: 'COMPANY_UPDATE_CONFLICT' });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.companyMediaOperation.createMany).not.toHaveBeenCalled();
+    expect(media.verifyCompanyFile).not.toHaveBeenCalled();
+    expect(media.bindCompanyFile).not.toHaveBeenCalled();
+  });
+
+  it('requires a version and a real field before reading persistence', async () => {
+    await expect(service.update(RECRUITER_ID, COMPANY_ID, {
+      description: 'draft',
+    } as UpdateCompanyDto)).rejects.toMatchObject({ code: 'INVALID_EXPECTED_VERSION' });
+    await expect(service.update(RECRUITER_ID, COMPANY_ID, {
+      expectedVersion: 0,
+    })).rejects.toMatchObject({ code: 'EMPTY_UPDATE' });
+    expect(prisma.companyMember.findUnique).not.toHaveBeenCalled();
+  });
+
   it('detects a concurrent aggregate version change before a non-media update', async () => {
     const baseline = companyRecord({ aggregateVersion: 20 });
     prisma.companyMember.findUnique.mockResolvedValue(
@@ -1163,6 +1193,7 @@ describe('CompanyService', () => {
 
     await expect(
       service.update(RECRUITER_ID, COMPANY_ID, {
+        expectedVersion: 20,
         description: 'new text',
       }),
     ).rejects.toMatchObject({ code: 'COMPANY_UPDATE_CONFLICT' });
@@ -1189,7 +1220,7 @@ describe('CompanyService', () => {
       companyRecord({ aggregateVersion: 2 }),
     );
 
-    await service.update(RECRUITER_ID, COMPANY_ID, {
+    await service.update(RECRUITER_ID, COMPANY_ID, { expectedVersion: 1,
       removeLogo: true,
       media: [],
     });
@@ -1270,10 +1301,11 @@ describe('CompanyService', () => {
     }));
 
     await expect(
-      service.update(RECRUITER_ID, COMPANY_ID, { media: videos }),
+      service.update(RECRUITER_ID, COMPANY_ID, { expectedVersion: 0, media: videos }),
     ).rejects.toMatchObject({ code: 'MEDIA_LIMIT_EXCEEDED' });
     await expect(
       service.update(RECRUITER_ID, COMPANY_ID, {
+        expectedVersion: 0,
         logo: { fileId: LOGO_FILE_ID },
         media: [
           {
@@ -1308,7 +1340,7 @@ describe('CompanyService', () => {
       }),
     );
 
-    await service.update(RECRUITER_ID, COMPANY_ID, {
+    await service.update(RECRUITER_ID, COMPANY_ID, { expectedVersion: 2,
       name: 'Acme Global',
     });
 
@@ -1333,6 +1365,7 @@ describe('CompanyService', () => {
   it('rejects null for non-nullable update fields before persistence', async () => {
     await expect(
       service.update(RECRUITER_ID, COMPANY_ID, {
+        expectedVersion: 0,
         media: null,
       } as unknown as UpdateCompanyDto),
     ).rejects.toMatchObject({

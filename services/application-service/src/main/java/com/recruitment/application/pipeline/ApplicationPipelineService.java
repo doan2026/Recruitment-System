@@ -19,6 +19,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
@@ -115,9 +116,18 @@ public class ApplicationPipelineService {
             ),
             PageRequest.of(page, size)
         );
+        Map<UUID, UUID> offerIds = result.isEmpty() ? Map.of()
+            : offers.findReferencesByApplicationIdIn(
+                result.getContent().stream().map(ApplicationEntity::getId).toList()
+            ).stream().collect(Collectors.toMap(
+                OfferRepository.OfferReference::getApplicationId,
+                OfferRepository.OfferReference::getId
+            ));
         return new RecruiterApplicationPageResponse(
             result.getContent().stream()
-                .map(RecruiterApplicationItemResponse::from)
+                .map(application -> RecruiterApplicationItemResponse.from(
+                    application, offerIds.get(application.getId())
+                ))
                 .toList(),
             result.getNumber(),
             result.getSize(),

@@ -5,11 +5,12 @@ import type { RecruiterJobFormValues } from "./jobForm";
 function serverJobType(job: Job): RecruiterJobFormValues["jobType"] {
   if (job.type === "FULLTIME") return "FULL_TIME";
   if (job.type === "PARTTIME") return "PART_TIME";
-  return "CONTRACT";
+  return job.type;
 }
 
 export const JOB_CONFLICT_FIELDS: readonly ConflictFieldDefinition<RecruiterJobFormValues, Job>[] = [
   { key: "title", label: "Tên vị trí", localValue: (draft) => draft.title.trim(), serverValue: (job) => job.title },
+  { key: "currency", label: "Đơn vị tiền tệ", localValue: (draft) => draft.currency.trim().toUpperCase(), serverValue: (job) => job.currency },
   { key: "location", label: "Địa điểm", localValue: (draft) => draft.location.trim(), serverValue: (job) => job.location },
   { key: "jobType", label: "Hình thức", localValue: (draft) => draft.jobType, serverValue: serverJobType },
   { key: "deadline", label: "Hạn nộp", localValue: (draft) => draft.deadline, serverValue: (job) => job.deadline.slice(0, 10) },

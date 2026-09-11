@@ -1,9 +1,19 @@
 {
   "profile": "product-admin",
-  "sourceRoots": ["frontend/app", "frontend/components", "frontend/lib"],
+  "sourceRoots": [
+    "frontend/app",
+    "frontend/components",
+    "frontend/lib"
+  ],
   "locale": "vi-VN",
   "canonicalMap": "UX-CONTRACT.md",
-  "requiredCapabilities": ["Select/Listbox", "Date", "Form", "Scrollbar", "CRUD"],
+  "requiredCapabilities": [
+    "Select/Listbox",
+    "Date",
+    "Form",
+    "Scrollbar",
+    "CRUD"
+  ],
   "ownership": {
     "Select/Listbox": "native",
     "Date": "native",
@@ -11,7 +21,12 @@
     "Scrollbar": "global-stylesheet",
     "CRUD": "route-and-api-adapter"
   },
-  "requiredCommands": ["test", "e2e", "typecheck", "build"],
+  "requiredCommands": [
+    "test",
+    "e2e",
+    "typecheck",
+    "build"
+  ],
   "commands": {
     "test": "npm run test",
     "e2e": "npm run test:e2e",
@@ -21,6 +36,9 @@
   "evidence": {
     "apiClient": "frontend/lib/apiClient.test.ts",
     "gatewayE2E": "frontend/tests/e2e/person2-gateway.spec.ts",
-    "build": "frontend/.next/build-manifest.json"
+    "build": "frontend/.next/build-manifest.json",
+    "fullFlowFixes": "frontend/tests/e2e/person2-flow-fixes.spec.ts",
+    "companyProfile": "frontend/tests/e2e/company-profile-edit.spec.ts",
+    "sessionApi": "frontend/lib/person2Flow.test.ts"
   }
 }

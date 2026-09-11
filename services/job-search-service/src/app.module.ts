@@ -32,7 +32,7 @@ import { PrismaService } from './prisma.service';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: process.env.NODE_ENV === 'test' }),
     JwtModule.register({}),
   ],
   // MetricsController first: JobController declares @Get(':id') at the root

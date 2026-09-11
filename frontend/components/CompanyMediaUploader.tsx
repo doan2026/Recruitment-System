@@ -175,7 +175,7 @@ export function CompanyMediaUploader({
               },
             ],
           };
-      const response = await updateCompany(company.id, input, signal);
+      const response = await updateCompany(company.id, { ...input, expectedVersion: company.aggregateVersion }, signal);
       onCompanyChange(response.data);
       resetForSelection(null);
       setStatus("Đã gắn media vào hồ sơ công ty.");

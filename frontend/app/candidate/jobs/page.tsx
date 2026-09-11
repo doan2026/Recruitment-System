@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useCurrentAccount } from "../../../components/SessionGate";
 import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import { cursorRestartView } from "../../../lib/cursorRecovery";
@@ -23,6 +24,8 @@ import {
   type RecommendationSource,
   type SearchMode,
   getPublicJobs,
+  isDemoPerson2Api,
+  type FallbackReason,
   getRecommendationsForCandidate,
 } from "../../../lib/person2Api";
 
@@ -43,10 +46,10 @@ function RecommendationCard({
   const fallback = recommendationFallbackView(item.fallbackReason);
   return (
     <article className="card recommendation-card">
-      <div className="section-head row-between"><strong>{item.title}</strong><StatusBadge tone={source.tone}>{source.label}</StatusBadge></div>
+      <div className="section-head row-between"><Link href={`/candidate/jobs/${item.id}?source=${item.source === "AI" ? "AI_RECOMMENDATION" : "SEARCH"}`}><strong>{item.title}</strong></Link><StatusBadge tone={source.tone}>{source.label}</StatusBadge></div>
       <p className="help">{source.description}</p>
-      <p className="help">Mức phù hợp {item.matchPercent}%</p>
-      <p>{item.reasonText}</p>
+      {item.source === "AI" ? <p className="help">Mức phù hợp {item.matchPercent}%</p> : null}
+      <Link className="btn btn-secondary" href={`/candidate/jobs/${item.id}?source=${item.source === "AI" ? "AI_RECOMMENDATION" : "SEARCH"}`}>Xem việc làm</Link>
       {fallback ? (
         <section className="recommendation-fallback" aria-label="Thông tin nguồn gợi ý dự phòng">
           <strong>{fallback.title}</strong>
@@ -63,6 +66,9 @@ function RecommendationCard({
 }
 
 export default function CandidateJobsPage() {
+  const account = useCurrentAccount();
+  const canRecommend = isDemoPerson2Api || account?.role === "CANDIDATE";
+  const [recommendationFallback, setRecommendationFallback] = useState<FallbackReason | undefined>();
   const [form, setForm] = useState<PublicJobSearchForm>(emptyPublicJobSearchForm);
   const [filters, setFilters] = useState<PublicJobSearchFilters>(() => normalizePublicJobSearch(emptyPublicJobSearchForm));
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -145,6 +151,13 @@ export default function CandidateJobsPage() {
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
+    if (!canRecommend) {
+      setRecs([]);
+      setRecommendationLoading(false);
+      setRecommendationError("");
+      setNextRecommendationCursor(null);
+      return;
+    }
     const continuation = Boolean(recommendationCursor);
     setRecommendationLoading(true);
     setRecommendationError("");
@@ -155,6 +168,7 @@ export default function CandidateJobsPage() {
         const candidateCursor = response.meta?.nextCursor ?? null;
         setRecs((current) => mergeRecommendationPage(current, response.data, continuation));
         setRecommendationSource(source);
+        setRecommendationFallback(response.meta?.fallbackReason as FallbackReason | undefined);
         setNextRecommendationCursor(canLoadMoreRecommendations(source, candidateCursor) ? candidateCursor : null);
         recommendationRestartedRef.current = false;
       })
@@ -178,7 +192,7 @@ export default function CandidateJobsPage() {
       active = false;
       controller.abort();
     };
-  }, [recommendationCursor, recommendationReloadKey]);
+  }, [canRecommend, recommendationCursor, recommendationReloadKey]);
 
   const canLoadMoreRecommendation = canLoadMoreRecommendations(recommendationSource, nextRecommendationCursor);
 
@@ -283,7 +297,7 @@ export default function CandidateJobsPage() {
         <div className="field">
           <label className="label" htmlFor="jobType">Hình thức</label>
           <select id="jobType" className="select" value={form.jobType} onChange={(event) => change("jobType", event.target.value as PublicJobSearchForm["jobType"])}>
-            <option value="">Tất cả</option><option value="FULL_TIME">Toàn thời gian</option><option value="PART_TIME">Bán thời gian</option><option value="CONTRACT">Hợp đồng</option>
+            <option value="">Tất cả</option><option value="FULL_TIME">Toàn thời gian</option><option value="PART_TIME">Bán thời gian</option><option value="REMOTE">Làm việc từ xa</option><option value="INTERNSHIP">Thực tập</option>
           </select>
         </div>
         <div className="field">
@@ -354,7 +368,7 @@ export default function CandidateJobsPage() {
                 <div className="section-head">
                   <div>
                     <strong>{job.title}</strong>
-                    <p className="help">{job.location} · {job.department} · {job.isNegotiable ? "Lương thỏa thuận" : `${job.salaryMin.toLocaleString("vi-VN")} – ${job.salaryMax?.toLocaleString("vi-VN")} VNĐ`}</p>
+                    <p className="help">{job.location} · {job.department} · {job.isNegotiable ? "Lương thỏa thuận" : `${job.salaryMin.toLocaleString("vi-VN")} – ${job.salaryMax === null ? "Chưa công bố" : job.salaryMax.toLocaleString("vi-VN")} ${job.currency}`}</p>
                   </div>
                   <StatusBadge tone={jobDataSourceView(job.source).tone}>{jobDataSourceView(job.source).label}</StatusBadge>
                 </div>
@@ -380,6 +394,11 @@ export default function CandidateJobsPage() {
         <section className="panel" id="suitable-jobs" tabIndex={-1}>
           <h2>Gợi ý phù hợp</h2>
           <p className="help">Mỗi thẻ ghi rõ nguồn xếp hạng. Khi dùng dữ liệu dự phòng, lý do và hành động phục hồi được hiển thị riêng.</p>
+          {!canRecommend ? <p className="notice">Đăng nhập bằng tài khoản ứng viên để nhận gợi ý phù hợp với hồ sơ của bạn.</p> : null}
+          {canRecommend && !recommendationLoading && !recommendationError && recs.length === 0 ? (() => {
+            const fallback = recommendationFallbackView(recommendationFallback);
+            return <div><EmptyState title={fallback?.title ?? "Chưa có việc làm phù hợp"} description={fallback?.description ?? "Hãy thử lại khi có tin tuyển dụng mới."} />{fallback?.action === "UPLOAD_CV" ? <Link className="btn btn-secondary" href="/candidate/profile/cvs">{fallback.actionLabel}</Link> : <button className="btn" type="button" onClick={restartRecommendations}>Làm mới gợi ý</button>}</div>;
+          })() : null}
           {recommendationRestartNotice ? <p className="notice" role="status">{recommendationRestartNotice}</p> : null}
           {recommendationError ? <ErrorState message={recommendationError} onRetry={() => setRecommendationReloadKey((value) => value + 1)} /> : null}
           {recommendationLoading && recs.length === 0 ? <LoadingState label="Đang tải gợi ý việc làm" /> : null}

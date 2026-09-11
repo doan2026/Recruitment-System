@@ -2,6 +2,7 @@ package com.recruitment.application.offer;
 
 import com.recruitment.application.api.ApiResponse;
 import com.recruitment.application.api.BusinessException;
+import com.recruitment.application.tracking.TrackingViewerRole;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -13,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -26,6 +28,27 @@ public class ApplicationOfferController {
 
     public ApplicationOfferController(ApplicationOfferService offers) {
         this.offers = offers;
+    }
+
+    @GetMapping("/offers/{offerId}")
+    @PreAuthorize("hasAnyRole('CANDIDATE', 'RECRUITER')")
+    @Operation(summary = "Read an authorized offer and current response versions")
+    public ResponseEntity<ApiResponse<OfferResponse>> get(
+        JwtAuthenticationToken authentication,
+        @RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+        @PathVariable UUID offerId
+    ) {
+        boolean recruiter = authentication.getAuthorities().stream()
+            .anyMatch(authority -> authority.getAuthority().equals("ROLE_RECRUITER"));
+        OfferResponse response = offers.get(
+            offerId, subject(authentication),
+            recruiter ? TrackingViewerRole.RECRUITER : TrackingViewerRole.CANDIDATE,
+            authorization
+        );
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+            .header(HttpHeaders.VARY, HttpHeaders.AUTHORIZATION)
+            .body(ApiResponse.of(response));
     }
 
     @PostMapping("/{applicationId}/offer")

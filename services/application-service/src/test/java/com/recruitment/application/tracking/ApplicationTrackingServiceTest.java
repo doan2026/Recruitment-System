@@ -15,6 +15,8 @@ import com.recruitment.application.client.RecruiterCompanyMembership;
 import com.recruitment.application.domain.ApplicationEntity;
 import com.recruitment.application.domain.ApplicationSource;
 import com.recruitment.application.domain.ApplicationStatus;
+import com.recruitment.application.domain.OfferEntity;
+import com.recruitment.application.repository.OfferRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -33,6 +35,7 @@ class ApplicationTrackingServiceTest {
     private final ApplicationTimelineRepository history =
         mock(ApplicationTimelineRepository.class);
     private final CompanyClient companies = mock(CompanyClient.class);
+    private final OfferRepository offers = mock(OfferRepository.class);
     private ApplicationTrackingService service;
 
     private final UUID applicationId = UUID.randomUUID();
@@ -58,8 +61,28 @@ class ApplicationTrackingServiceTest {
         service = new ApplicationTrackingService(
             applications,
             history,
-            companies
+            companies,
+            offers
         );
+    }
+
+    @Test
+    void candidateListAndDetailExposeOnlyTheirOfferReference() {
+        UUID offerId = UUID.randomUUID();
+        OfferRepository.OfferReference reference = mock(OfferRepository.OfferReference.class);
+        when(reference.getId()).thenReturn(offerId);
+        when(reference.getApplicationId()).thenReturn(applicationId);
+        when(applications.findAllByCandidateIdOrderByAppliedAtDesc(candidateId))
+            .thenReturn(List.of(application));
+        when(offers.findReferencesByApplicationIdIn(List.of(applicationId)))
+            .thenReturn(List.of(reference));
+        when(applications.findById(applicationId)).thenReturn(Optional.of(application));
+        OfferEntity offer = mock(OfferEntity.class);
+        when(offer.getId()).thenReturn(offerId);
+        when(offers.findByApplicationId(applicationId)).thenReturn(Optional.of(offer));
+        assertThat(service.listMine(candidateId).getFirst().offerId()).isEqualTo(offerId);
+        assertThat(service.getDetail(applicationId, candidateId,
+            TrackingViewerRole.CANDIDATE, "Bearer token").offerId()).isEqualTo(offerId);
     }
 
     @Test

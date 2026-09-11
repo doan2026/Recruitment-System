@@ -7,12 +7,14 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import java.util.UUID;
+import java.util.List;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -27,6 +29,22 @@ public class ApplicationEvaluationController {
         ApplicationEvaluationService evaluations
     ) {
         this.evaluations = evaluations;
+    }
+
+    @GetMapping("/{applicationId}/evaluations")
+    @PreAuthorize("hasRole('RECRUITER')")
+    @Operation(summary = "Read internal evaluations for an authorized company application")
+    public ResponseEntity<ApiResponse<List<EvaluationResponse>>> list(
+        JwtAuthenticationToken authentication,
+        @RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+        @PathVariable UUID applicationId
+    ) {
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+            .header(HttpHeaders.VARY, HttpHeaders.AUTHORIZATION)
+            .body(ApiResponse.of(evaluations.list(
+                applicationId, subject(authentication), authorization
+            )));
     }
 
     @PostMapping("/{applicationId}/evaluation")

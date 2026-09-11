@@ -687,6 +687,13 @@ export class CompanyService {
     this.validateUpdate(dto);
 
     const baseline = await this.requireOwner(recruiterId, companyId);
+    if (baseline.aggregateVersion !== dto.expectedVersion) {
+      throw new ApiException(
+        'COMPANY_UPDATE_CONFLICT',
+        'The company changed since it was loaded; reload before saving',
+        HttpStatus.CONFLICT,
+      );
+    }
     const targetCompanyId = baseline.id;
     const mediaPlan = this.planMediaMutation(targetCompanyId, baseline, dto);
     const attachmentLease: ForegroundAttachmentLease = {
@@ -1181,6 +1188,13 @@ export class CompanyService {
 
   private validateUpdate(dto: UpdateCompanyDto): void {
     this.validateNoUnexpectedNulls(dto, new Set(['website']));
+    if (!Number.isSafeInteger(dto.expectedVersion) || dto.expectedVersion < 0) {
+      throw new ApiException(
+        'INVALID_EXPECTED_VERSION',
+        'expectedVersion must be a non-negative safe integer',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
 
     if (dto.logo && dto.removeLogo === true) {
       throw new ApiException(
@@ -1192,7 +1206,8 @@ export class CompanyService {
 
     const hasEffectiveUpdate = Object.entries(dto).some(
       ([key, value]) =>
-        value !== undefined && (key !== 'removeLogo' || value === true),
+        key !== 'expectedVersion' && value !== undefined &&
+        (key !== 'removeLogo' || value === true),
     );
 
     if (!hasEffectiveUpdate) {

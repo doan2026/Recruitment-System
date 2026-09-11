@@ -1,6 +1,7 @@
 package com.recruitment.application.offer;
 
 import com.recruitment.application.domain.ApplicationStatus;
+import com.recruitment.application.domain.ApplicationEntity;
 import com.recruitment.application.domain.OfferEntity;
 import com.recruitment.application.domain.OfferStatus;
 import java.math.BigDecimal;
@@ -27,6 +28,14 @@ public record OfferResponse(
     ApplicationStatus applicationStatus,
     long applicationVersion
 ) {
+    static OfferResponse current(OfferEntity offer, ApplicationEntity application) {
+        return responded(
+            offer, offer.getStatus(), offer.getRespondedAt(),
+            offer.getResponseNote(), offer.getVersion(),
+            application.getStatus(), application.getVersion()
+        );
+    }
+
     static OfferResponse sent(
         OfferEntity offer,
         long applicationVersion

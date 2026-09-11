@@ -1,6 +1,6 @@
 package com.recruitment.application.tracking;
 
-enum TrackingViewerRole {
+public enum TrackingViewerRole {
     CANDIDATE,
     RECRUITER
 }

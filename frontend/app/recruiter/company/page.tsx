@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ConflictRecoveryPanel } from "../../../components/ConflictRecoveryPanel";
 import { ConfirmationDialog } from "../../../components/ConfirmationDialog";
 import { CompanyMediaUploader } from "../../../components/CompanyMediaUploader";
@@ -21,14 +21,29 @@ import {
 } from "../../../lib/companyVerification";
 import { type Company, type CompanyMemberRole, getCompany, resubmitCompanyVerification, updateCompany } from "../../../lib/person2Api";
 
-type CompanyDraft = { name: string; taxCode: string };
+import { emptyCompanyCreateValues, type CompanyCreateErrors, type CompanyCreateField } from "../../../lib/companyForm";
+import {
+  buildCompanyEditUpdate,
+  COMPANY_EDIT_CONFLICT_FIELDS,
+  companyEditValues,
+  isCompanyEditDirty,
+  validateCompanyEdit,
+  type CompanyEditValues,
+} from "../../../lib/companyEditForm";
+
+type CompanyDraft = CompanyEditValues;
 
 export default function RecruiterCompanyPage() {
   const [company, setCompany] = useState<Company | null>(null);
   const [editing, setEditing] = useState(false);
   const [status, setStatus] = useState("");
-  const [name, setName] = useState("");
-  const [taxCode, setTaxCode] = useState("");
+  const formRef = useRef<HTMLFormElement>(null);
+  const editButtonRef = useRef<HTMLButtonElement>(null);
+  // Keep the form's original version separate from updates made by media controls.
+  const [formSnapshot, setFormSnapshot] = useState<Company | null>(null);
+  const [values, setValues] = useState<CompanyDraft>(emptyCompanyCreateValues);
+  const [errors, setErrors] = useState<CompanyCreateErrors>({});
+  const [discarding, setDiscarding] = useState(false);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [saveError, setSaveError] = useState("");
   const [verificationError, setVerificationError] = useState("");
@@ -47,8 +62,8 @@ export default function RecruiterCompanyPage() {
       .then((response) => {
         if (!active) return;
         setCompany(response.data);
-        setName(response.data.name);
-        setTaxCode(response.data.taxCode);
+        setFormSnapshot(response.data);
+        setValues(companyEditValues(response.data));
       })
       .catch((reason: unknown) => {
         if (active) setLoadError(reason);
@@ -60,35 +75,35 @@ export default function RecruiterCompanyPage() {
   }, [reloadKey]);
 
   async function persistCompany(draft: CompanyDraft, needsReview: boolean) {
-    if (!company || saving) return;
+    if (!company || !formSnapshot || saving || conflict || memberRole !== "OWNER") return;
+    const snapshot = formSnapshot;
     setSaving(true);
     setSaveError("");
     setStatus("");
     setConflict(null);
     try {
-      const response = await updateCompany(company.id, draft);
+      const response = await updateCompany(company.id, buildCompanyEditUpdate(draft, snapshot));
       setCompany(response.data);
-      setName(response.data.name);
-      setTaxCode(response.data.taxCode);
+      setFormSnapshot(response.data);
+      setValues(companyEditValues(response.data));
+      setErrors({});
       setEditing(false);
+      setTimeout(() => editButtonRef.current?.focus(), 0);
       setStatus(needsReview
         ? "Thông tin pháp lý đã đổi. Hồ sơ được chuyển về chờ xác minh."
         : "Đã lưu thông tin công ty.");
     } catch (reason: unknown) {
       if (isOptimisticConflict(reason)) {
         try {
-          const snapshot = await prepareConflictSnapshot({
+          const recovered = await prepareConflictSnapshot({
             error: reason,
             localDraft: draft,
-            localVersion: company.aggregateVersion,
+            localVersion: snapshot.aggregateVersion,
             reload: async () => (await getCompany()).data,
             serverVersion: (server) => server.aggregateVersion,
-            fields: [
-              { key: "name", label: "Tên công ty", localValue: (value) => value.name, serverValue: (value) => value.name },
-              { key: "taxCode", label: "Mã số thuế", localValue: (value) => value.taxCode, serverValue: (value) => value.taxCode },
-            ],
+            fields: COMPANY_EDIT_CONFLICT_FIELDS,
           });
-          setConflict(snapshot);
+          setConflict(recovered);
         } catch (reloadReason: unknown) {
           setSaveError(toUserMessage(reloadReason));
         }
@@ -102,9 +117,16 @@ export default function RecruiterCompanyPage() {
 
   function saveCompany(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!company || !name.trim() || !taxCode.trim() || saving) return;
-    const draft = { name: name.trim(), taxCode: taxCode.trim() };
-    if (requiresCompanyReverification(company, draft)) {
+    if (!company || !formSnapshot || saving || conflict || memberRole !== "OWNER") return;
+    const nextErrors = validateCompanyEdit(values);
+    setErrors(nextErrors);
+    const firstInvalid = Object.keys(nextErrors)[0] as CompanyCreateField | undefined;
+    if (firstInvalid) {
+      formRef.current?.querySelector<HTMLElement>(`[name="${firstInvalid}"]`)?.focus();
+      return;
+    }
+    const draft = { ...values };
+    if (requiresCompanyReverification(formSnapshot, draft)) {
       setConfirmationDraft(draft);
       return;
     }
@@ -118,23 +140,23 @@ export default function RecruiterCompanyPage() {
   }
 
   async function resubmitVerification() {
-    if (!company || company.verificationStatus !== "REJECTED" || resubmitting) return;
+    if (!company || company.verificationStatus !== "REJECTED" || resubmitting || editing || saving || memberRole !== "OWNER") return;
     setResubmitting(true);
     setVerificationError("");
     setStatus("");
     try {
       const response = await resubmitCompanyVerification();
       setCompany(response.data);
-      setName(response.data.name);
-      setTaxCode(response.data.taxCode);
+      setFormSnapshot(response.data);
+      setValues(companyEditValues(response.data));
       setStatus("Đã gửi lại hồ sơ. Trạng thái đã chuyển về chờ xác minh.");
     } catch (reason: unknown) {
       if (isInvalidResubmissionTransition(reason)) {
         try {
           const latest = (await getCompany()).data;
           setCompany(latest);
-          setName(latest.name);
-          setTaxCode(latest.taxCode);
+          setFormSnapshot(latest);
+          setValues(companyEditValues(latest));
           setStatus("Trạng thái đã thay đổi ở nơi khác. Đã tải dữ liệu mới nhất.");
         } catch (reloadReason: unknown) {
           setVerificationError(toUserMessage(reloadReason));
@@ -150,8 +172,9 @@ export default function RecruiterCompanyPage() {
   function useServerCompany() {
     if (!conflict) return;
     setCompany(conflict.server);
-    setName(conflict.server.name);
-    setTaxCode(conflict.server.taxCode);
+    setFormSnapshot(conflict.server);
+    setValues(companyEditValues(conflict.server));
+    setErrors({});
     setConflict(null);
     setStatus("Đã dùng dữ liệu mới nhất từ hệ thống. Bạn có thể tiếp tục chỉnh sửa.");
   }
@@ -159,10 +182,55 @@ export default function RecruiterCompanyPage() {
   function keepCompanyDraft() {
     if (!conflict) return;
     setCompany(conflict.server);
-    setName(conflict.localDraft.name);
-    setTaxCode(conflict.localDraft.taxCode);
+    setFormSnapshot(conflict.server);
+    setValues(conflict.localDraft);
+    setErrors({});
     setConflict(null);
     setStatus("Đã làm mới dữ liệu nền và giữ nguyên phần bạn nhập. Kiểm tra rồi bấm Lưu thay đổi để gửi lại.");
+  }
+
+  function changeField(field: CompanyCreateField, value: string) {
+    if (saving || conflict) return;
+    const next = { ...values, [field]: value };
+    setValues(next);
+    if (errors[field]) {
+      setErrors((current) => ({ ...current, [field]: validateCompanyEdit(next)[field] }));
+    }
+  }
+
+  function closeEditor() {
+    if (!company || saving) return;
+    setEditing(false);
+    setDiscarding(false);
+    setConflict(null);
+    setSaveError("");
+    setErrors({});
+    setFormSnapshot(company);
+    setValues(companyEditValues(company));
+    setTimeout(() => editButtonRef.current?.focus(), 0);
+  }
+
+  function toggleEditor() {
+    if (!company || saving || resubmitting || memberRole !== "OWNER") return;
+    if (editing) {
+      if (formSnapshot && isCompanyEditDirty(values, formSnapshot)) setDiscarding(true);
+      else closeEditor();
+      return;
+    }
+    setFormSnapshot(company);
+    setValues(companyEditValues(company));
+    setErrors({});
+    setSaveError("");
+    setStatus("");
+    setEditing(true);
+  }
+
+  function receiveCompanyUpdate(nextCompany: Company) {
+    setCompany(nextCompany);
+    if (!editing) {
+      setFormSnapshot(nextCompany);
+      setValues(companyEditValues(nextCompany));
+    }
   }
 
   const needsOnboarding = loadError instanceof ApiClientError && loadError.code === "COMPANY_NOT_FOUND";
@@ -202,17 +270,26 @@ export default function RecruiterCompanyPage() {
         eyebrow="RECRUITER · COMPANY"
         title="Hồ sơ công ty"
         description="Quản lý danh tính doanh nghiệp, trạng thái xác minh và thư viện hình ảnh."
-        action={memberRole === "OWNER" ? <button className="btn btn-primary" type="button" onClick={() => setEditing((value) => !value)}>{editing ? "Đóng chỉnh sửa" : "Chỉnh sửa hồ sơ"}</button> : undefined}
+        action={memberRole === "OWNER" ? <button ref={editButtonRef} className="btn btn-primary" type="button" disabled={saving || resubmitting} onClick={toggleEditor}>{editing ? "Đóng chỉnh sửa" : "Chỉnh sửa hồ sơ"}</button> : undefined}
       />
 
       <ConfirmationDialog
         open={confirmationDraft !== null}
         title="Thay đổi này cần xác minh lại"
-        description="Bạn đang sửa tên hoặc mã số thuế của công ty đã được xác minh. Khi lưu, trạng thái công ty sẽ chuyển từ VERIFIED về PENDING và lý do từ chối cũ sẽ được xóa."
+        description="Bạn đang sửa tên hoặc mã số thuế của công ty đã được xác minh. Khi lưu, trạng thái công ty sẽ chuyển từ VERIFIED về PENDING để Admin xác minh lại và lý do từ chối cũ sẽ được xóa."
         confirmLabel="Xác nhận và lưu"
         pending={saving}
         onConfirm={() => { void confirmVerifiedEdit(); }}
         onCancel={() => setConfirmationDraft(null)}
+      />
+
+      <ConfirmationDialog
+        open={discarding}
+        title="Bỏ các thay đổi chưa lưu?"
+        description="Các trường hồ sơ bạn vừa nhập chưa được lưu. Bỏ thay đổi để đóng form, hoặc quay lại tiếp tục chỉnh sửa."
+        confirmLabel="Bỏ thay đổi"
+        onConfirm={closeEditor}
+        onCancel={() => setDiscarding(false)}
       />
 
       {status ? <p className="notice notice-success" role="status">{status}</p> : null}
@@ -223,7 +300,7 @@ export default function RecruiterCompanyPage() {
         <Metric label="Trạng thái" value={company.verificationStatus} detail="Xác minh doanh nghiệp" />
         <Metric label="Phiên bản" value={`v${company.aggregateVersion}`} detail="Optimistic concurrency" />
         <Metric label="Quyền công ty" value={memberRole ?? "Đang tải"} detail="Authoritative membership" />
-        <Metric label="Tin đang tuyển" value="5" detail="3 đang công khai" />
+        <Metric label="Tin đang tuyển" value="—" detail="Chưa có dữ liệu thống kê" />
       </section>
 
       <section className="grid-2">
@@ -250,13 +327,24 @@ export default function RecruiterCompanyPage() {
                 className="btn btn-secondary"
                 type="button"
                 onClick={resubmitVerification}
-                disabled={resubmitting}
+                disabled={resubmitting || editing || saving}
                 aria-busy={resubmitting}
               >
                 {resubmitting ? "Đang gửi lại…" : "Gửi lại để xác minh"}
               </button>
             ) : null}
           </div>
+
+          {!editing ? (
+            <dl className="stack">
+              <div><dt className="label">Lĩnh vực</dt><dd>{company.industry || "Chưa cập nhật"}</dd></div>
+              <div><dt className="label">Quy mô</dt><dd>{company.size || "Chưa cập nhật"}</dd></div>
+              <div><dt className="label">Địa chỉ</dt><dd>{company.address || "Chưa cập nhật"}</dd></div>
+              <div><dt className="label">Website</dt><dd>{company.website || "Chưa cập nhật"}</dd></div>
+              <div><dt className="label">Mô tả công ty</dt><dd style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{company.description || "Chưa cập nhật"}</dd></div>
+            </dl>
+          ) : null}
+          {editing && verification.canResubmit ? <p className="help">Lưu hoặc đóng chỉnh sửa trước khi gửi lại hồ sơ để xác minh.</p> : null}
 
           {conflict ? (
             <ConflictRecoveryPanel
@@ -268,23 +356,57 @@ export default function RecruiterCompanyPage() {
           ) : null}
 
           {editing && memberRole === "OWNER" ? (
-            <form className="form-grid" noValidate onSubmit={saveCompany}>
-              <div className="field">
+            <form ref={formRef} className="form-grid" noValidate onSubmit={saveCompany} aria-busy={saving}>
+              <div className="field span-2">
                 <label className="label" htmlFor="company-name">Tên công ty</label>
-                <input id="company-name" className="input" value={name} onChange={(event) => setName(event.target.value)} aria-invalid={!name.trim()} aria-describedby={!name.trim() ? "company-name-error" : undefined} />
-                {!name.trim() ? <span id="company-name-error" className="form-error">Nhập tên công ty.</span> : null}
+                <input id="company-name" name="name" className="input" autoComplete="organization" value={values.name} disabled={saving || conflict !== null} onChange={(event) => changeField("name", event.target.value)} aria-invalid={!!errors.name} aria-describedby={errors.name ? "company-name-error" : undefined} />
+                {errors.name ? <span id="company-name-error" className="form-error">{errors.name}</span> : null}
               </div>
+
               <div className="field">
                 <label className="label" htmlFor="tax-code">Mã số thuế</label>
-                <input id="tax-code" className="input" value={taxCode} onChange={(event) => setTaxCode(event.target.value)} aria-invalid={!taxCode.trim()} aria-describedby={!taxCode.trim() ? "tax-code-error" : undefined} />
-                {!taxCode.trim() ? <span id="tax-code-error" className="form-error">Nhập mã số thuế.</span> : null}
+                <input id="tax-code" name="taxCode" className="input" inputMode="numeric" value={values.taxCode} disabled={saving || conflict !== null} onChange={(event) => changeField("taxCode", event.target.value)} aria-invalid={!!errors.taxCode} aria-describedby={errors.taxCode ? "tax-code-error" : undefined} />
+                {errors.taxCode ? <span id="tax-code-error" className="form-error">{errors.taxCode}</span> : null}
               </div>
+
+              <div className="field">
+                <label className="label" htmlFor="company-industry">Lĩnh vực</label>
+                <input id="company-industry" name="industry" className="input" value={values.industry} disabled={saving || conflict !== null} onChange={(event) => changeField("industry", event.target.value)} aria-invalid={!!errors.industry} aria-describedby={errors.industry ? "company-industry-error" : undefined} />
+                {errors.industry ? <span id="company-industry-error" className="form-error">{errors.industry}</span> : null}
+              </div>
+
+              <div className="field">
+                <label className="label" htmlFor="company-size">Quy mô</label>
+                <input id="company-size" name="size" className="input" placeholder="Ví dụ: 51–200 nhân sự" value={values.size} disabled={saving || conflict !== null} onChange={(event) => changeField("size", event.target.value)} aria-invalid={!!errors.size} aria-describedby={errors.size ? "company-size-error" : undefined} />
+                {errors.size ? <span id="company-size-error" className="form-error">{errors.size}</span> : null}
+              </div>
+
+              <div className="field">
+                <label className="label" htmlFor="company-website">Website (không bắt buộc)</label>
+                <input id="company-website" name="website" className="input" type="url" inputMode="url" autoComplete="url" placeholder="https://example.vn" value={values.website} disabled={saving || conflict !== null} onChange={(event) => changeField("website", event.target.value)} aria-invalid={!!errors.website} aria-describedby={errors.website ? "company-website-error" : undefined} />
+                {errors.website ? <span id="company-website-error" className="form-error">{errors.website}</span> : null}
+              </div>
+
+              <div className="field span-2">
+                <label className="label" htmlFor="company-address">Địa chỉ</label>
+                <input id="company-address" name="address" className="input" autoComplete="street-address" value={values.address} disabled={saving || conflict !== null} onChange={(event) => changeField("address", event.target.value)} aria-invalid={!!errors.address} aria-describedby={errors.address ? "company-address-error" : undefined} />
+                {errors.address ? <span id="company-address-error" className="form-error">{errors.address}</span> : null}
+              </div>
+
+              <div className="field span-2">
+                <label className="label" htmlFor="company-description">Mô tả công ty</label>
+                <textarea id="company-description" name="description" className="textarea resize-none" rows={6} value={values.description} disabled={saving || conflict !== null} onChange={(event) => changeField("description", event.target.value)} aria-invalid={!!errors.description} aria-describedby={errors.description ? "company-description-error company-description-help" : "company-description-help"} />
+                <span id="company-description-help" className="help">Tối đa 10.000 ký tự.</span>
+                {errors.description ? <span id="company-description-error" className="form-error">{errors.description}</span> : null}
+              </div>
+
               <div className="span-2 btn-group">
-                <button className="btn btn-primary" type="submit" disabled={!name.trim() || !taxCode.trim() || saving} aria-busy={saving}>
+                <button className="btn btn-primary" type="submit" disabled={saving || conflict !== null} aria-busy={saving}>
                   {saving ? "Đang lưu…" : "Lưu thay đổi"}
                 </button>
-                <button className="btn" type="button" disabled={saving} onClick={() => { setEditing(false); setConflict(null); setSaveError(""); setName(company.name); setTaxCode(company.taxCode); }}>Hủy</button>
+                <button className="btn" type="button" disabled={saving} onClick={toggleEditor}>Hủy</button>
               </div>
+              {conflict ? <p className="help span-2">Chọn cách xử lý bản cập nhật ở trên trước khi tiếp tục chỉnh sửa.</p> : null}
             </form>
           ) : null}
         </section>
@@ -294,22 +416,14 @@ export default function RecruiterCompanyPage() {
           <p className="help">Xin chữ ký → tải trực tiếp → xác nhận canonical → gắn fileId vào hồ sơ.</p>
           <CompanyMediaUploader
             company={company}
-            onCompanyChange={(nextCompany) => {
-              setCompany(nextCompany);
-              setName(nextCompany.name);
-              setTaxCode(nextCompany.taxCode);
-            }}
+            onCompanyChange={receiveCompanyUpdate}
           />
         </aside> : <aside className="panel"><h2>Quyền MEMBER</h2><p className="help">Thư viện media và thay đổi pháp lý chỉ dành cho OWNER.</p></aside>}
       </section>
 
       {memberRole === "OWNER" ? <CompanyMediaLibrary
         company={company}
-        onCompanyChange={(nextCompany) => {
-          setCompany(nextCompany);
-          setName(nextCompany.name);
-          setTaxCode(nextCompany.taxCode);
-        }}
+        onCompanyChange={receiveCompanyUpdate}
       /> : null}
 
       <CompanyMemberManagement companyId={company.id} onRoleChange={setMemberRole} />

@@ -37,7 +37,7 @@
 | Date | Native date baseline | UX contract | native | locale + keyboard |
 | Form | Shared `.field`/form policy | UX contract | create / edit | validation + build |
 | Scrollbar | `frontend/app/globals.css` | DESIGN.md | stable gutter | computed style |
-| CRUD | Route + `frontend/lib/person2Api.ts` | P16.N2 | explicit demo / gateway | API unit + full-flow E2E pending |
+| CRUD | Route + `frontend/lib/person2Api.ts` | P16.N2 + BE DTO | explicit demo / gateway | API unit + browser API-mock E2E |
 | Optimistic conflict | `frontend/lib/conflictRecovery.ts` + `ConflictRecoveryPanel` | P16.N2 | Company / Job / Application | API unit + consumer flow |
 | Confirmation dialog | `frontend/components/ConfirmationDialog.tsx` | UX contract | warning / danger | keyboard + focus + build |
 
@@ -57,7 +57,7 @@
 - Candidate search: form chỉ áp criteria sau submit; giữ `q/location/salary/skills/experience/jobType/sort/limit` xuyên suốt cursor chain, append khử trùng theo id; đổi criteria/mode/limit xóa cursor. OFFSET dừng trước cửa sổ 10.000 và cho chuyển CURSOR hoặc focus về filter.
 - Public Company search: giữ signed cursor trong memory, khóa `q`/`limit` khi đang tải chuỗi và kết thúc theo `hasMore`; không hiển thị `total`/số trang.
 - Public Company detail: `logoUrl=null` dùng initials placeholder; media chỉ lấy từ public response, giữ `sortOrder`, có empty state và không optimistic-insert media vừa confirm.
-- Recommendation: mỗi card ghi nhãn + mô tả nguồn AI/PREFERENCES/LATEST. Sáu fallback Candidate có nội dung và CTA riêng; NO_ACTIVE_CV dẫn sang route quản lý CV thuộc Profile UI, năm nhánh còn lại chủ động reload recommendation và khóa CTA khi pending. Chỉ nguồn AI có `nextCursor` mới render sentinel + nút xem thêm; fallback luôn xóa cursor và ẩn control.
+- Recommendation: chỉ tải dữ liệu riêng tư khi Candidate đã đăng nhập; mỗi card ghi nhãn + mô tả nguồn AI/PREFERENCES/LATEST. Sáu fallback Candidate có nội dung và CTA riêng; NO_ACTIVE_CV dẫn sang `/candidate/profile/cvs` để đọc CV đang hoạt động và hướng dẫn phần tạo/tải CV thuộc nhóm Profile, năm nhánh còn lại chủ động reload recommendation và khóa CTA khi pending. Chỉ nguồn AI có `nextCursor` mới render sentinel + nút xem thêm; fallback luôn xóa cursor và ẩn control.
 - URL state: vẫn pending; adapter đã hỗ trợ API Gateway thật nhưng filter hiện giữ local state.
 - Empty/no-results/error/loading: state riêng, không đổi footprint bất ngờ.
 - Back/scroll restoration: route detail quay về owning list; hoàn thiện khi nối URL filter thật.
@@ -90,7 +90,7 @@
 
 - Route document title: `{Page} — CareerHub`; dynamic titles bổ sung theo từng route.
 - 404/403/error: dùng app-owned route state, giữ header điều hướng.
-- Top navigation cuộn ngang trên mobile; không ẩn đích nghiệp vụ.
+- Top navigation cuộn ngang trên mobile; các đích riêng tư chỉ hiện theo role tài khoản thật, không giả lập quyền recruiter. Backend vẫn là nơi thực thi quyền.
 - Tables cuộn ngang; card/list reflow một cột ở mobile.
 - Focus dùng `scroll-padding-top: 88px`, không bị header sticky che.
 
@@ -114,7 +114,7 @@
 - Upload trực tiếp provider dùng multipart với `credentials: omit`; chỉ capability public được đưa vào form, private Company signature/confirm/attach vẫn no-store qua API client.
 - `apiClientCore.ts` là owner của envelope, error-code mapping, timeout/abort, retry policy, UUID v4 và allowlist field.
 - `NEXT_PUBLIC_API_MODE=demo|gateway` là lựa chọn tường minh; lỗi gateway không tự rơi về dữ liệu demo.
-- Access token chỉ giữ trong memory; Auth gọi `setApiSession({ token?, accountId })` để refresh cùng account không xóa state, còn đổi account phát revision. `clearApiSession` luôn phát revision kể cả cookie-only.
+- Access token chỉ giữ trong memory; Auth gọi `setApiSession({ token?, accountId })` để refresh cùng account không xóa state, còn đổi account phát revision. `clearApiSession` phát revision khi vô hiệu phiên (kể cả cookie-only chưa vô hiệu), sau đó idempotent để không gây vòng lặp401.
 
 ## Validation
 
@@ -132,7 +132,20 @@
 ## Verification
 
 - Required static commands: strict premium audit, anti-pattern grep, `npm test`, `npm run typecheck`, `npm run build`.
-- Browser matrix: Chrome desktop + narrow viewport, keyboard, reduced motion; full E2E pending.
+- Browser matrix: Chrome desktop + narrow viewport, keyboard và các luồng thành công/lỗi với API mock. Đây không phải bằng chứng E2E hệ thống đã triển khai.
 - Accessibility: semantic buttons/links/table, labels, focus-visible, live status.
 - Canonical sibling: Candidate job list và Recruiter job list.
-- CRUD full-flow/failure-path evidence: pending API integration; không tuyên bố hoàn thành từ demo state.
+- CRUD/failure-path evidence: `frontend/tests/e2e/person2-gateway.spec.ts`, `person2-flow-fixes.spec.ts`, `company-profile-edit.spec.ts`; backend thật được kiểm tra riêng, live Docker E2E vẫn cần môi trường.
+
+## Bổ sung sau rà soát 2026-09-10
+
+- **Auth integration:** `authSession.ts` gọi JSON API Auth có sẵn. Access/refresh token chỉ giữ trong memory, không giả định có HttpOnly cookie; tải lại trang phải đăng nhập lại. `SessionGate` bảo vệ các route riêng tư, và `ApiSessionBoundary` xóa state khi đổi/vô hiệu phiên.
+- Request private phải kiểm revision sau các await và trước retry; response của phiên cũ bị hủy. Refresh single-flight gắn revision. Login/refresh/logout không đính kèm access token cũ. Đổi role khi refresh buộc đăng nhập lại.
+- **Company/Job CAS:** `expectedVersion` lấy từ bản đã mở trong form. Company dùng phiên bản >=0, Job >=1. Update media không tự nâng baseline của form Công ty đang sửa; 409 reload/compare rồi mới cho người dùng chọn bản và gửi lại.
+- **Company edit:** đủ name/taxCode/description/industry/size/address/website. Website rỗng gửi null; hủy bản nháp bẩn có xác nhận. Chặn rời route từ mọi link/browser-back vẫn là hạng mục riêng, chưa tuyên bố hoàn thành.
+- **Job:** bốn loại việc FULL_TIME/PART_TIME/REMOTE/INTERNSHIP; đơn vị tiền từ BE/form, không ép USD thành VND. Cho sửa theo trạng thái BE cho phép; tin công khai đổi nội dung phải xác nhận khả năng gửi duyệt lại.
+- **Public detail:** Job công khai không phụ thuộc request recommendation. Candidate chưa đăng nhập có CTA đăng nhập, không tự gọi API gợi ý/CV riêng tư.
+- **Application:** chọn CV active từ `GET /profile/cvs`, giữ source của link, gửi một lần; theo dõi detail/coverLetter/timeline từ BE. Chỉ đọc/chọn CV, không triển khai CRUD CV của nhóm khác.
+- **Bookmark:** POST lưu, DELETE bỏ lưu (204 không yêu cầu JSON), thao tác lỗi phải đọc lại hoặc cho retry; không suy đoán trạng thái đã lưu.
+- **Offer:** vào từ offerId của Application → GET Offer có quyền → phản hồi với cả hai phiên bản. Dialog xác nhận kiểm lại hạn và trạng thái ngay trước POST; BE là quyết định cuối. Evaluation đọc lại bằng GET được cấp quyền, không chỉ giữ flag cục bộ.
+- **Visual reconciliation:** giữ nguyên DESIGN.md, token CSS, native select/date và ngôn ngữ vi-VN. Chỉ mở rộng shared confirmation/session/API primitives; không thay palette hoặc typography.

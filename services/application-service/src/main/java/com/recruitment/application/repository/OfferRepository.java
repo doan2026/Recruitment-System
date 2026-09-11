@@ -4,6 +4,8 @@ import com.recruitment.application.domain.OfferEntity;
 import com.recruitment.application.domain.OfferStatus;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.Collection;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -11,6 +13,20 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface OfferRepository extends JpaRepository<OfferEntity, UUID> {
+    interface OfferReference {
+        UUID getId();
+        UUID getApplicationId();
+    }
+
+    @Query("""
+        select offer.id as id, offer.applicationId as applicationId
+        from OfferEntity offer
+        where offer.applicationId in :applicationIds
+        """)
+    List<OfferReference> findReferencesByApplicationIdIn(
+        @Param("applicationIds") Collection<UUID> applicationIds
+    );
+
     Optional<OfferEntity> findByApplicationId(UUID applicationId);
 
     boolean existsByApplicationId(UUID applicationId);

@@ -1,4 +1,4 @@
-export type RecruiterJobType = "FULL_TIME" | "PART_TIME" | "CONTRACT";
+export type RecruiterJobType = "FULL_TIME" | "PART_TIME" | "REMOTE" | "INTERNSHIP";
 
 export interface RecruiterJobFormValues {
   title: string;
@@ -8,6 +8,7 @@ export interface RecruiterJobFormValues {
   salaryMin: string;
   salaryMax: string;
   isNegotiable: boolean;
+  currency: string;
   location: string;
   jobType: RecruiterJobType;
   experienceYears: string;
@@ -24,7 +25,7 @@ export interface RecruiterJobPayload {
   salaryMin?: number;
   salaryMax?: number;
   isNegotiable: boolean;
-  currency: "VND";
+  currency: string;
   location: string;
   jobType: RecruiterJobType;
   experienceYears: number;
@@ -43,6 +44,7 @@ export const emptyRecruiterJobForm: RecruiterJobFormValues = {
   salaryMin: "",
   salaryMax: "",
   isNegotiable: false,
+  currency: "VND",
   location: "Hà Nội",
   jobType: "FULL_TIME",
   experienceYears: "0",
@@ -84,6 +86,8 @@ export function validateRecruiterJobForm(
   if (!values.benefits.trim() || values.benefits.length > 20_000) errors.benefits = "Quyền lợi phải có từ 1 đến 20.000 ký tự.";
   const location = values.location.normalize("NFKC").trim();
   if (!location || location.length > 255) errors.location = "Địa điểm phải có từ 1 đến 255 ký tự.";
+  if (!["FULL_TIME", "PART_TIME", "REMOTE", "INTERNSHIP"].includes(values.jobType)) errors.jobType = "Chọn hình thức tuyển dụng hợp lệ.";
+  if (!/^[A-Z]{3}$/.test(values.currency.trim().toUpperCase())) errors.currency = "Nhập mã tiền tệ gồm 3 chữ cái, ví dụ VND hoặc USD.";
   if (!isDateAfterUtcToday(values.deadline, now)) errors.deadline = "Hạn nộp phải sau hôm nay.";
 
   const experienceYears = Number(values.experienceYears);
@@ -119,7 +123,7 @@ export function normalizeRecruiterJobForm(values: RecruiterJobFormValues): Recru
     requirements: values.requirements.trim(),
     benefits: values.benefits.trim(),
     isNegotiable: values.isNegotiable,
-    currency: "VND",
+    currency: values.currency.trim().toUpperCase(),
     location: values.location.normalize("NFKC").trim(),
     jobType: values.jobType,
     experienceYears: Number(values.experienceYears),

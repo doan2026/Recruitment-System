@@ -7,6 +7,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import com.recruitment.application.tracking.TrackingViewerRole;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -76,6 +79,33 @@ class ApplicationOfferControllerTest {
 
     @MockBean
     private JwtDecoder jwtDecoder;
+
+    @Test
+    void authenticatedCandidateReadsPrivateOffer() throws Exception {
+        stubJwt(CANDIDATE_ID.toString(), "CANDIDATE");
+        when(offers.get(OFFER_ID, CANDIDATE_ID, TrackingViewerRole.CANDIDATE, AUTHORIZATION))
+            .thenReturn(sentResponse());
+        mvc.perform(get("/offers/{offerId}", OFFER_ID)
+            .header(HttpHeaders.AUTHORIZATION, AUTHORIZATION))
+            .andExpect(status().isOk())
+            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"))
+            .andExpect(result -> assertThat(result.getResponse().getHeaders(HttpHeaders.VARY))
+                .contains(HttpHeaders.AUTHORIZATION))
+            .andExpect(jsonPath("$.data.id").value(OFFER_ID.toString()))
+            .andExpect(jsonPath("$.data.applicationVersion").value(1))
+            .andExpect(jsonPath("$.data.version").value(0));
+    }
+
+    @Test
+    void anonymousAndAdminCannotReadOffer() throws Exception {
+        mvc.perform(get("/offers/{offerId}", OFFER_ID))
+            .andExpect(status().isUnauthorized());
+        stubJwt(RECRUITER_ID.toString(), "ADMIN");
+        mvc.perform(get("/offers/{offerId}", OFFER_ID)
+            .header(HttpHeaders.AUTHORIZATION, AUTHORIZATION))
+            .andExpect(status().isForbidden());
+        verifyNoInteractions(offers);
+    }
 
     @Test
     void recruiterSendsOfferAndReceivesCreatedResponse() throws Exception {

@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
@@ -12,6 +14,7 @@ function fmtDate(value?: string) {
 }
 
 export default function CandidateApplicationsPage() {
+  const router = useRouter();
   const [applications, setApplications] = useState<CandidateApplication[]>([]);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -75,7 +78,7 @@ export default function CandidateApplicationsPage() {
       return;
     }
     setActionError("");
-    setActionStatus("Hãy mở Offer từ thông báo đã nhận để dùng đúng offerId và hai phiên bản đi kèm.");
+    router.push(application.offerId ? `/candidate/offers/${application.offerId}` : `/candidate/applications/${application.id}`);
   }
 
   return (
@@ -98,6 +101,7 @@ export default function CandidateApplicationsPage() {
               </div>
               <p className="help">Match {application.matchScore ?? "chưa có"}% · Nộp ngày {fmtDate(application.createdAt)} · Phiên bản {application.version ?? "tải khi thao tác"}</p>
               <div className="btn-group">
+                <Link className="btn" href={`/candidate/applications/${application.id}`}>Xem chi tiết và lịch sử</Link>
                 {actions.map((action) => (
                   <button key={action.kind} className={action.kind === "RESPOND_OFFER" ? "btn btn-primary" : "btn btn-warning"} type="button" disabled={pendingApplicationId !== null} aria-busy={pending && action.kind === "WITHDRAW"} onClick={() => runAction(application, action)}>
                     {pending && action.kind === "WITHDRAW" ? "Đang rút hồ sơ…" : action.label}

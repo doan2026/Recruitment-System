@@ -11,6 +11,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.hibernate.exception.ConstraintViolationException;
@@ -54,6 +55,17 @@ public class ApplicationEvaluationService {
         this.evaluations = evaluations;
         this.companies = companies;
         this.clock = clock;
+    }
+
+    @Transactional(readOnly = true)
+    public List<EvaluationResponse> list(
+        UUID applicationId, UUID recruiterId, String authorization
+    ) {
+        ApplicationEntity application = applications.findById(applicationId)
+            .orElseThrow(this::notFound);
+        authorize(application, recruiterId, authorization);
+        return evaluations.findAllByApplicationIdOrderByCreatedAtAscIdAsc(applicationId)
+            .stream().map(EvaluationResponse::from).toList();
     }
 
     @Transactional

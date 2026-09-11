@@ -7,6 +7,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -20,6 +22,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -68,6 +71,31 @@ class ApplicationEvaluationControllerTest {
 
     @MockBean
     private JwtDecoder jwtDecoder;
+
+    @Test
+    void recruiterReadsPrivateEvaluationList() throws Exception {
+        request(EVALUATOR_ID.toString(), "RECRUITER", "{}");
+        when(evaluations.list(APPLICATION_ID, EVALUATOR_ID, AUTHORIZATION)).thenReturn(List.of());
+        mvc.perform(get("/{applicationId}/evaluations", APPLICATION_ID)
+            .header(HttpHeaders.AUTHORIZATION, AUTHORIZATION))
+            .andExpect(status().isOk())
+            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"))
+            .andExpect(result -> assertThat(result.getResponse().getHeaders(HttpHeaders.VARY))
+                .contains(HttpHeaders.AUTHORIZATION))
+            .andExpect(jsonPath("$.data").isEmpty());
+        verify(evaluations).list(APPLICATION_ID, EVALUATOR_ID, AUTHORIZATION);
+    }
+
+    @Test
+    void evaluationReadRejectsCandidateAndAnonymous() throws Exception {
+        mvc.perform(get("/{applicationId}/evaluations", APPLICATION_ID))
+            .andExpect(status().isUnauthorized());
+        request(EVALUATOR_ID.toString(), "CANDIDATE", "{}");
+        mvc.perform(get("/{applicationId}/evaluations", APPLICATION_ID)
+            .header(HttpHeaders.AUTHORIZATION, AUTHORIZATION))
+            .andExpect(status().isForbidden());
+        verifyNoInteractions(evaluations);
+    }
 
     @Test
     void recruiterCreatesEvaluation() throws Exception {

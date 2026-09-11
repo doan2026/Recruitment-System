@@ -61,6 +61,11 @@ export interface Company {
   shortName: string;
   taxCode: string;
   ownerName: string;
+  description?: string;
+  industry?: string;
+  size?: string;
+  address?: string;
+  website?: string | null;
   aggregateVersion: number;
   verificationStatus: CompanyVerificationStatus;
   rejectReason?: string;
@@ -84,12 +89,12 @@ export interface Job {
   level: string;
   experienceYears?: number;
   quantity?: number;
-  type: "FULLTIME" | "PARTTIME" | "CONTRACT";
+  type: "FULLTIME" | "PARTTIME" | "REMOTE" | "INTERNSHIP";
   location: string;
   department: string;
   salaryMin: number;
   salaryMax: number | null;
-  currency: "VND";
+  currency: string;
   isNegotiable: boolean;
   description: string;
   requirements: string[];
@@ -129,6 +134,9 @@ export interface CandidateApplication {
   status: ApplicationStatus;
   version: number | null;
   offerVersion?: number;
+  offerId?: string | null;
+  coverLetter?: string | null;
+  timeline?: { fromStatus: string | null; toStatus: string; note: string | null; changedAt: string }[];
   matchScore?: number;
   createdAt: string;
   expectedAt?: string;
@@ -150,6 +158,10 @@ export interface Offer {
   status: OfferStatus;
   fileId?: string;
   fileUrl?: string;
+  startDate?: string;
+  note?: string | null;
+  responseNote?: string | null;
+  applicationStatus?: ApplicationStatus;
 }
 
 const baseAt = (offset: number) => {
@@ -245,7 +257,7 @@ export const jobs: Job[] = [
     companyId: "cmp-techvision",
     title: "Product Manager",
     level: "Lead",
-    type: "CONTRACT",
+    type: "REMOTE",
     location: "Da Nang",
     department: "Product",
     salaryMin: 30000000,
@@ -461,7 +473,7 @@ export async function getPublicJobs(search: {
   salaryMax?: number;
   skills?: string[];
   experienceYears?: number;
-  jobType?: "FULL_TIME" | "PART_TIME" | "CONTRACT";
+  jobType?: "FULL_TIME" | "PART_TIME" | "REMOTE" | "INTERNSHIP";
   sort?: "RELEVANCE" | "NEWEST" | "SALARY_DESC";
   mode: SearchMode;
   page?: number;

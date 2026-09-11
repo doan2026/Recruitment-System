@@ -25,6 +25,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -87,6 +88,41 @@ class ApplicationEvaluationServiceTest {
             applicationId,
             evaluatorId
         )).thenReturn(false);
+    }
+
+    @ParameterizedTest
+    @EnumSource(CompanyMemberRole.class)
+    void memberAndOwnerCanReadPersistedEvaluations(CompanyMemberRole role) {
+        when(companies.getRecruiterMembership(evaluatorId, AUTHORIZATION))
+            .thenReturn(new RecruiterCompanyMembership(companyId, role));
+        EvaluationEntity evaluation = EvaluationEntity.create(
+            UUID.randomUUID(), applicationId, evaluatorId,
+            new BigDecimal("85.50"), Map.of("technical", new BigDecimal("90.00")),
+            "Persisted evaluation", NOW
+        );
+        when(evaluations.findAllByApplicationIdOrderByCreatedAtAscIdAsc(applicationId))
+            .thenReturn(List.of(evaluation));
+        List<EvaluationResponse> result = service.list(applicationId, evaluatorId, AUTHORIZATION);
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().id()).isEqualTo(evaluation.getId());
+        assertThat(result.getFirst().note()).isEqualTo("Persisted evaluation");
+        assertThat(result.getFirst().score()).isEqualByComparingTo("85.50");
+    }
+
+    @Test
+    void evaluationReadIsScopedBeforeQueryingPrivateRows() {
+        when(companies.getRecruiterMembership(evaluatorId, AUTHORIZATION))
+            .thenReturn(new RecruiterCompanyMembership(UUID.randomUUID(), CompanyMemberRole.OWNER));
+        assertBusinessException(
+            () -> service.list(applicationId, evaluatorId, AUTHORIZATION),
+            "APPLICATION_ACCESS_DENIED", HttpStatus.FORBIDDEN
+        );
+        verify(evaluations, never()).findAllByApplicationIdOrderByCreatedAtAscIdAsc(any());
+    }
+
+    @Test
+    void evaluationReadReturnsEmptyListForUnevaluatedApplication() {
+        assertThat(service.list(applicationId, evaluatorId, AUTHORIZATION)).isEmpty();
     }
 
     @ParameterizedTest

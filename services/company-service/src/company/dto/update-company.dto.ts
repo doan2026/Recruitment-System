@@ -1,10 +1,13 @@
 import { Type } from 'class-transformer';
-import { ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsInt,
   IsOptional,
+  Max,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { CompanyMediaReferenceDto } from './company-media-reference.dto';
@@ -12,6 +15,12 @@ import { CreateCompanyDto } from './create-company.dto';
 import { FileReferenceDto } from './file-reference.dto';
 
 export class UpdateCompanyDto extends PartialType(CreateCompanyDto) {
+  @ApiProperty({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })
+  @IsInt()
+  @Min(0)
+  @Max(Number.MAX_SAFE_INTEGER)
+  expectedVersion!: number;
+
   @ApiPropertyOptional({ type: FileReferenceDto })
   @IsOptional()
   @ValidateNested()
