@@ -1,0 +1,2 @@
+# PostgreSQL Skill
+Own data per service: auth (users/refresh tokens), chat (conversations/members/messages), video (calls/participants/history), notification (notifications/push tokens). Every entity has its own UUID/ULID key: user_id, refresh_token_id, conversation_id, message_id, call_id, participant_id, notification_id, push_token_id. Email is UNIQUE, not the primary key. Store call metadata, never video/audio.
