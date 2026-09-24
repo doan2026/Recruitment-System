@@ -26,6 +26,8 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(AuthCorsProperties.class)
 class SecurityConfig {
+  @org.springframework.beans.factory.annotation.Value("${springdoc.api-docs.enabled:false}")
+  private boolean docsEnabled;
   @Bean
   SecurityFilterChain securityFilterChain(
       HttpSecurity http,
@@ -41,7 +43,9 @@ class SecurityConfig {
         .formLogin(form -> form.disable())
         .httpBasic(basic -> basic.disable())
         .logout(logout -> logout.disable())
-        .authorizeHttpRequests(auth -> auth
+        .authorizeHttpRequests(auth -> {
+          if (docsEnabled) auth.requestMatchers("/auth/v3/api-docs/**", "/auth/swagger-ui/**", "/auth/swagger-ui.html").permitAll();
+          auth
             .requestMatchers(
                 "/health",
                 "/auth/health",
@@ -68,8 +72,10 @@ class SecurityConfig {
                 "/auth/google/exchange")
             .permitAll()
             .requestMatchers(HttpMethod.GET, "/auth/me").authenticated()
+            .requestMatchers(HttpMethod.GET, "/auth/users").hasRole("ADMIN")
             .requestMatchers(HttpMethod.PATCH, "/auth/users/*/lock").hasRole("ADMIN")
-            .anyRequest().denyAll())
+            .anyRequest().denyAll();
+        })
         .oauth2ResourceServer(oauth -> oauth
             .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter))
             .authenticationEntryPoint((request, response, exception) ->

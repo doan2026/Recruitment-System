@@ -83,6 +83,15 @@ auth:
   mail:
     from: ${SMTP_FROM:no-reply@recruitment.local}
 
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:false}
+    path: /auth/v3/api-docs
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:false}
+    path: /auth/swagger-ui.html
+  paths-to-match: /auth/**
+
 management:
   endpoints:
     web:
