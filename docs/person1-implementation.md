@@ -72,5 +72,9 @@ mvn test
 mvn -Pintegration -Dapi.version=1.44 verify
 ```
 
-Kết quả cụ thể được ghi ở cuối tài liệu sau lần xác minh cuối.
+### Kết quả xác minh (24/09/2026)
 
+- Frontend: 137 kiểm thử unit/API, typecheck, production build và 16/16 kịch bản Playwright (desktop/mobile) đều đạt.
+- Auth service: 218 kiểm thử Maven đều đạt.
+- Admin service: 12 kiểm thử đơn vị và 4/4 kiểm thử tích hợp PostgreSQL/Testcontainers đều đạt.
+- `docker compose config --quiet` yêu cầu file `.env` với các biến bảo mật và hạ tầng bắt buộc; không có file `.env` cục bộ nên Compose được giữ ở trạng thái chưa khởi chạy để tránh dùng cấu hình hoặc bí mật giả.

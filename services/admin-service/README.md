@@ -57,5 +57,6 @@ mvn -Pintegration -Dapi.version=1.44 verify
 
 Integration tests use a disposable PostgreSQL 16 Testcontainer, apply Flyway migrations, and cover duplicates, late events, poison events, CAS report handling, audit immutability, application startup and OpenAPI/security. Docker must be running. The api.version property is for newer Docker engines whose minimum API exceeds the Java client's default.
 
-Runtime starts migrations automatically. Configure migration/runtime roles separately in a production deployment, and use a migration job if runtime DDL is prohibited. Container readiness uses Actuator database health. Internal service URLs, Kafka broker and CORS origins are explicit in `.env.example`.
+Verified on 24/09/2026: 12 unit tests and 4 PostgreSQL integration tests passed with Docker Desktop 29.5.3.
 
+Runtime starts migrations automatically. Configure migration/runtime roles separately in a production deployment, and use a migration job if runtime DDL is prohibited. Container readiness uses Actuator database health. Internal service URLs, Kafka broker and CORS origins are explicit in `.env.example`.
