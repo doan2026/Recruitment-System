@@ -1,8 +1,8 @@
 # BÁO CÁO TIẾN ĐỘ DỰ ÁN HỆ THỐNG TUYỂN DỤNG
 
-> Ngày cập nhật: 29/08/2026
+> Ngày cập nhật: 24/09/2026
 > Nhánh đối chiếu chính: `develop`
-> Pull Request lần cập nhật: PR #67 từ `feature/application-service/offer-lifecycle-consistency` vào `develop`
+> Pull Request lần cập nhật: PR #138 từ `merge/master-into-develop` vào `develop`
 
 ## Phạm vi và quy ước đánh giá
 
@@ -32,6 +32,16 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 | Hạ tầng dùng chung | Người 3 | 🟡 Docker Compose, Nginx, database và Kafka base đã có; Notification có one-shot migration, non-root runtime, readiness DB/Kafka, static JWT PEM và route no-store/query-free; distributed limiter, Kafka TLS/SASL, Jitsi và production hardening còn pending |
 | Frontend | Phối hợp cả nhóm | ⏳ Trang khởi tạo |
 | Tích hợp, kiểm thử và vận hành | Phối hợp cả nhóm | 🟡 Nhiều service-level PostgreSQL/Kafka/security suite đã có; deployed cross-service E2E, load và release gate toàn hệ thống còn pending |
+
+### Cập nhật đồng bộ `master → develop` ngày 24/09/2026
+
+- PR #138 đã merge vào `develop`; commit hiện tại sau merge là `684dd98`.
+- Đã đưa module độc lập `services/chat_video_hr_system` từ `master` vào `develop`, gồm Auth, Chat WebSocket, Notification SSE/Redpanda, Video LiveKit, Nginx và frontend React/Vite.
+- Merge sạch, không ghi đè các service hiện hữu. Không sửa hoặc push lên nhánh `master`.
+- Đã sửa khai báo kiểu Vite bị thiếu; `npm ci` và frontend production build đều PASS.
+- Chưa kiểm thử bốn service Go vì máy local chưa có Go. Docker runtime còn pending vì module cần tạo các file `.env` từ mẫu và sinh RSA keys cục bộ.
+- `npm audit` hiện báo 2 lỗ hổng dependency frontend (1 moderate, 1 high); chưa chạy `npm audit fix --force` vì có nguy cơ breaking change.
+- Đây là phần đồng bộ code của module Chat/Video do thành viên khác thực hiện, **không tính vào phạm vi task Người 2**.
 
 ---
 
