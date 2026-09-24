@@ -1,0 +1,2 @@
+# Deployment Skill
+Architecture: Internet -> HTTPS/WSS -> Nginx/API Gateway -> Go services -> PostgreSQL/Kafka/Redis; WebRTC media -> SFU such as LiveKit. Gateway handles TLS, routing, WS upgrade, load balancing, and rate limiting; services handle authorization. Keep JWT private key, DB passwords, Kafka credentials, FCM server credentials, and LiveKit API secret server-side. Frontend only gets public config. Deploy: test/build -> migrations -> infrastructure -> services -> health checks -> HTTP/WSS verification -> inspect logs/metrics/lag/connections.
