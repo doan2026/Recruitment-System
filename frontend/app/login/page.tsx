@@ -4,6 +4,8 @@ import { type FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { signIn } from "../../lib/authSession";
 import { toUserMessage } from "../../lib/apiClient";
+import Link from "next/link";
+import { landing } from "../../lib/person1Api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -23,14 +25,16 @@ export default function LoginPage() {
     try {
       const account = await signIn(email, password);
       const returnTo = new URLSearchParams(window.location.search).get("returnTo");
-      const safeReturn = returnTo && /^\/(?:candidate|recruiter|ai)(?:\/|$)/.test(returnTo) && !returnTo.includes("\\");
-      router.replace(safeReturn ? returnTo : account.role === "RECRUITER" ? "/recruiter/jobs" : "/candidate/jobs");
+      const safeReturn = returnTo && /^\/(?:candidate|recruiter|admin|ai)(?:\/|$)/.test(returnTo) && !returnTo.includes("\\");
+      router.replace(safeReturn ? returnTo : landing(account.role));
     } catch (reason) { setError(toUserMessage(reason)); setPassword(""); }
     finally { setPending(false); }
   }
   return <section className="page-section">
     <div className="page-header"><div><h1>Đăng nhập CareerHub</h1><p className="muted">Sử dụng tài khoản đã được xác minh trong hệ thống.</p></div></div>
     <form className="card form-stack" noValidate onSubmit={submit}>
+      <div className="btn-group"><Link href="/register">Tạo tài khoản</Link><Link href="/forgot-password">Quên mật khẩu</Link></div>
+      {process.env.NEXT_PUBLIC_GOOGLE_LOGIN_ENABLED === "true" ? <a className="btn" href={`${process.env.NEXT_PUBLIC_API_BASE_URL ?? ""}/auth/google`}>Đăng nhập với Google</a> : null}
       <div className="field">
         <label className="label" htmlFor="login-email">Email</label>
         <input className="input" id="login-email" type="email" autoComplete="username" maxLength={320} value={email} disabled={pending} onChange={(event) => setEmail(event.target.value)} aria-invalid={invalid === "email"} aria-describedby={invalid === "email" ? "login-email-error" : undefined} />

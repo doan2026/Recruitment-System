@@ -51,6 +51,7 @@ export default async function CompanyDetailPage({ params }: { params: { companyI
   return (
     <main>
       <PageHeader eyebrow="CANDIDATE · COMPANY" title={company.name} description={company.description} />
+      <Link className="btn" href={`/reports?type=COMPANY&id=${encodeURIComponent(company.id)}`}>Báo cáo công ty</Link>
 
       <section className="panel company-public-hero">
         <div className="company-public-logo">

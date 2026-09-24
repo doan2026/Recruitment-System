@@ -9,7 +9,7 @@ export interface CurrentAccount {
   role: "CANDIDATE" | "RECRUITER" | "ADMIN";
 }
 
-interface TokenResponse {
+export interface TokenResponse {
   accessToken: string;
   refreshToken: string;
   tokenType: string;
@@ -47,9 +47,14 @@ export async function signIn(email: string, password: string): Promise<CurrentAc
     authRecovery: false, attachAccessToken: false, maxRetries: 0,
   });
   validateTokens(response.data);
-  account = response.data.user;
-  refreshToken = response.data.refreshToken;
-  setApiSession({ token: response.data.accessToken, accountId: account.id });
+  return establishSession(response.data);
+}
+
+export function establishSession(tokens: TokenResponse): CurrentAccount {
+  validateTokens(tokens);
+  account = tokens.user;
+  refreshToken = tokens.refreshToken;
+  setApiSession({ token: tokens.accessToken, accountId: account.id });
   configureApiSessionRefresh(async () => {
     const current = getCurrentAccount();
     const presented = refreshToken;

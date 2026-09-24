@@ -27,6 +27,9 @@ export function AccountNavigation() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const links = [...publicLinks,
+    ...(account?.role === "CANDIDATE" ? [{ label: "Hồ sơ", href: "/candidate/profile" }] : []),
+    ...(account?.role === "ADMIN" ? [{ label: "Quản trị", href: "/admin" }] : []),
+    ...(account ? [{ label: "Báo cáo vi phạm", href: "/reports" }] : []),
     ...(isDemoPerson2Api || account?.role === "CANDIDATE" ? candidateLinks : []),
     ...(isDemoPerson2Api || account?.role === "RECRUITER" ? recruiterLinks : []),
   ];

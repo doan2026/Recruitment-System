@@ -70,6 +70,7 @@ export default function CandidateJobDetailPage({ params, searchParams }: {
   return (
     <main>
       <PageHeader title={job.title} description={`${job.location} · ${job.level}`} action={<Link className="btn" href="/candidate/jobs">Quay về danh sách</Link>} />
+      <Link className="btn" href={`/reports?type=JOB&id=${encodeURIComponent(job.id)}`}>Báo cáo tin tuyển dụng</Link>
       <section className="grid-2">
         <section className="panel">
           <div className="section-head"><h2>Chi tiết công việc</h2><StatusBadge tone={canApply ? "success" : "warning"}>{job.status}</StatusBadge></div>

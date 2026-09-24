@@ -9,6 +9,7 @@ service-account*.json
 **/dist/
 **/target/
 **/.next/
+**/.next-e2e/
 **/.test-dist/
 **/playwright-report/
 **/test-results/
@@ -22,3 +23,4 @@ service-account*.json
 *.log
 .idea/
 .vscode/
+.cache/
