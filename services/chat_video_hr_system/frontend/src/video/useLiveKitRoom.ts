@@ -41,7 +41,7 @@ export const useLiveKitRoom = (url: string, token: string) => {
 
       // Try connecting to LiveKit
       await room.connect(url, token);
-      
+
       // Enable camera and microphone
       await room.localParticipant.enableCameraAndMicrophone();
       setIsCamEnabled(room.localParticipant.isCameraEnabled);
