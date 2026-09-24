@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @SpringBootApplication
+@org.springframework.scheduling.annotation.EnableScheduling
 public class AdminServiceApplication {
   public static void main(String[] args) { SpringApplication.run(AdminServiceApplication.class, args); }
 }

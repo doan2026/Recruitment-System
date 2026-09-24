@@ -198,6 +198,14 @@ services:
     build: ./services/admin-service
     env_file:
       - ./services/admin-service/.env
+    environment:
+      JWT_ISSUER: ${JWT_ISSUER:?JWT_ISSUER is required}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:?JWT_AUDIENCE is required}
+      JWT_JWKS_URI: http://auth-service:8080/auth/.well-known/jwks.json
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      AUTH_SERVICE_URL: http://auth-service:8080
+      COMPANY_SERVICE_URL: http://company-service:3000
+      JOB_SERVICE_URL: http://job-search-service:3000
     restart: unless-stopped
     depends_on:
       postgres:
