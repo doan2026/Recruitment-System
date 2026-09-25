@@ -7,6 +7,21 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JobService } from './job.service';
 
+const DEFAULT_EXPIRY_INTERVAL_MS = 3_600_000;
+const MIN_EXPIRY_INTERVAL_MS = 60_000;
+
+/** Fails closed: a non-numeric value used to become NaN, i.e. a 1 ms timer. */
+export function expiryIntervalMs(raw: unknown): number {
+  if (raw === undefined || raw === null || raw === '') {
+    return DEFAULT_EXPIRY_INTERVAL_MS;
+  }
+  const value = typeof raw === 'number' ? raw : Number(String(raw).trim());
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error('JOB_EXPIRY_INTERVAL_MS must be a positive integer (milliseconds)');
+  }
+  return Math.max(value, MIN_EXPIRY_INTERVAL_MS);
+}
+
 @Injectable()
 export class JobExpiryService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(JobExpiryService.name);
@@ -18,8 +33,9 @@ export class JobExpiryService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
-    const configured = this.config.get<number>('JOB_EXPIRY_INTERVAL_MS');
-    const intervalMs = Math.max(configured ?? 3_600_000, 60_000);
+    const intervalMs = expiryIntervalMs(
+      this.config.get<string>('JOB_EXPIRY_INTERVAL_MS'),
+    );
     void this.expire();
     this.timer = setInterval(() => void this.expire(), intervalMs);
     this.timer.unref();

@@ -111,6 +111,9 @@ export interface Job {
   memberRole?: "OWNER" | "MEMBER";
   fallbackReason?: FallbackReason;
   rejectionReason?: string;
+  /** Raw backend text; the list fields above drop blank lines and indentation. */
+  requirementsText?: string;
+  benefitsText?: string;
 }
 
 export interface JobRecommendation {

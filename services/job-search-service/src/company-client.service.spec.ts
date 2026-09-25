@@ -48,3 +48,40 @@ describe('Company authorization for Job CRUD', () => {
     });
   });
 });
+
+describe('Company name lookup for indexing', () => {
+  const KEY = 'job-search-to-company-indexing-key-0001';
+  const indexingClient = (key: string | undefined) => new CompanyClientService(new ConfigService({
+    COMPANY_SERVICE_URL: 'http://company-service:3000',
+    COMPANY_INTERNAL_API_KEY: key,
+  }));
+
+  it('reads the internal summary so a PENDING company keeps its jobs indexable', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(response({
+      data: { id: COMPANY, name: 'Acme Vietnam', verifiedStatus: 'PENDING' }, meta: null,
+    }));
+    await expect(indexingClient(KEY).getCompanyNameForIndexing(COMPANY)).resolves.toBe('Acme Vietnam');
+    expect(fetchMock).toHaveBeenCalledWith(`http://company-service:3000/internal/${COMPANY}`,
+      expect.objectContaining({
+        redirect: 'error', cache: 'no-store',
+        headers: { accept: 'application/json', 'x-internal-api-key': KEY },
+      }));
+  });
+
+  it.each([undefined, 'short', 'replace-with-a-distinct-job-search-to-company-key'])(
+    'refuses to call Company without a usable key (%p)', async (key) => {
+      const fetchMock = jest.spyOn(global, 'fetch');
+      await expect(indexingClient(key).getCompanyNameForIndexing(COMPANY)).rejects.toThrow('COMPANY_INTERNAL_API_KEY');
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['a non-2xx response', response({ code: 'COMPANY_NOT_FOUND' }, 404)],
+    ['another company', response({ data: { id: USER, name: 'Acme Vietnam' }, meta: null })],
+    ['a control character in the name', response({ data: { id: COMPANY, name: 'Acme\u0085' }, meta: null })],
+  ])('treats %s as a retryable indexing failure', async (_, reply) => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(reply);
+    await expect(indexingClient(KEY).getCompanyNameForIndexing(COMPANY)).rejects.toThrow();
+  });
+});

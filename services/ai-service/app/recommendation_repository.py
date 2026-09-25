@@ -186,14 +186,19 @@ class PsycopgRecommendationRepository:
                     source = cursor.execute(
                         """
                         SELECT
-                            is_active,
-                            model_name,
-                            text_hash,
-                            source_version,
-                            updated_at,
-                            vector::text
-                        FROM ai.job_embeddings
-                        WHERE job_id = %s
+                            embedding.is_active,
+                            embedding.model_name,
+                            embedding.text_hash,
+                            embedding.source_version,
+                            embedding.updated_at,
+                            embedding.vector::text,
+                            aggregate.last_aggregate_version,
+                            aggregate.tombstoned
+                        FROM ai.job_embeddings AS embedding
+                        LEFT JOIN ai.embedding_aggregate_cursors AS aggregate
+                            ON aggregate.aggregate_type = 'JOB'
+                            AND aggregate.aggregate_id = embedding.job_id
+                        WHERE embedding.job_id = %s
                         """,
                         (job_id,),
                     ).fetchone()
@@ -209,10 +214,17 @@ class PsycopgRecommendationRepository:
                         source_version,
                         source_updated_at,
                         source_vector,
+                        cursor_version,
+                        cursor_tombstoned,
                     ) = source
                     if not isinstance(is_active, bool):
                         raise RecommendationStoreUnavailable
-                    _require_exact_source_version(source_version, job_version)
+                    _require_current_source_version(
+                        source_version,
+                        job_version,
+                        cursor_version=cursor_version,
+                        cursor_tombstoned=cursor_tombstoned,
+                    )
                     if not is_active:
                         return _source_empty_or_stale(
                             expected_source_fingerprint,
@@ -480,17 +492,33 @@ def _validate_job_version(job_version: object) -> None:
         raise RecommendationStoreUnavailable
 
 
-def _require_exact_source_version(
+def _require_current_source_version(
     source_version: object,
     job_version: int,
+    *,
+    cursor_version: object,
+    cursor_tombstoned: object,
 ) -> None:
+    """Accept the embedding only if it represents the authorized Job version.
+
+    Job edits that leave the embedded state unchanged (deadline, quantity…)
+    advance the aggregate cursor without rewriting ``source_version``, so an
+    older embedding is still current when the cursor sits at ``job_version``.
+    """
     _validate_job_version(job_version)
-    if (
-        not isinstance(source_version, int)
-        or isinstance(source_version, bool)
-        or source_version != job_version
-    ):
+    if not isinstance(source_version, int) or isinstance(source_version, bool):
         raise RecommendationStoreUnavailable
+    if source_version == job_version:
+        return
+    if (
+        source_version < job_version
+        and isinstance(cursor_version, int)
+        and not isinstance(cursor_version, bool)
+        and cursor_version == job_version
+        and cursor_tombstoned is False
+    ):
+        return
+    raise RecommendationStoreUnavailable
 
 
 def _source_empty_or_stale(

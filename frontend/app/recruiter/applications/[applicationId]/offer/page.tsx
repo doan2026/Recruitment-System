@@ -9,6 +9,13 @@ import { ApiClientError, toUserMessage } from "../../../../../lib/apiClient";
 import { OFFER_ATTACHMENT_SUPPORT } from "../../../../../lib/offerAttachment";
 import { getApplicationDetail, sendApplicationOffer, type CandidateApplication } from "../../../../../lib/person2Api";
 
+// Exact 409 codes POST /applications/:id/offer can return when the page is stale.
+const OFFER_STALE_MESSAGES: Partial<Record<string, string>> = {
+  APPLICATION_CHANGED_CONCURRENTLY: "Hồ sơ vừa thay đổi. Đã tải trạng thái mới và giữ bản Offer bạn nhập; hãy kiểm tra trước khi chủ động gửi lại.",
+  APPLICATION_NOT_ELIGIBLE_FOR_OFFER: "Hồ sơ không còn ở bước phỏng vấn nên không thể gửi Offer. Đã tải trạng thái mới nhất.",
+  OFFER_ALREADY_EXISTS: "Hồ sơ này đã có Offer (có thể do đồng nghiệp vừa gửi). Đã tải trạng thái mới nhất.",
+};
+
 export default function RecruiterSendOfferPage() {
   const params = useParams<{ applicationId: string }>();
   const applicationId = params.applicationId;
@@ -93,11 +100,12 @@ export default function RecruiterSendOfferPage() {
       setApplication((current) => current ? { ...current, status: response.data.applicationStatus, version: response.data.applicationVersion } : current);
       setSubmitted(true);
     } catch (reason: unknown) {
-      if (reason instanceof ApiClientError && (reason.code === "APPLICATION_CHANGED_CONCURRENTLY" || reason.code === "INVALID_APPLICATION_TRANSITION")) {
+      const staleMessage = reason instanceof ApiClientError ? OFFER_STALE_MESSAGES[reason.code] : undefined;
+      if (staleMessage) {
         try {
           const latest = await getApplicationDetail(application.id);
           setApplication(latest.data);
-          setSubmitError("Hồ sơ vừa thay đổi. Đã tải trạng thái mới và giữ bản Offer bạn nhập; hãy kiểm tra trước khi chủ động gửi lại.");
+          setSubmitError(staleMessage);
         } catch (reloadError: unknown) { setSubmitError(toUserMessage(reloadError)); }
       } else setSubmitError(toUserMessage(reason));
     } finally {

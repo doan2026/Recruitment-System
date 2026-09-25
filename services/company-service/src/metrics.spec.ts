@@ -21,6 +21,7 @@ describe('route normalisation', () => {
   it('keeps a known route as its own label', () => {
     expect(normalizeRoute('/search')).toBe('/search');
     expect(normalizeRoute('/me')).toBe('/me');
+    expect(normalizeRoute('/')).toBe('/');
   });
 
   it('templates a company path so no company id reaches a label', () => {
@@ -37,6 +38,7 @@ describe('route normalisation', () => {
       '/{id}/members/{id}',
     );
     expect(normalizeRoute(`/by-user/${userId}`)).toBe('/by-user/{id}');
+    expect(normalizeRoute(`/internal/${companyId}`)).toBe('/internal/{id}');
   });
 
   it('collapses anything else so scanning cannot grow the registry', () => {

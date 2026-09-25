@@ -137,3 +137,13 @@ export function normalizeRecruiterJobForm(values: RecruiterJobFormValues): Recru
   }
   return payload;
 }
+
+// Mirrors the Job Service rule: only these normalized fields send a PUBLISHED
+// job back to admin review; deadline, quantity, skills… are applied at once.
+const REVIEW_FIELDS = ["title", "description", "requirements", "isNegotiable", "currency", "salaryMin", "salaryMax"] as const;
+
+export function jobEditRequiresReview(original: RecruiterJobFormValues, draft: RecruiterJobFormValues): boolean {
+  const before = normalizeRecruiterJobForm(original);
+  const after = normalizeRecruiterJobForm(draft);
+  return REVIEW_FIELDS.some((field) => before[field] !== after[field]);
+}

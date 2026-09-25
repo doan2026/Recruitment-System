@@ -40,6 +40,7 @@ import {
 } from './dto/public-company-search.dto';
 import { PublicCompanyProfileDto } from './dto/public-company-profile.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
+import { CompanyIndexingSummaryDto } from './dto/company-indexing-summary.dto';
 import {
   CompanyVerificationDecision,
   VerifyCompanyDto,
@@ -406,6 +407,23 @@ export class CompanyService {
     } catch (error) {
       this.throwPersistenceError(error);
     }
+  }
+
+  async getIndexingSummary(
+    companyId: string,
+  ): Promise<CompanyIndexingSummaryDto> {
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { id: true, name: true, verifiedStatus: true },
+    });
+    if (!company) {
+      throw new ApiException(
+        'COMPANY_NOT_FOUND',
+        'Company was not found',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return company;
   }
 
   async getPublicById(companyId: string): Promise<PublicCompanyProfileDto> {
@@ -1274,7 +1292,15 @@ export class CompanyService {
 
   private cleanCompanyName(value: string): string {
     const cleaned = value.normalize('NFKC').trim().replace(/\s+/g, ' ');
-    if (cleaned.length < 2 || cleaned.length > 160) {
+    // Same rule Job & Search enforces on this name (code points, no C0/C1
+    // controls); accepting more here would make every Job call for the
+    // company fail with COMPANY_SERVICE_UNAVAILABLE.
+    const length = [...cleaned].length;
+    if (
+      length < 2 ||
+      length > 160 ||
+      /[\u0000-\u001f\u007f-\u009f]/u.test(cleaned)
+    ) {
       throw new ApiException(
         'VALIDATION_ERROR',
         'name must contain between 2 and 160 normalized characters',

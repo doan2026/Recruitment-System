@@ -25,9 +25,14 @@ export interface RecruiterCompany {
   memberRole: 'OWNER' | 'MEMBER';
 }
 
-interface PublicCompany {
-  id: string;
-  name: string;
+const COMPANY_NAME_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
+
+function isCanonicalCompanyName(name: unknown): name is string {
+  return typeof name === 'string' &&
+    [...name].length >= 2 &&
+    [...name].length <= 160 &&
+    !COMPANY_NAME_CONTROL_CHARACTERS.test(name) &&
+    name === name.normalize('NFKC').trim().replace(/\s+/g, ' ');
 }
 
 @Injectable()
@@ -126,13 +131,7 @@ export class CompanyClientService {
       !hasExactKeys(body.data, RECRUITER_COMPANY_KEYS) ||
       !isUuidV4(body.data.companyId) ||
       body.data.companyId !== body.data.companyId.toLowerCase() ||
-      typeof body.data.name !== 'string' ||
-      [...body.data.name].length < 2 ||
-      [...body.data.name].length > 160 ||
-      /[\u0000-\u001f\u007f-\u009f]/u.test(body.data.name) ||
-      body.data.name !== body.data.name.normalize('NFKC')
-        .trim()
-        .replace(/\s+/g, ' ') ||
+      !isCanonicalCompanyName(body.data.name) ||
       !['PENDING', 'VERIFIED', 'REJECTED'].includes(
         body.data.verifiedStatus as string,
       ) ||
@@ -148,25 +147,66 @@ export class CompanyClientService {
     };
   }
 
-  async getPublicCompanyName(companyId: string): Promise<string> {
-    const baseUrl = this.config.get<string>('COMPANY_SERVICE_URL');
-    if (!baseUrl) throw new Error('COMPANY_SERVICE_URL is required');
+  /**
+   * Company name for the search index. Uses Company's internal lookup instead
+   * of the public profile: a PUBLISHED job stays searchable while its company
+   * is back in PENDING review after a legal-field edit, and the public
+   * endpoint hides such companies (404), which used to dead-letter the job.
+   */
+  async getCompanyNameForIndexing(companyId: string): Promise<string> {
+    const apiKey = this.indexingApiKey();
+    if (!apiKey) {
+      throw new Error('COMPANY_INTERNAL_API_KEY is not configured');
+    }
+    const { baseUrl, timeoutMs } = this.recommendationConfig();
     let response: Response;
     try {
-      response = await fetch(
-        baseUrl.replace(/\/$/, '') + '/' + companyId,
-        { signal: AbortSignal.timeout(3000) },
-      );
+      response = await fetch(`${baseUrl}/internal/${companyId}`, {
+        method: 'GET',
+        headers: {
+          accept: 'application/json',
+          'x-internal-api-key': apiKey,
+        },
+        cache: 'no-store',
+        redirect: 'error',
+        signal: AbortSignal.timeout(timeoutMs),
+      });
     } catch {
       throw new Error('Company Service is unavailable while indexing');
     }
-    const body = (await response.json().catch(() => ({}))) as {
-      data?: PublicCompany;
-    };
-    if (!response.ok || !body.data?.name) {
-      throw new Error(`Cannot resolve public company ${companyId}`);
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error(
+        `Cannot resolve company ${companyId} for indexing (HTTP ${response.status})`,
+      );
+    }
+    let body: unknown;
+    try {
+      body = await readBoundedJson(response);
+    } catch {
+      throw new Error('Company Service returned an unreadable indexing response');
+    }
+    if (
+      !isPlainObject(body) ||
+      !isPlainObject(body.data) ||
+      body.data.id !== companyId ||
+      !isCanonicalCompanyName(body.data.name)
+    ) {
+      throw new Error('Company Service returned an invalid indexing response');
     }
     return body.data.name;
+  }
+
+  private indexingApiKey(): string | undefined {
+    const value = this.config.get<string>('COMPANY_INTERNAL_API_KEY');
+    const byteLength = value ? Buffer.byteLength(value, 'utf8') : 0;
+    return value &&
+      !value.toLowerCase().includes('replace-with') &&
+      byteLength >= 32 &&
+      byteLength <= 512 &&
+      /^[\x21-\x7e]+$/.test(value)
+      ? value
+      : undefined;
   }
 
   private recommendationLookupUnavailable(): ApiException {
