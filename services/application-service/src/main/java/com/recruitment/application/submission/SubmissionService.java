@@ -31,7 +31,9 @@ public class SubmissionService {
         String authorization,
         CreateApplicationRequest request
     ) {
-        JobAvailability job = jobs.getAvailability(request.jobId());
+        JobAvailability job = withEventSafeTitle(
+            jobs.getAvailability(request.jobId())
+        );
         validateJob(job);
         Optional<ProfileSkillSnapshot> skillSnapshot =
             profiles.verifyCandidateCvForSubmission(
@@ -52,6 +54,40 @@ public class SubmissionService {
             job,
             skillSnapshot.orElseThrow()
         );
+    }
+
+    private static JobAvailability withEventSafeTitle(JobAvailability job) {
+        return new JobAvailability(
+            job.jobId(),
+            job.exists(),
+            job.acceptingApplications(),
+            job.reason(),
+            job.companyId(),
+            job.recruiterId(),
+            eventSafeJobTitle(job.jobTitle()),
+            job.status(),
+            job.deadline()
+        );
+    }
+
+    /**
+     * application-events v1 forbids control characters in job_title and caps
+     * it at 200 UTF-16 units. Titles stored before Job Service rejected them
+     * (e.g. a pasted tab) must not turn every submission into a 500.
+     */
+    static String eventSafeJobTitle(String title) {
+        if (title == null) {
+            return null;
+        }
+        String cleaned = title
+            .replaceAll("[\\x00-\\x1F\\x7F]+", " ")
+            .replaceAll(" {2,}", " ")
+            .strip();
+        if (cleaned.length() > 200) {
+            int end = Character.isHighSurrogate(cleaned.charAt(199)) ? 199 : 200;
+            cleaned = cleaned.substring(0, end).strip();
+        }
+        return cleaned.isEmpty() ? null : cleaned;
     }
 
     private void validateJob(JobAvailability job) {

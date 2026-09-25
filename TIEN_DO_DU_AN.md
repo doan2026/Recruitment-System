@@ -1,8 +1,8 @@
 # BÁO CÁO TIẾN ĐỘ DỰ ÁN HỆ THỐNG TUYỂN DỤNG
 
-> Ngày cập nhật: 24/09/2026
+> Ngày cập nhật: 25/09/2026
 > Nhánh đối chiếu chính: `develop`
-> Pull Request lần cập nhật: PR #138 từ `merge/master-into-develop` vào `develop`
+> Pull Request lần cập nhật: từ `fix/person2/audit-findings` vào `develop` (mục 2.58)
 
 ## Phạm vi và quy ước đánh giá
 
@@ -196,7 +196,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - **Công nghệ:** Next.js 14, React 18, TypeScript.
 - **Chức năng chính:** auth UI; hồ sơ/CV; công ty; job search/detail; apply/bookmark; recruiter pipeline/offer/dashboard; interview/video/chat/notification; admin console.
 - **Phụ thuộc:** API Gateway và hợp đồng API của toàn bộ backend.
-- **Trạng thái:** 🟡 React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter `demo|gateway` đã nối các read flow, cập nhật Company và tạo Company qua Gateway; các nền tảng safe error, conflict/transient recovery và private session boundary có unit test. `404 COMPANY_NOT_FOUND` đã thành onboarding thay vì lỗi. Gateway-contract E2E đã chạy trên Chrome desktop/mobile; Auth UI thật, các phụ thuộc Offer và deployed E2E vẫn pending; P16.N2 hiện 47/52.
+- **Trạng thái:** 🟡 React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter `demo|gateway` đã nối các read flow, cập nhật Company và tạo Company qua Gateway; các nền tảng safe error, conflict/transient recovery và private session boundary có unit test. `404 COMPANY_NOT_FOUND` đã thành onboarding thay vì lỗi. Gateway-contract E2E đã chạy trên Chrome desktop/mobile; Auth UI thật, các phụ thuộc Offer và deployed E2E vẫn pending; P16.N2 hiện 48/52.
 
 ## T14 — Tích hợp, kiểm thử và vận hành
 
@@ -1068,6 +1068,44 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 **Gate sau khi sửa:** AI **745/745** test cùng `ruff check`/`ruff format --check` sạch; Company **325 unit + 19 integration**; Job & Search **553 unit + 20 integration**; Application **309 unit + 107 integration**. `docker compose config` giải được mọi biến bắt buộc từ `.env.example` và nginx config parse sạch. Ba mục còn tồn của Người 2 (live Claude, corpus production + hạ tầng, Admin approval E2E) **không đổi** — chúng bị chặn bởi thiếu key, thiếu dữ liệu/hạ tầng thật và một service chưa tồn tại, không phải bởi lỗi mã.
 
 
+
+## 2.58 Kiểm thử lại phần Người 2 và sửa lỗi tìm được — 25/09/2026
+
+> Nhánh `fix/person2/audit-findings` tạo từ `develop` (`bada090`). Chỉ sửa bốn service của Người 2 (Company, Job & Search, Application, AI), FE tiêu thụ chúng và cấu hình Compose của bốn service này; không sửa service của Người 1/3 hay nginx.
+
+**Mức cao — FE hỏng khi chạy qua proxy `/api` của Next (cấu hình Docker):**
+- Next tự redirect 308 `/api/jobs/` → `/api/jobs` rồi proxy thành `/jobs`.
+- Nginx chỉ khai báo `location /jobs/`, nên redirect trình duyệt sang host nội bộ `api-gateway`. Hậu quả: tạo tin, nộp hồ sơ, danh sách hồ sơ của HR và tạo công ty đều hỏng.
+- Cách sửa: `next.config.mjs` bật `skipTrailingSlashRedirect` và thêm rewrite giữ dấu `/`.
+- Đã kiểm bằng cả `next dev` và bản build production (`next start`) với gateway giả ghi log: `/api/jobs/`, `/api/applications/?…`, `/api/companies/` tới đúng `/jobs/`, `/applications/?…`, `/companies/`.
+
+**Mức trung bình:**
+- **Sửa tin đang PUBLISHED:** Job so giá trị đã chuẩn hóa với bản ghi hiện tại, thay vì xét field có được gửi hay không. Chỉ khi đổi tiêu đề, mô tả, yêu cầu, lương, chế độ thỏa thuận hoặc đơn vị tiền (mới thêm `currency`) thì tin mới về `PENDING_APPROVAL`; deadline, số lượng, phúc lợi… được cập nhật ngay. FE chỉ hiện hộp thoại duyệt lại khi các trường đó thay đổi, và giữ nguyên văn `requirements`/`benefits` để form không đụng tới không bị coi là sửa.
+- **Gợi ý ứng viên trả 503 sau khi sửa tin:** AI chấp nhận embedding cũ khi aggregate cursor đã ở đúng `job_version` (event cùng trạng thái được ghi `SKIPPED_UNCHANGED`), thay vì đòi `source_version` khớp tuyệt đối. Cách này không ghi lại `job_embeddings`, nên không làm stale cursor gợi ý việc của Candidate.
+- **Index Job khi công ty về PENDING sau khi sửa trường pháp lý:**
+  - Trước đây indexer lấy tên công ty qua API công khai. API này trả 404 cho công ty chưa VERIFIED, nên tin vào dead-letter và baseline Elasticsearch không bao giờ hoàn tất.
+  - Company thêm `GET /internal/:id`, trả `id`/`name`/`verifiedStatus` với mọi trạng thái. Route được bảo vệ bằng key riêng `INTERNAL_API_KEY_JOB_SEARCH`, và gateway đã xóa `X-Internal-Api-Key` trên `/companies/`.
+  - Job gọi endpoint này bằng `COMPANY_INTERNAL_API_KEY`, có allowlist host, `redirect: error` và đọc JSON có giới hạn.
+
+**Mức thấp:**
+- Job chặn ký tự điều khiển trong `title`/`location`.
+- Application chuẩn hóa `job_title` cũ trước khi nộp đơn, hết lỗi 500 do contract `application-events` v1.
+- Company từ chối tên có ký tự điều khiển hoặc chỉ có 1 code point (những tên Job không chấp nhận).
+- Bulk detail chuẩn hóa UUID về chữ thường.
+- `JOB_EXPIRY_INTERVAL_MS` sai định dạng giờ fail-closed thay vì thành timer 1 ms.
+- `/metrics` của Company có nhãn `/` và `/internal/{id}`.
+- Form gửi Offer tải lại trạng thái khi gặp `APPLICATION_NOT_ELIGIBLE_FOR_OFFER` hoặc `OFFER_ALREADY_EXISTS`.
+
+**Triển khai:** thêm biến bắt buộc `COMPANY_INTERNAL_API_KEY_JOB_SEARCH` vào `.env` gốc (xem `.env.example`). Compose truyền biến này cho cả Company và Job; nếu thiếu, `docker compose` sẽ báo lỗi ngay.
+
+**Gate:**
+- Company **352/352 unit** (có test HTTP thật cho route nội bộ với guard/filter toàn cục), build và typecheck spec PASS.
+- Job & Search **611 unit PASS**, 20 integration bỏ qua vì cần Docker; build và typecheck spec PASS.
+- Application **326/326** và đóng gói JAR PASS.
+- AI **672 PASS**, 79 integration bỏ qua; ruff sạch.
+- FE **132/132 unit**, **54/54 Playwright** desktop + mobile (API giả lập), typecheck và production build PASS.
+- Integration Docker (Job 20, AI 79, Application/Company Testcontainers) và deployed E2E **chưa chạy** vì máy kiểm tra không có Docker.
+
 ---
 
 # 3. Danh sách task CHƯA làm (Pending)
@@ -1346,7 +1384,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [ ] Admin dashboard, company/job approval, user/report management và export.
 - [ ] Loading/error/empty state, responsive UI, accessibility và E2E test.
 
-### P16.N2 — FE tiêu thụ bốn service của Người 2 (47/52 tích hợp API thật; baseline UI đã có)
+### P16.N2 — FE tiêu thụ bốn service của Người 2 (48/52 tích hợp API thật; baseline UI đã có)
 
 > Bổ sung ngày 30/08/2026 theo yêu cầu. Đây là danh sách chi tiết task FE **chưa làm**, nhưng **chỉ giới hạn ở phần tiêu thụ bốn service của Người 2** (Company, Job & Search, Application, AI chatbot). FE của Auth, Profile, Media, Interview, Notification, Admin và Chat **không** nằm trong danh sách này. Bản thân việc code FE vẫn **thuộc Người 3** — mục này ghi ra để thấy backend của Người 2 đang chờ FE làm những gì, không phải chuyển việc sang Người 2.
 >
@@ -1417,7 +1455,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 #### Nền tảng dùng chung (làm trước mọi màn hình)
 
 - [x] API client bóc envelope thống nhất: thành công là `{data, meta}`, lỗi là `{code, message, details}`. Hiển thị theo `code` chứ không hiển thị `message` thô; `details` mới là chỗ mang thông tin điều hướng (`currentStatus`, `reason`, `eligibleAt`, `retryAfterSeconds`).
-- [x] Gọi đúng đường dẫn có **dấu `/` cuối** cho ba route collection — `POST /companies/`, `POST /jobs/`, `POST|GET /applications/`. Gateway chỉ khai báo `location /companies/`, `/jobs/`, `/applications/`, nên bỏ dấu `/` là nhận 404 **từ nginx**, không phải từ service; lỗi này không có mã nghiệp vụ để bắt.
+- [x] Gọi đúng đường dẫn có **dấu `/` cuối** cho ba route collection — `POST /companies/`, `POST /jobs/`, `POST|GET /applications/`. Gateway chỉ khai báo `location /companies/`, `/jobs/`, `/applications/`, nên bỏ dấu `/` là bị nginx redirect sang host nội bộ `api-gateway`, không phải lỗi từ service; lỗi này không có mã nghiệp vụ để bắt. Khi FE gọi qua proxy `/api` của Next (cấu hình Docker), `next.config.mjs` phải bật `skipTrailingSlashRedirect` và giữ dấu `/` trong rewrite, nếu không Next tự redirect 308 và bỏ dấu `/` trước khi proxy (sửa ở mục 2.58).
 - [x] Bộ xử lý `409` dùng chung cho optimistic locking: tải lại resource, so sánh, cho người dùng quyết định gửi lại — **không retry mù**. Áp cho `APPLICATION_CHANGED_CONCURRENTLY`, `JOB_STATE_CHANGED`, `COMPANY_UPDATE_CONFLICT`.
   - Shared primitive và Company consumer đã hoàn thành; Job/Application consumer sẽ đóng cùng mutation flow tương ứng.
 - [x] Bộ xử lý `429`/`503` phân biệt hai nhóm: nhóm **có** `Retry-After` đếm ngược và tự thử lại đúng một lần; nhóm **không có** như `MEDIA_UPLOAD_RATE_LIMITED` của Company hay AI rate-limit quy về `503` ở Application dùng local backoff 2–30 giây và khóa nút đến khi được phép thử lại.
@@ -1432,7 +1470,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [x] Dialog cảnh báo chuyển trạng thái ngầm: sửa `name` hoặc `taxCode` của công ty đang `VERIFIED` mở shared accessible warning dialog trước khi gọi `PUT /companies/:id`; chỉ mutation sau xác nhận, hủy giữ nguyên draft, pending khóa nút, rồi cập nhật badge về `PENDING` và xóa `rejectReason` theo response backend.
 - [x] Handshake tải media ba bước: gọi đúng Company boundary `POST /companies/:id/media/signature` với `Idempotency-Key` ổn định → upload multipart thẳng lên `uploadUrl` không cookie → `POST /companies/:id/media/confirm` → rồi mới `PUT /companies/:id` với `fileId`. FE kiểm `maxBytes`/`allowedFormats` trước và sau signature, đếm ngược `expiresAt`, xin chữ ký mới khi hết hạn; file đã confirm được giữ để retry attach hoặc bỏ local cho durable backend cleanup.
 - [x] Ngữ nghĩa **replace-all** của media trong `PUT`: editor kéo thả và có nút bàn phím để sắp xếp, xóa ảnh/video bằng cách bỏ khỏi mảng, luôn gửi lại toàn bộ gallery với `sortOrder` liên tục; FE chặn quá 10 IMAGE + 1 VIDEO và mọi `fileId` trùng logo/gallery; luồng xóa logo chỉ gửi `removeLogo=true`, không gửi đồng thời `logo`.
-- [x] Xử lý `409 COMPANY_UPDATE_CONFLICT`: API **không** có `If-Match` hay `version` trong body; form đã `GET /companies/me` lại, so `aggregateVersion` và từng field, giữ draft trong memory, cho chọn bản rồi yêu cầu người dùng bấm lưu lại kèm thông báo "dữ liệu vừa bị người khác sửa".
+- [x] Xử lý `409 COMPANY_UPDATE_CONFLICT`: `PUT /companies/:id` bắt buộc `expectedVersion` trong body (lấy từ `aggregateVersion` đang hiển thị), không dùng `If-Match`; form đã `GET /companies/me` lại, so `aggregateVersion` và từng field, giữ draft trong memory, cho chọn bản rồi yêu cầu người dùng bấm lưu lại kèm thông báo "dữ liệu vừa bị người khác sửa".
 - [x] Trang tìm kiếm công ty công khai với cursor pagination: route `/companies` giữ `nextCursor` mờ trong memory, khóa `q`/`limit` giữa các lần tải thêm, debounce 300 ms có IME guard, append khử trùng, infinite scroll kèm nút fallback và kết thúc chỉ theo `hasMore`; không hiển thị cursor, `total` hay thanh số trang.
 - [x] Trang công ty công khai: route `/companies/[companyId]` dùng placeholder khi `logoUrl=null`, chỉ render media hợp lệ có trong public response, có empty state và ghi rõ media vừa confirm có thể chưa xuất hiện ngay; `404 COMPANY_NOT_FOUND` được trình bày theo ngữ cảnh hồ sơ chưa xác minh/không còn công khai.
 - [x] Luồng mời thành viên phía OWNER: form gọi `POST /companies/:id/members`, normalize/validate email và hiện `invitationToken` đúng trong response tạo lời mời để copy/gửi thủ công; token chỉ ở React memory, có clipboard fallback và cảnh báo reload/mời lại cùng email sẽ mất hoặc vô hiệu token cũ.
@@ -1461,7 +1499,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 
 - [x] Lưu và gắn `expectedVersion` cho **mọi lệnh ghi** (đổi trạng thái, rút hồ sơ, gửi offer, phản hồi offer, làm mới match score): giữ `version` từ mọi response và gắn vào request kế tiếp.
 - [x] Luồng phản hồi offer giữ **hai version độc lập** (`expectedOfferVersion` + `expectedApplicationVersion`) và tách **bốn** loại `409` thành bốn thông báo/hành động khác nhau: `OFFER_EXPIRED`, `OFFER_ALREADY_RESPONDED`, `OFFER_CHANGED_CONCURRENTLY`, `APPLICATION_CHANGED_CONCURRENTLY`.
-- [x] Máy trạng thái hồ sơ phía client để chỉ hiện nút hợp lệ: `APPLIED→REVIEWING`, `REVIEWING→INTERVIEW`, `→REJECTED` (bắt buộc lý do) từ `APPLIED`/`REVIEWING`/`INTERVIEW`/`OFFER`; `INTERVIEW→OFFER` chỉ qua `POST /offer`; `OFFER→HIRED|REJECTED` chỉ do ứng viên phản hồi; `WITHDRAWN` từ bốn trạng thái active. Đoán sai là `409 INVALID_APPLICATION_TRANSITION`.
+- [x] Máy trạng thái hồ sơ phía client để chỉ hiện nút hợp lệ: `APPLIED→REVIEWING`, `REVIEWING→INTERVIEW`, `→REJECTED` (bắt buộc lý do) từ `APPLIED`/`REVIEWING`/`INTERVIEW`/`OFFER`; `INTERVIEW→OFFER` chỉ qua `POST /offer`; `OFFER→HIRED|REJECTED` chỉ do ứng viên phản hồi; `WITHDRAWN` từ bốn trạng thái active. `PATCH /status` đoán sai là `409 INVALID_APPLICATION_TRANSITION`; riêng `POST /offer` trả `409 APPLICATION_NOT_ELIGIBLE_FOR_OFFER` hoặc `409 OFFER_ALREADY_EXISTS` và form Offer tải lại trạng thái cho cả hai.
 - [x] Màn nộp hồ sơ xử lý cooldown: `details.eligibleAt` cho biết mốc 30 ngày kể từ lần `REJECTED` gần nhất — hiện ngày cụ thể thay vì lỗi chung.
 - [x] Bảng hồ sơ của nhà tuyển dụng: phân trang **offset** (`page`/`size`, tối đa 100) cùng bộ lọc `job_id`/`status`/`appliedFrom`/`appliedTo`/`skills` và ba kiểu sắp xếp. Đây **không** phải cursor nên phải xử lý trôi dữ liệu khi có hồ sơ mới chèn vào giữa các trang; tự validate `appliedFrom <= appliedTo` trước khi gửi.
 - [ ] Handshake upload file offer với Media **trước khi** gọi `POST /offer`: phải có cặp `fileId` + `fileUrl` đã xác nhận, thiếu một trong hai là `400`; bỏ file thì gửi cả hai rỗng.
@@ -1469,10 +1507,10 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [x] Hai loại phản hồi suy giảm phải render được thay vì báo lỗi: danh sách bookmark trả `200` với `job=null` khi Job Service lỗi (thẻ placeholder), và dashboard trả `warnings[]` cùng `summary.activeJobs.available=false` (hiện số liệu một phần kèm cảnh báo).
 - [x] Nút làm mới match score xử lý riêng `409 AI_MATCH_NOT_READY` kèm `details.reason`: đây là trạng thái "chưa sẵn sàng" cần cho thử lại/poll, **khác hẳn** `409` xung đột version.
 - [x] Màn xem/tải CV của recruiter: `expiresAt` rất ngắn nên phải mở ngay và xin link mới khi hết hạn; không cache metadata lẫn link.
-- [ ] Bù ba lỗ hổng API hiện có: ứng viên **không lấy được `version`** từ `GET /applications/my` (phải gọi thêm `GET /applications/:id` trước khi rút hồ sơ); **không có endpoint đọc offer** nên `offerId` phải lấy từ Notification Service; **không có endpoint GET đánh giá** nên phải tự nhớ trạng thái "đã đánh giá" từ `409`.
+- [x] Bù ba lỗ hổng API ban đầu: ứng viên **không lấy được `version`** từ `GET /applications/my` (phải gọi thêm `GET /applications/:id` trước khi rút hồ sơ); đọc Offer và đọc đánh giá nay đã có endpoint riêng.
   - [x] Candidate withdraw đã lấy detail/version authoritative trước mutation.
-  - [ ] Offer route đã nhận `offerId` theo deep link nhưng chưa có Notification handoff chứa hai version; không giả lập GET Offer không tồn tại.
-  - [x] Evaluation ghi nhớ “đã đánh giá” từ POST thành công hoặc exact duplicate `409` trong React session.
+  - [x] Offer route nhận `offerId` theo deep link rồi gọi `GET /offers/:id` (Candidate sở hữu hoặc Recruiter cùng công ty) để lấy `version` + `applicationVersion` từ cùng một snapshot; `offerId` nullable có trong list/detail Application.
+  - [x] Evaluation đọc lại bằng `GET /applications/:id/evaluations` (chỉ Recruiter cùng công ty) và vẫn coi exact duplicate `409` là “đã đánh giá”.
 - [x] Chú ý ba prefix khác nhau: hồ sơ ở `/applications/`, bookmark ở `/applications/bookmarks`, còn **phản hồi offer nằm ở prefix riêng `/offers/`**.
 
 #### AI chatbot — 1 endpoint

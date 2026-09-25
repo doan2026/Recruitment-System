@@ -64,7 +64,7 @@ import {
   withoutRemovedMember,
 } from "./companyMembership";
 import { isRejectedRecruiterJob, nextRecruiterJobStatus, recruiterJobActionLabel, recruiterJobActions, recruiterJobEditLabel } from "./jobLifecycle";
-import { normalizeJobSkills, normalizeRecruiterJobForm, validateRecruiterJobForm, type RecruiterJobFormValues } from "./jobForm";
+import { jobEditRequiresReview, normalizeJobSkills, normalizeRecruiterJobForm, validateRecruiterJobForm, type RecruiterJobFormValues } from "./jobForm";
 import { buildRecruiterJobTable, type RecruiterJobTableRow } from "./recruiterJobTable";
 import { isRecruiterJobAccessDenied, recruiterJobScopeView } from "./recruiterJobAccess";
 import { emptyPublicJobSearchForm, isOffsetWindowTooDeep, mergePublicJobPage, normalizePublicJobSearch, publicJobSearchScope, validatePublicJobSearch } from "./publicJobSearch";
@@ -1235,6 +1235,15 @@ const validJobForm: RecruiterJobFormValues = {
   skills: "React, TypeScript",
   deadline: "2026-09-02",
 };
+
+test("PUBLISHED Job edits need admin review only when review fields change", () => {
+  for (const change of [{ deadline: "2026-12-31" }, { quantity: "9" }, { skills: "React, Next.js" }, { benefits: "Thêm 13 tháng lương." }, { location: "Đà Nẵng" }, { title: "  Frontend Developer  " }]) {
+    assert.equal(jobEditRequiresReview(validJobForm, { ...validJobForm, ...change }), false, JSON.stringify(change));
+  }
+  for (const change of [{ title: "Senior Frontend Developer" }, { description: "Mô tả mới." }, { requirements: "Có kinh nghiệm Vue." }, { salaryMax: "30000000" }, { currency: "usd" }, { isNegotiable: true }]) {
+    assert.equal(jobEditRequiresReview(validJobForm, { ...validJobForm, ...change }), true, JSON.stringify(change));
+  }
+});
 
 test("Job form validates the backend deadline, salary and skill invariants", () => {
   const now = new Date("2026-08-31T23:30:00+07:00");

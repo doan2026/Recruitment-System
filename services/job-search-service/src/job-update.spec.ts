@@ -1,6 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { Job, JobStatus, JobType } from '@prisma/client';
+import { Job, JobStatus, JobType, Prisma } from '@prisma/client';
 import { CreateJobDto, UpdateJobDto } from './job.dto';
 import { JobService } from './job.service';
 import { PrismaService } from './prisma.service';
@@ -18,13 +18,14 @@ const input = (): CreateJobDto => ({
   experienceYears: 2, quantity: 2, skills: ['NestJS'], deadline: '2099-12-31',
 });
 
-function harness() {
+function harness(overrides: Partial<Job> = {}) {
   let row: Job = {
     ...input(), id: JOB, companyId: COMPANY, createdBy: USER,
     salaryMin: null, salaryMax: null, deadline: new Date('2099-12-31T00:00:00Z'),
     status: JobStatus.DRAFT, aggregateVersion: 1, publishedAt: null,
     rejectionReason: null, reviewedBy: null, reviewedAt: null,
     createdAt: new Date(), updatedAt: new Date(),
+    ...overrides,
   };
   const create = jest.fn();
   const updateMany = jest.fn(async ({ where, data }) => {
@@ -93,6 +94,62 @@ describe('Job update browser contract', () => {
     await expect(test.service.update(USER, 'Bearer mock', JOB, { expectedVersion: 1 }))
       .rejects.toMatchObject({ code: 'EMPTY_UPDATE' });
     expect(test.database.$transaction).not.toHaveBeenCalled();
+  });
+
+  describe('PUBLISHED edits submitted as the full browser form', () => {
+    const publishedAt = new Date('2026-09-01T00:00:00Z');
+    const published = () => harness({
+      status: JobStatus.PUBLISHED, publishedAt, isNegotiable: false, currency: 'VND',
+      salaryMin: new Prisma.Decimal('10000000'), salaryMax: new Prisma.Decimal('20000000'),
+    });
+    const fullForm = (changes: Partial<CreateJobDto> = {}) => ({
+      ...input(), isNegotiable: false, currency: 'VND',
+      salaryMin: 10000000, salaryMax: 20000000, expectedVersion: 1, ...changes,
+    });
+
+    it.each([
+      ['deadline', { deadline: '2099-06-30' }],
+      ['quantity', { quantity: 5 }],
+      ['benefits', { benefits: 'Health insurance' }],
+      ['nothing', {}],
+    ] as const)('keeps the job PUBLISHED when only %s changes', async (_, changes) => {
+      const test = published();
+      const response = await test.service.update(USER, 'Bearer mock', JOB, fullForm(changes));
+      expect(response.status).toBe(JobStatus.PUBLISHED);
+      expect(test.row().publishedAt).toEqual(publishedAt);
+    });
+
+    it.each([
+      ['title', { title: 'Senior title' }],
+      ['description', { description: 'Changed duties' }],
+      ['requirements', { requirements: 'Java' }],
+      ['salaryMax', { salaryMax: 25000000 }],
+      ['currency', { currency: 'usd' }],
+      ['isNegotiable', { isNegotiable: true, salaryMin: undefined, salaryMax: undefined }],
+    ] as const)('sends the job back to PENDING_APPROVAL when %s changes', async (_, changes) => {
+      const test = published();
+      const response = await test.service.update(USER, 'Bearer mock', JOB, fullForm(changes));
+      expect(response.status).toBe(JobStatus.PENDING_APPROVAL);
+      expect(test.row().publishedAt).toBeNull();
+    });
+
+    it('compares normalized text so surrounding whitespace is not a content change', async () => {
+      const test = published();
+      const response = await test.service.update(USER, 'Bearer mock', JOB,
+        fullForm({ title: '  Original title  ', description: 'Build recruitment services\n' }));
+      expect(response.status).toBe(JobStatus.PUBLISHED);
+    });
+  });
+
+  it.each([
+    ['title', 'Backend\tEngineer'],
+    ['title', 'Backend\u0085Engineer'],
+    ['location', 'Ha\u0007 Noi'],
+  ] as const)('rejects control characters in single-line %s', async (field, value) => {
+    const test = harness();
+    await expect(test.service.create(USER, 'Bearer mock', { ...input(), [field]: value }))
+      .rejects.toMatchObject({ code: 'INVALID_JOB_CONTENT', details: { field } });
+    expect(test.database.job.create).not.toHaveBeenCalled();
   });
 
   it.each(['title', 'description', 'requirements', 'benefits', 'location'] as const)(

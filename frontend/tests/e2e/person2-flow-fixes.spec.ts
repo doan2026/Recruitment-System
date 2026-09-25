@@ -173,6 +173,23 @@ test("published Job edits require confirmation and do not call publish after bac
   expect(publishes).toBe(0);
 });
 
+test("deadline-only edits keep a published Job public without the re-review dialog", async ({ page }) => {
+  const bodies: Record<string, unknown>[] = [];
+  await page.route(`${gateway}/jobs/mine`, (route) => reply(route, [job]));
+  await page.route(`${gateway}/jobs/${jobId}`, (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    bodies.push(body);
+    return reply(route, { ...job, ...body, status: "PUBLISHED", aggregateVersion: 8 });
+  });
+  await authenticate(page, "RECRUITER", `/recruiter/jobs/${jobId}/edit`);
+  await page.locator("#deadline").fill("2099-06-30");
+  await page.getByRole("button", { name: "Lưu thay đổi", exact: true }).click();
+  await expect(page.getByText("Đã lưu thay đổi.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  expect(bodies).toHaveLength(1);
+  expect(bodies[0]).toMatchObject({ deadline: "2099-06-30", expectedVersion: 7, title: job.title, requirements: job.requirements });
+});
+
 test("private recommendation failure never hides a successfully loaded public Job", async ({ page }) => {
   await page.route(`${gateway}/jobs/${jobId}`, (route) => reply(route, job));
   await page.route(`${gateway}/jobs/recommended**`, (route) => reply(route, { code: "RECOMMENDATION_UNAVAILABLE" }, 503));

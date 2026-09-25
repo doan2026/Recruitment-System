@@ -37,6 +37,9 @@ const LATENCY_BUCKETS = [
  * walking random paths cannot grow the registry without limit.
  */
 const KNOWN_ROUTES = new Set([
+  // The gateway maps POST /companies/ (create) and GET /companies/ (admin
+  // queue) to the service root.
+  '/',
   '/health',
   '/metrics',
   '/search',
@@ -61,6 +64,7 @@ export const normalizeRoute = (path: string): string => {
     '/{id}/media/confirm',
     '/{id}/verify',
     '/by-user/{id}',
+    '/internal/{id}',
     '/{id}/members/{id}',
     '/{id}/members/{id}/transfer-ownership',
   ]);

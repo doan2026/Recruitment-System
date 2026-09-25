@@ -12,6 +12,7 @@ import {
   Query,
   Post,
   Put,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -30,6 +31,7 @@ import {
 } from '@nestjs/swagger';
 import { CurrentUser } from '../common/auth/current-user.decorator';
 import { AuthUser } from '../common/auth/auth-user.interface';
+import { JobSearchInternalGuard } from '../common/auth/job-search-internal.guard';
 import { Public } from '../common/auth/public.decorator';
 import { Roles } from '../common/auth/roles.decorator';
 import { SystemRole } from '../common/auth/system-role.enum';
@@ -41,6 +43,7 @@ import {
   CompanyProfileDto,
   LogoReferenceResponseDto,
 } from './dto/company-profile.dto';
+import { CompanyIndexingSummaryDto } from './dto/company-indexing-summary.dto';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import {
   CompanyMediaUploadCapabilityDto,
@@ -267,6 +270,23 @@ export class CompanyController {
     @Query() query: PublicCompanySearchQueryDto,
   ): Promise<ApiSuccessResponse<PublicCompanySearchSummaryDto[]>> {
     return this.companyService.searchPublic(query);
+  }
+
+  @Public()
+  @UseGuards(JobSearchInternalGuard)
+  @Get('internal/:id')
+  @Header('Cache-Control', 'no-store')
+  @ApiOperation({
+    summary: 'Internal: company name for Job & Search indexing (any status)',
+  })
+  @ApiHeader({ name: 'X-Internal-Api-Key', required: true })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOkResponse({ type: CompanyIndexingSummaryDto })
+  @ApiNotFoundResponse({ description: 'The company does not exist' })
+  getIndexingSummary(
+    @Param('id', COMPANY_ID_PIPE) companyId: string,
+  ): Promise<CompanyIndexingSummaryDto> {
+    return this.companyService.getIndexingSummary(companyId);
   }
 
   @Public()
