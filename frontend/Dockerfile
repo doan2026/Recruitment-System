@@ -10,6 +10,7 @@ RUN npm ci
 COPY app app
 COPY components components
 COPY lib lib
+COPY types types
 COPY next.config.mjs tsconfig.json next-env.d.ts ./
 RUN npm run build
 
