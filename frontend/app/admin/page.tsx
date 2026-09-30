@@ -21,6 +21,14 @@ const metricNames: Record<string, string> = {
   OFFER: "Đề nghị",
   HIRED: "Đã tuyển",
 };
+const navIcons: Record<Tab, string> = {
+  stats: "/figma/admin/375c7.svg",
+  users: "/figma/admin/af4a8.svg",
+  companies: "/figma/admin/fdcad.svg",
+  jobs: "/figma/admin/7e3f5.svg",
+  reports: "/figma/admin/55bb8.svg",
+  audit: "/figma/admin/2d2e0.svg",
+};
 const today = () => new Date().toISOString().slice(0, 10);
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>("stats");
@@ -169,11 +177,11 @@ export default function AdminPage() {
   const trend = overview?.daily.filter((row) => row.metric === "APPLIED") ?? [];
   const maximum = Math.max(1, ...trend.map((r) => Number(r.value)));
   return (
-    <main className="form-stack">
+    <main className="admin-workspace">
       <div className="page-header">
         <div>
           <p className="eyebrow">QUẢN TRỊ</p>
-          <h1>Trung tâm quản trị</h1>
+          <h1>{tab === "stats" ? "Tổng quan hệ thống" : labels[tab]}</h1>
         </div>
         <button
           className="btn"
@@ -183,7 +191,9 @@ export default function AdminPage() {
           Tải lại dữ liệu
         </button>
       </div>
-      <nav className="btn-group" aria-label="Chức năng quản trị">
+      <nav className="btn-group admin-sidebar" aria-label="Chức năng quản trị">
+        <a className="admin-brand" href="/" aria-label="CareerHub"><img src="/figma/admin/6aca2.png" alt="CareerHub" width="117" height="32" /></a>
+        <div className="admin-identity"><img src="/figma/admin/28322.png" alt="" /><span><strong>CareerHub Admin</strong><small>System Administrator</small></span></div>
         {(Object.keys(labels) as Tab[]).map((key) => (
           <button
             className={"btn" + (tab === key ? " btn-primary" : "")}
@@ -197,7 +207,8 @@ export default function AdminPage() {
               setReason("");
             }}
           >
-            {labels[key]}
+            <img className="admin-nav-icon" src={navIcons[key]} alt="" aria-hidden="true" />
+            <span>{labels[key]}</span>
           </button>
         ))}
       </nav>
