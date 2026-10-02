@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
@@ -12,13 +12,14 @@ export function Person1Gate({
 }) {
   const account = useCurrentAccount();
   const path = usePathname();
+  if (role === "ADMIN" && path === "/admin/login") return <>{children}</>;
   if (!account)
     return (
       <section className="card empty-state">
         <h1>Đăng nhập để tiếp tục</h1>
         <Link
           className="btn btn-primary"
-          href={`/login?returnTo=${encodeURIComponent(path)}`}
+          href={role === "ADMIN" ? `/admin/login?returnTo=${encodeURIComponent(path)}` : `/login?returnTo=${encodeURIComponent(path)}`}
         >
           Đăng nhập
         </Link>
@@ -33,3 +34,5 @@ export function Person1Gate({
     );
   return <>{children}</>;
 }
+
+
