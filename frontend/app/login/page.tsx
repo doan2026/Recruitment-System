@@ -157,8 +157,6 @@ export default function LoginPage() {
           )}
 
           <p className="auth-signup">Chưa có tài khoản? <Link href="/register">Đăng ký ngay</Link></p>
-          <p className="auth-role-shortcut">Bạn là nhà tuyển dụng? <Link href="/recruiter/login">Đăng nhập Recruiter</Link></p>
-
           <footer className="auth-login-footer">
             <Link href="/" aria-label="CareerHub - Trang chủ">
               <img src="/figma/login/7544b.png" alt="CareerHub" width="73" height="20" />

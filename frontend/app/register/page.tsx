@@ -127,7 +127,6 @@ export default function RegisterPage() {
         <button className="auth-google" type="button" onClick={() => setError("Đăng ký Google chưa được cấu hình cho môi trường local.")}><img src="/figma/register/bc562.svg" alt="" aria-hidden="true" /><span>Đăng ký với Google</span></button>
         <p className="auth-signup">Đã có tài khoản? <Link href="/login">Đăng nhập</Link></p>
       </> : null}
-      {!flow ? <p className="auth-role-switch">Bạn là nhà tuyển dụng? <Link href="/recruiter/register">Tạo tài khoản tuyển dụng</Link></p> : null}
     </section>
     {flow ? <aside className="auth-otp-visual" aria-label="Xác thực tài khoản"><div className="auth-otp-image" /><div className="auth-security-chip"><strong>Bảo mật</strong><span>An toàn 100%</span></div></aside> : <aside className="auth-register-visual" aria-label="Cơ hội nghề nghiệp tại CareerHub">
       <div className="auth-featured-image"><span>Featured Opportunity</span><div><strong>Senior Product Designer</strong><small>TechNova Inc. · San Francisco, CA</small></div></div>
