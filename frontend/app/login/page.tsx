@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { type FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -157,6 +157,7 @@ export default function LoginPage() {
           )}
 
           <p className="auth-signup">Chưa có tài khoản? <Link href="/register">Đăng ký ngay</Link></p>
+          <p className="auth-role-shortcut">Bạn là nhà tuyển dụng? <Link href="/recruiter/login">Đăng nhập Recruiter</Link></p>
 
           <footer className="auth-login-footer">
             <Link href="/" aria-label="CareerHub - Trang chủ">
@@ -179,3 +180,4 @@ export default function LoginPage() {
     </main>
   );
 }
+

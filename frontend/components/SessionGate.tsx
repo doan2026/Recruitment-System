@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -14,12 +14,13 @@ export function useCurrentAccount(): CurrentAccount | null {
 export function SessionGate({ children, role }: { children: ReactNode; role: CurrentAccount["role"] }) {
   const account = useCurrentAccount();
   const pathname = usePathname();
+  if (role === "RECRUITER" && (pathname === "/recruiter/login" || pathname === "/recruiter/register")) return <>{children}</>;
   if (isDemoPerson2Api) return <>{children}</>;
   if (!account) return (
     <section className="card empty-state">
       <h1>Đăng nhập để tiếp tục</h1>
       <p>Phiên đăng nhập chưa có hoặc đã hết hạn. Dữ liệu riêng tư chỉ được tải sau khi đăng nhập.</p>
-      <Link className="btn btn-primary" href={`/login?returnTo=${encodeURIComponent(pathname)}`}>Đăng nhập</Link>
+      <Link className="btn btn-primary" href={role === "RECRUITER" ? `/recruiter/login?returnTo=${encodeURIComponent(pathname)}` : `/login?returnTo=${encodeURIComponent(pathname)}`}>Đăng nhập</Link>
     </section>
   );
   if (account.role !== role) return (
@@ -31,3 +32,5 @@ export function SessionGate({ children, role }: { children: ReactNode; role: Cur
   );
   return <>{children}</>;
 }
+
+

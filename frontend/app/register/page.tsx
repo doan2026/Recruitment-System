@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
@@ -12,7 +12,7 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [role, setRole] = useState<"CANDIDATE" | "RECRUITER">("CANDIDATE");
+  const role = "CANDIDATE" as const;
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [flow, setFlow] = useState("");
   const [otp, setOtp] = useState("");
@@ -23,7 +23,7 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("role") === "RECRUITER") setRole("RECRUITER");
+    if (new URLSearchParams(window.location.search).get("role") === "RECRUITER") router.replace("/recruiter/register");
   }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -93,7 +93,7 @@ export default function RegisterPage() {
         <h1>Tài khoản đã xác minh</h1>
         <p className="auth-copy">Tài khoản của bạn đã sẵn sàng. Tiếp tục đến hồ sơ để hoàn thiện thông tin.</p>
         {notice ? <p className="auth-message" role="status">{notice}</p> : null}
-        <Link className="auth-submit auth-submit-link" href={role === "RECRUITER" ? "/recruiter/jobs" : "/candidate/profile"}>Tiếp tục đến CareerHub <span aria-hidden="true">→</span></Link>
+        <Link className="auth-submit auth-submit-link" href="/candidate/profile">Tiếp tục đến CareerHub <span aria-hidden="true">→</span></Link>
       </section>
       <aside className="auth-otp-visual" aria-label="Xác thực tài khoản"><div className="auth-otp-image" /></aside>
     </main>;
@@ -103,7 +103,7 @@ export default function RegisterPage() {
     <section className={flow ? "auth-otp-panel" : "auth-register-panel"}>
       <Link className="auth-brand" href="/" aria-label="CareerHub"><img src={flow ? "/figma/otp/6aca2.png" : "/figma/register/7f320.png"} alt="CareerHub" width="146" height="40" /></Link>
       <header className="auth-heading">
-        <h1>{flow ? "Xác thực tài khoản" : role === "RECRUITER" ? "Tạo tài khoản nhà tuyển dụng" : "Tạo tài khoản mới"}</h1>
+        <h1>{flow ? "Xác thực tài khoản" : "Tạo tài khoản mới"}</h1>
         <p>{flow ? `Nhập mã OTP 6 số đã được gửi đến ${email}.` : "Khám phá cơ hội nghề nghiệp tuyệt vời dành cho bạn."}</p>
       </header>
       <form className="auth-form auth-register-form" noValidate onSubmit={submit}>
@@ -127,7 +127,7 @@ export default function RegisterPage() {
         <button className="auth-google" type="button" onClick={() => setError("Đăng ký Google chưa được cấu hình cho môi trường local.")}><img src="/figma/register/bc562.svg" alt="" aria-hidden="true" /><span>Đăng ký với Google</span></button>
         <p className="auth-signup">Đã có tài khoản? <Link href="/login">Đăng nhập</Link></p>
       </> : null}
-      {!flow ? <p className="auth-role-switch">Bạn là nhà tuyển dụng? <Link href="/register?role=RECRUITER">Tạo tài khoản tuyển dụng</Link></p> : null}
+      {!flow ? <p className="auth-role-switch">Bạn là nhà tuyển dụng? <Link href="/recruiter/register">Tạo tài khoản tuyển dụng</Link></p> : null}
     </section>
     {flow ? <aside className="auth-otp-visual" aria-label="Xác thực tài khoản"><div className="auth-otp-image" /><div className="auth-security-chip"><strong>Bảo mật</strong><span>An toàn 100%</span></div></aside> : <aside className="auth-register-visual" aria-label="Cơ hội nghề nghiệp tại CareerHub">
       <div className="auth-featured-image"><span>Featured Opportunity</span><div><strong>Senior Product Designer</strong><small>TechNova Inc. · San Francisco, CA</small></div></div>
@@ -135,3 +135,5 @@ export default function RegisterPage() {
     </aside>}
   </main>;
 }
+
+

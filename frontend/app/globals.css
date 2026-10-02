@@ -912,3 +912,88 @@ body:has(.admin-workspace) .content-wrap { width:100%; max-width:none; margin:0;
 .candidate-profile-cv .btn { justify-self:start; }
 @media (max-width:1000px) { .candidate-profile-hero-body { grid-template-columns:100px minmax(0,1fr); } .candidate-profile-avatar-wrap,.candidate-profile-avatar { width:100px; height:100px; } .candidate-completion { grid-column:1/-1; margin:0; } }
 @media (max-width:720px) { .candidate-profile-grid { grid-template-columns:1fr; } .candidate-profile-hero-body { grid-template-columns:76px minmax(0,1fr); gap:12px; padding:0 16px 18px; } .candidate-profile-avatar-wrap,.candidate-profile-avatar { width:76px; height:76px; } .candidate-profile-avatar { border-width:3px; } .candidate-profile-identity { padding-top:24px; } .candidate-profile-identity h2 { font-size:17px; } .candidate-profile-contact { gap:6px 10px; } .candidate-completion { grid-column:1/-1; } .candidate-profile-facts { gap:12px; } }
+/* Role-specific transactional auth pages follow the centered Recruiter Figma frame. */
+.auth-portal-page { display:flex; min-height:100vh; min-height:100svh; flex-direction:column; background:#f9f9ff; color:#151c27; }
+.auth-portal-header { z-index:1; display:flex; min-height:54px; align-items:center; justify-content:space-between; gap:24px; padding:7px 28px; border-bottom:1px solid #edf0f8; background:#fff; }
+.auth-portal-brand { display:flex; width:175px; height:40px; align-items:center; }
+.auth-portal-brand img { display:block; width:auto; max-width:100%; max-height:40px; object-fit:contain; }
+.auth-portal-header nav { display:flex; align-items:center; gap:24px; color:#3d4a3d; font-size:12px; }
+.auth-portal-header a,.auth-portal-footer a { color:inherit; text-decoration:none; }
+.auth-portal-header a:hover,.auth-portal-footer a:hover { color:#006e2e; }
+.auth-portal-header .auth-header-action { padding:6px 14px; border:1px solid #006e2e; border-radius:8px; color:#006e2e; font-weight:700; }
+.auth-portal-main { display:flex; flex:1; align-items:center; justify-content:center; padding:48px 16px; }
+.auth-portal-card { position:relative; width:min(100%,448px); overflow:hidden; padding:34px 25px; border:1px solid #dce2f3; border-radius:12px; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+.auth-portal-card::before { position:absolute; z-index:0; top:-64px; right:-64px; width:128px; height:128px; border-radius:50%; background:rgba(0,110,46,.06); content:""; filter:blur(20px); pointer-events:none; }
+.auth-portal-heading,.auth-portal-form,.auth-portal-divider,.auth-portal-card>.auth-google,.auth-portal-signup,.auth-admin-help { position:relative; z-index:1; }
+.auth-portal-heading { margin:0 0 28px; text-align:center; }
+.auth-portal-heading h1 { margin:0 0 8px; color:#151c27; font:700 20px/1.35 "Manrope","Inter",sans-serif; }
+.auth-portal-heading p { margin:0; color:#3d4a3d; font:400 14px/24px "Inter",sans-serif; }
+.auth-portal-form { display:flex; flex-direction:column; gap:20px; }
+.auth-portal-field { display:flex; flex-direction:column; gap:8px; }
+.auth-portal-field>label { color:#3d4a3d; font-size:14px; }
+.auth-portal-input-wrap { position:relative; display:flex; height:42px; align-items:center; border:1px solid #bccbb9; border-radius:4px; background:#fff; }
+.auth-portal-input-wrap:focus-within { border-color:#006e2e; box-shadow:0 0 0 3px rgba(0,110,46,.1); }
+.auth-portal-input-wrap>img { position:absolute; left:10px; width:17px; height:17px; opacity:.7; }
+.auth-portal-input-wrap>img.auth-portal-lock { width:16px; height:19px; }
+.auth-portal-input-wrap input { width:100%; height:100%; padding:0 42px; border:0; outline:0; background:transparent; color:#151c27; font:400 14px/1.4 "Inter",sans-serif; }
+.auth-portal-input-wrap input::placeholder { color:#7b8490; }
+.auth-portal-eye { position:absolute; right:4px; display:grid; width:34px; height:34px; place-items:center; border:0; background:transparent; cursor:pointer; }
+.auth-portal-eye img { width:19px; height:19px; }
+.auth-portal-options { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:-2px; color:#3d4a3d; font-size:13px; }
+.auth-portal-options label { display:flex; align-items:center; gap:8px; }
+.auth-portal-options input { width:16px; height:16px; accent-color:#006e2e; }
+.auth-portal-options a,.auth-portal-signup a { color:#006e2e; font-weight:600; text-decoration:none; }
+.auth-portal-card .auth-submit { height:42px; border-radius:6px; box-shadow:none; }
+.auth-portal-card .auth-error { margin:-12px 0 -8px; }
+.auth-portal-divider,.auth-recruiter-register-divider { display:flex; align-items:center; gap:14px; margin:22px 0 18px; color:#6d7b6c; font-size:12px; }
+.auth-portal-divider::before,.auth-portal-divider::after,.auth-recruiter-register-divider::before,.auth-recruiter-register-divider::after { height:1px; flex:1; background:#d5ddcf; content:""; }
+.auth-portal-card>.auth-google { height:42px; border-radius:6px; }
+.auth-portal-signup,.auth-admin-help { margin:24px 0 0; color:#3d4a3d; font-size:13px; line-height:20px; text-align:center; }
+.auth-admin-mark { position:relative; z-index:1; display:grid; width:44px; height:44px; margin:0 auto 16px; place-items:center; border-radius:12px; background:#006e2e; color:#fff; font-size:16px; font-weight:800; letter-spacing:-1px; }
+.auth-admin-portal .auth-portal-card { border-top:3px solid #006e2e; }
+.auth-admin-portal .auth-portal-heading h1 { font-size:24px; }
+.auth-admin-help { padding-top:12px; border-top:1px solid #edf0f8; color:#6b7280; }
+.auth-portal-footer { display:flex; min-height:72px; align-items:center; justify-content:space-between; gap:22px; padding:18px 28px; background:#dce2f3; color:#596373; font-size:12px; }
+.auth-portal-footer img { display:block; object-fit:contain; }
+.auth-portal-footer>div { display:flex; gap:20px; }
+.auth-portal-footer .auth-footer-wordmark { color:#006e2e; font-size:17px; font-weight:700; }
+.auth-recruiter-register { background:#f9f9ff; }
+.auth-recruiter-register-main { display:flex; flex:1; align-items:center; justify-content:center; padding:48px 16px; }
+.auth-recruiter-register-card { position:relative; display:flex; width:min(100%,358px); flex-direction:column; gap:15px; padding:26px 25px; border:1px solid #dce2f3; border-radius:14px; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+.auth-recruiter-register-heading { margin-bottom:8px; text-align:center; }
+.auth-recruiter-register-heading h1 { margin:0 0 8px; color:#151c27; font:700 25px/1.25 "Manrope","Inter",sans-serif; letter-spacing:-.4px; }
+.auth-recruiter-register-heading p { margin:0; color:#555f6f; font-size:13px; line-height:19px; }
+.auth-recruiter-register-field { display:flex; flex-direction:column; gap:5px; }
+.auth-recruiter-register-field label { color:#3d4a3d; font-size:10px; }
+.auth-recruiter-register-field input { width:100%; height:34px; padding:0 10px; border:1px solid #bccbb9; border-radius:7px; outline:0; background:#f9f9ff; color:#151c27; font:400 13px/1 "Inter",sans-serif; }
+.auth-recruiter-register-field input:focus { border-color:#006e2e; box-shadow:0 0 0 3px rgba(0,110,46,.1); }
+.auth-recruiter-terms { display:flex; align-items:flex-start; gap:8px; color:#596373; font-size:11px; line-height:16px; }
+.auth-recruiter-terms input { flex:0 0 auto; width:13px; height:13px; margin:2px 0 0; accent-color:#006e2e; }
+.auth-recruiter-terms a { color:#006e2e; text-decoration:none; }
+.auth-recruiter-register-card .auth-submit { height:34px; border-radius:6px; box-shadow:none; font-size:12px; }
+.auth-recruiter-register-divider { margin:0; }
+.auth-recruiter-register-card .auth-google { height:38px; border-radius:6px; font-size:12px; }
+.auth-recruiter-register-card .auth-portal-signup { margin:0; font-size:11px; }
+.auth-recruiter-register-card .auth-error,.auth-recruiter-register-card .auth-message { margin:0; font-size:12px; }
+.auth-recruiter-register-card .auth-resend { border:0; background:none; color:#006e2e; font-size:12px; cursor:pointer; }
+.auth-recruiter-success { justify-content:center; min-height:300px; text-align:center; }
+.auth-recruiter-success h1 { margin:0; font-size:24px; }
+.auth-recruiter-success p { color:#596373; font-size:14px; line-height:1.6; }
+.auth-recruiter-register-footer { flex-wrap:wrap; }
+.auth-recruiter-register-footer>div { display:flex; gap:30px; }
+@media(max-width:700px) {
+  .auth-portal-header { padding:8px 16px; }
+  .auth-portal-header nav { gap:10px; font-size:11px; }
+  .auth-portal-header nav>a:not(.auth-header-action),.auth-portal-header nav>span:first-child { display:none; }
+  .auth-portal-brand { width:130px; }
+  .auth-portal-main,.auth-recruiter-register-main { padding:32px 16px; }
+  .auth-portal-footer,.auth-recruiter-register-footer { justify-content:center; text-align:center; }
+  .auth-portal-footer>*,.auth-recruiter-register-footer>* { flex-basis:100%; justify-content:center; }
+}
+.auth-role-shortcut { margin:8px 0 0; color:#596373; font-size:12px; line-height:18px; text-align:center; }
+.auth-role-shortcut a { color:#006e2e; font-weight:600; text-decoration:none; }
+.auth-role-shortcut a:hover { text-decoration:underline; }
+body:has(.auth-portal-page) { background:#f9f9ff; }
+body:has(.auth-portal-page) .topbar,body:has(.auth-portal-page) .site-footer { display:none; }
+body:has(.auth-portal-page) .content-wrap { width:100%; max-width:none; margin:0; padding:0; }
+body:has(.auth-portal-page) .content-wrap>* { width:100%; }
