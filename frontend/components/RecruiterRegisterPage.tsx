@@ -68,13 +68,14 @@ export default function RecruiterRegisterPage() {
   const otpStage = !!registrationId;
   return <main className="auth-portal-page auth-recruiter-register">
     <header className="auth-portal-header">
-      <Link className="auth-portal-brand" href="/" aria-label="CareerHub - Trang chủ"><img src="/figma/register/7f320.png" alt="CareerHub" width="146" height="40" /></Link>
+      <div className="auth-recruiter-header-brand-group"><Link className="auth-portal-brand" href="/" aria-label="CareerHub - Trang chủ"><img src="/figma/register/7f320.png" alt="" width="146" height="40" /></Link><Link className="auth-recruiter-header-title" href="/">CareerHub</Link></div>
       <nav aria-label="Điều hướng"><Link href="/">Trang chủ</Link><Link href="/candidate/jobs">Việc làm</Link><Link href="/companies">Công ty</Link><span>Bạn là nhà tuyển dụng?</span><Link className="auth-header-action" href="/recruiter/login">Đăng nhập</Link></nav>
     </header>
     <section className="auth-recruiter-register-main">
       {verified ? <div className="auth-recruiter-register-card auth-recruiter-success"><h1>Tài khoản Recruiter đã xác minh</h1><p>{notice || "Tài khoản của bạn đã sẵn sàng."}</p><Link className="auth-submit auth-submit-link" href="/recruiter/jobs">Tiếp tục đến khu vực tuyển dụng →</Link></div> :
         <form className="auth-recruiter-register-card" noValidate onSubmit={submit}>
           <header className="auth-recruiter-register-heading"><h1>{otpStage ? "Xác minh email Recruiter" : <>Đăng ký tài khoản<br />Recruiter</>}</h1><p>{otpStage ? `Nhập mã OTP 6 số đã gửi đến ${email}.` : "Tạo tài khoản để đăng tin tuyển dụng và tìm kiếm ứng viên phù hợp."}</p></header>
+          <div className="auth-recruiter-register-fields">
           {!otpStage ? <>
             <div className="auth-recruiter-register-field"><label htmlFor="recruiter-name">Họ và tên</label><input id="recruiter-name" autoComplete="name" maxLength={160} value={name} onChange={e => setName(e.target.value)} placeholder="Nhập họ và tên" disabled={pending} /></div>
             <div className="auth-recruiter-register-field"><label htmlFor="recruiter-email">Email công việc</label><input id="recruiter-email" type="email" autoComplete="email" maxLength={320} value={email} onChange={e => setEmail(e.target.value)} placeholder="name@company.com" disabled={pending} /></div>
@@ -90,8 +91,9 @@ export default function RecruiterRegisterPage() {
             {process.env.NEXT_PUBLIC_GOOGLE_LOGIN_ENABLED === "true" ? <a className="auth-google" href={`${process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api"}/auth/google?role=RECRUITER`}><img src="/figma/login/bc562.svg" alt="" /><span>Đăng ký với Google</span></a> : <button className="auth-google" type="button" onClick={() => setError("Đăng ký Google chưa được cấu hình cho môi trường local.")}><img src="/figma/login/bc562.svg" alt="" /><span>Đăng ký với Google</span></button>}
             <p className="auth-portal-signup">Đã có tài khoản? <Link href="/recruiter/login">Đăng nhập</Link></p>
           </>}
+          </div>
         </form>}
     </section>
-    <footer className="auth-portal-footer auth-recruiter-register-footer"><Link href="/" className="auth-footer-wordmark">CareerHub</Link><div><Link href="/companies">Company</Link><Link href="/candidate/jobs">Candidates</Link><Link href="/recruiter/login">Recruiters</Link></div><div><a href="mailto:support@careerhub.local">Support</a><Link href="/privacy">Legal</Link></div><span>© 2024 CareerHub. All rights reserved.</span></footer>
+    <footer className="auth-portal-footer auth-recruiter-register-footer"><div className="auth-recruiter-register-footer-brand"><Link href="/" className="auth-footer-wordmark">CareerHub</Link><span>© 2024 CareerHub. All rights reserved.</span></div><nav className="auth-recruiter-register-footer-links" aria-label="Liên kết chân trang"><Link href="/companies">Company</Link><Link href="/candidate/jobs">Candidates</Link><Link href="/recruiter/login">Recruiters</Link><a href="mailto:support@careerhub.local">Support</a><Link href="/privacy">Legal</Link></nav></footer>
   </main>;
 }

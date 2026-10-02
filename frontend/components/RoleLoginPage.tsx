@@ -147,7 +147,7 @@ export default function RoleLoginPage({ portal }: { portal: Portal }) {
 
       <footer className="auth-portal-footer auth-recruiter-login-footer">
         <Link href="/" aria-label="CareerHub"><img src="/figma/login/7544b.png" alt="CareerHub" width="92" height="26" /></Link>
-        <div><a href="mailto:support@careerhub.local">Support</a><Link href="/privacy">Legal</Link></div>
+        <div><Link href="/companies">Company</Link><a href="mailto:support@careerhub.local">Support</a><Link href="/privacy">Legal</Link></div>
         <span>© 2024 CareerHub. All rights reserved.</span>
       </footer>
     </main>
