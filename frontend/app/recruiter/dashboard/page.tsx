@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { EmptyState, ErrorState, LoadingState, Metric, PageHeader, StatusBadge } from "../../../components/ui";
+import { EmptyState, ErrorState, LoadingState, Metric, PageHeader, StatusBadge } from "@/components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import { activeJobsMetricView, dashboardWarningView } from "../../../lib/applicationDegradedStates";
 import { getCompany, getRecruiterDashboard, type RecruiterDashboard } from "../../../lib/person2Api";

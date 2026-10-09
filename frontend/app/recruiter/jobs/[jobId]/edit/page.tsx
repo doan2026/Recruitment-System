@@ -3,9 +3,9 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../../../components/ui";
-import { ConfirmationDialog } from "../../../../../components/ConfirmationDialog";
-import { ConflictRecoveryPanel } from "../../../../../components/ConflictRecoveryPanel";
+import { ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
+import { ConfirmationDialog } from "@/components/ConfirmationDialog";
+import { ConflictRecoveryPanel } from "@/components/ConflictRecoveryPanel";
 import { ApiClientError, toUserMessage } from "../../../../../lib/apiClient";
 import { prepareConflictSnapshot, type ConflictSnapshot } from "../../../../../lib/conflictRecovery";
 import { JOB_CONFLICT_FIELDS } from "../../../../../lib/person2ConflictFields";

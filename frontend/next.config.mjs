@@ -8,8 +8,8 @@ export default {
     const gateway = (process.env.API_INTERNAL_BASE_URL || 'http://localhost:8080').replace(/\/$/, '');
     return [
       // `:path*` drops a trailing slash, so collection roots need their own rule.
-      { source: '/api/:path*/', destination: `${gateway}/:path*/` },
-      { source: '/api/:path*', destination: `${gateway}/:path*` },
+      { source: '/api/:path((?!auth-cookie).*)/', destination: `${gateway}/:path/` },
+      { source: '/api/:path((?!auth-cookie).*)', destination: `${gateway}/:path` },
     ];
   },
 };

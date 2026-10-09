@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { getActiveCandidateCvs, type ActiveCandidateCv } from "../../../../lib/person2Api";
 import { toUserMessage } from "../../../../lib/apiClient";
-import { EmptyState, ErrorState, LoadingState, PageHeader } from "../../../../components/ui";
+import { EmptyState, ErrorState, LoadingState, PageHeader } from "@/components/ui";
 
 export default function CandidateCvsPage() {
   const [cvs, setCvs] = useState<ActiveCandidateCv[]>([]);

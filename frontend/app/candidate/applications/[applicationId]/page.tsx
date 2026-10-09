@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../../components/ui";
+import { ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
 import { ApiClientError, toUserMessage } from "../../../../lib/apiClient";
 import { getApplicationDetail, type CandidateApplication } from "../../../../lib/person2Api";
 

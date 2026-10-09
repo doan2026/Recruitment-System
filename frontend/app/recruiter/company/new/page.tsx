@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { PageHeader } from "../../../../components/ui";
+import { PageHeader } from "@/components/ui";
 import { ApiClientError, toUserMessage } from "../../../../lib/apiClient";
 import {
   type CompanyCreateErrors,

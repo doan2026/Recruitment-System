@@ -63,8 +63,8 @@ import type {
   SearchMode,
 } from "./demoData";
 
-export const person2ApiMode = process.env.NEXT_PUBLIC_API_MODE === "gateway" ? "gateway" : "demo";
-export const isDemoPerson2Api = person2ApiMode === "demo";
+export const person2ApiMode = "gateway";
+export const isDemoPerson2Api = false;
 
 interface BackendCompany {
   id: string;
@@ -458,11 +458,12 @@ function toJob(value: BackendJob, source: JobDataSource = "POSTGRESQL"): Job {
     status: value.status ?? "PUBLISHED",
     deadline: value.deadline,
     source,
-    ownerName: value.createdBy || value.companyName || "Nhà tuyển dụng",
+    ownerName: value.companyName || "Nhà tuyển dụng",
     aggregateVersion: value.aggregateVersion ?? 0,
     rejectionReason: value.rejectionReason ?? undefined,
     createdAt: value.createdAt ?? value.updatedAt ?? new Date(0).toISOString(),
     updatedAt: value.updatedAt ?? value.createdAt ?? new Date(0).toISOString(),
+    createdBy: value.createdBy,
   };
 }
 
@@ -470,7 +471,7 @@ function toApplication(value: BackendApplicationListItem): CandidateApplication 
   return {
     id: value.id,
     candidateId: value.candidateId ?? "",
-    candidateName: value.candidateId ? `Ứng viên ${value.candidateId.slice(0, 8)}` : "Ứng viên",
+    candidateName: "Ứng viên",
     email: "",
     jobId: value.jobId,
     jobTitle: value.jobTitle,

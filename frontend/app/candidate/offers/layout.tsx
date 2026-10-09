@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { type ReactNode } from "react";
-import { SessionGate } from "../../../components/SessionGate";
+import { SessionGate } from "@/components/SessionGate";
 
 export const metadata: Metadata = { title: "Phản hồi offer" };
 

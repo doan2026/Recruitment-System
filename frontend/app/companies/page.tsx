@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { EmptyState, ErrorState, LoadingState, PageHeader } from "../../components/ui";
+import { EmptyState, ErrorState, LoadingState, PageHeader } from "@/components/ui";
 import { toUserMessage } from "../../lib/apiClient";
 import { mergePublicCompanyPage, shouldLockCompanySearch } from "../../lib/companyPublicSearch";
 import { type PublicCompanySummary, searchPublicCompanies } from "../../lib/person2Api";

@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { BookmarkButton } from "../../../../components/BookmarkButton";
-import { ApplyForm } from "../../../../components/ApplyForm";
-import { useCurrentAccount } from "../../../../components/SessionGate";
-import { ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../../components/ui";
+import { BookmarkButton } from "@/components/BookmarkButton";
+import { ApplyForm } from "@/components/ApplyForm";
+import { useCurrentAccount } from "@/components/SessionGate";
+import { ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
 import { ApiClientError, toUserMessage } from "../../../../lib/apiClient";
 import { getPublicJob, getRecommendationsForCandidate, isDemoPerson2Api, type Job, type JobRecommendation } from "../../../../lib/person2Api";
+import { createConversation } from "../../../../lib/chatApi";
+import { useRouter } from "next/navigation";
 
 const SOURCES = ["SEARCH", "AI_RECOMMENDATION", "COMPANY_PAGE", "SHARED_LINK", "OTHER"] as const;
 type ApplicationSource = typeof SOURCES[number];
@@ -20,6 +22,7 @@ export default function CandidateJobDetailPage({ params, searchParams }: {
   params: { jobId: string };
   searchParams: { source?: string };
 }) {
+  const router = useRouter();
   const account = useCurrentAccount();
   const [job, setJob] = useState<Job | null>(null);
   const [loading, setLoading] = useState(true);
@@ -28,10 +31,25 @@ export default function CandidateJobDetailPage({ params, searchParams }: {
   const [recommendations, setRecommendations] = useState<JobRecommendation[]>([]);
   const [recommendationError, setRecommendationError] = useState("");
   const [recommendationLoading, setRecommendationLoading] = useState(false);
+  const [chatting, setChatting] = useState(false);
   const canRecommend = isDemoPerson2Api || account?.role === "CANDIDATE";
   const source = SOURCES.includes(searchParams.source as ApplicationSource)
     ? searchParams.source as ApplicationSource
     : "SEARCH";
+
+  async function handleStartChat() {
+    if (!job?.createdBy) return;
+    setChatting(true);
+    try {
+      const response = await createConversation(`Chat với ${job.ownerName}`, [job.createdBy], false);
+      router.push(`/messages?chat=${response.data.id}`);
+    } catch (e) {
+      console.error(e);
+      alert("Không thể tạo cuộc trò chuyện: " + toUserMessage(e));
+    } finally {
+      setChatting(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -84,7 +102,15 @@ export default function CandidateJobDetailPage({ params, searchParams }: {
           <ul>{job.benefits.map((item, index) => <li key={index}>{item}</li>)}</ul>
           <p><strong>Kỹ năng:</strong> {job.skills.join(", ")}</p>
           <p><strong>Hạn nộp:</strong> <time dateTime={job.deadline.slice(0, 10)}>{job.deadline.slice(0, 10).split("-").reverse().join("/")}</time></p>
-          <div className="btn-group"><Link className="btn" href={`/companies/${job.companyId}`}>Xem công ty</Link><BookmarkButton jobId={job.id} /></div>
+          <div className="btn-group">
+            <Link className="btn" href={`/companies/${job.companyId}`}>Xem công ty</Link>
+            {job.createdBy && account?.role === "CANDIDATE" && (
+              <button className="btn" onClick={handleStartChat} disabled={chatting}>
+                {chatting ? "Đang tạo..." : "Chat ngay"}
+              </button>
+            )}
+            <BookmarkButton jobId={job.id} />
+          </div>
         </section>
         <section className="panel">
           <h2>Ứng tuyển</h2>

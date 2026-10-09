@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
-import { ConfirmationDialog } from "../../../../../components/ConfirmationDialog";
-import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../../../components/ui";
+import { ConfirmationDialog } from "@/components/ConfirmationDialog";
+import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
 import { ApiClientError, toUserMessage } from "../../../../../lib/apiClient";
 import { OFFER_ATTACHMENT_SUPPORT } from "../../../../../lib/offerAttachment";
 import { getApplicationDetail, sendApplicationOffer, type CandidateApplication } from "../../../../../lib/person2Api";

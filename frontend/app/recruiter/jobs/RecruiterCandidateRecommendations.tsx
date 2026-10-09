@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { EmptyState, LoadingState, StatusBadge } from "../../../components/ui";
-import { TransientRecoveryState } from "../../../components/TransientRecoveryState";
+import { EmptyState, LoadingState, StatusBadge } from "@/components/ui";
+import { TransientRecoveryState } from "@/components/TransientRecoveryState";
 import { ApiClientError } from "../../../lib/apiClient";
 import { CANDIDATE_RECOMMENDATION_DEBOUNCE_MS, candidateRecommendationEmptyView } from "../../../lib/candidateRecommendation";
 import { getRecruiterCandidateRecommendations, type Job, type RecruiterCandidateRecommendationResult } from "../../../lib/person2Api";

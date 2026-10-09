@@ -71,6 +71,7 @@ export const API_PATHS = Object.freeze({
   bookmarks: "/applications/bookmarks",
   offers: "/offers/",
   aiChat: "/ai/chat",
+  chats: "/chat/chats",
 });
 
 type QueryPrimitive = string | number | boolean;
@@ -497,6 +498,9 @@ export async function requestApi<T>(
         }
         assertCurrentSession();
         clearApiSession();
+        if (typeof window !== "undefined") {
+          window.location.assign(`/login?returnTo=${encodeURIComponent(window.location.pathname)}`);
+        }
         throw apiError;
       }
       if (!TRANSIENT_STATUSES.has(response.status) || transientAttempt >= maxRetries) throw apiError;

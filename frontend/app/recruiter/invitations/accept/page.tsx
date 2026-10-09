@@ -1,5 +1,5 @@
-import { CompanyInvitationAcceptance } from "../../../../components/CompanyInvitationAcceptance";
-import { PageHeader } from "../../../../components/ui";
+import { CompanyInvitationAcceptance } from "@/components/CompanyInvitationAcceptance";
+import { PageHeader } from "@/components/ui";
 
 export default function InvitationAcceptPage() {
   return (

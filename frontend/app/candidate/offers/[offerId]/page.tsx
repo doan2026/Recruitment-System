@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { ConfirmationDialog } from "../../../../components/ConfirmationDialog";
+import { ConfirmationDialog } from "@/components/ConfirmationDialog";
 import { useEffect, useRef, useState } from "react";
-import { ErrorState, LoadingState, StatusBadge } from "../../../../components/ui";
+import { ErrorState, LoadingState, StatusBadge } from "@/components/ui";
 import { ApiClientError, toUserMessage } from "../../../../lib/apiClient";
 import { offerResponseRecoveryView } from "../../../../lib/offerResponseRecovery";
 import { getOffer, Offer, respondToApplicationOffer } from "../../../../lib/person2Api";

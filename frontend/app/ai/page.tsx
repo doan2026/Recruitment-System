@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { EmptyState, PageHeader, StatusBadge } from "../../components/ui";
+import { EmptyState, PageHeader, StatusBadge } from "@/components/ui";
 import { createChatSessionId, toUserMessage } from "../../lib/apiClient";
 import { appendAiChatExchange, createAiChatConversation, type AiChatMessage } from "../../lib/aiChatConversation";
 import { classifyAiChatBackpressure, runAiChatWithBusyRetry } from "../../lib/aiChatBackpressure";

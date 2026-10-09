@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { EmptyState, ErrorState, LoadingState, PageHeader } from "../../../components/ui";
+import { EmptyState, ErrorState, LoadingState, PageHeader } from "@/components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import { getRecruiterJobs, type Job } from "../../../lib/person2Api";
 import { RecruiterCandidateRecommendations } from "../jobs/RecruiterCandidateRecommendations";
