@@ -1,6 +1,12 @@
 name: recruitment-system
 
 services:
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    restart: unless-stopped
   api-gateway:
     image: nginx:1.30.4-alpine
     restart: unless-stopped
@@ -20,6 +26,7 @@ services:
       - admin-service
       - chat-service
       - ai-service
+      - video-service
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -57,7 +64,7 @@ services:
     environment:
       REDISCLI_AUTH: ${REDIS_PASSWORD}
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -106,7 +113,7 @@ services:
       - /bin/bash
       - -ec
       - |
-        for topic in job-events cv-events application-events "$$KAFKA_INTERVIEW_TOPIC" chat-events; do
+        for topic in job-events cv-events application-events "$$KAFKA_INTERVIEW_TOPIC" chat-events video.call.started video.call.ended; do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$$topic" --partitions 3 --replication-factor 1
         done
 
@@ -174,7 +181,7 @@ services:
       INTERVIEW_CURSOR_HMAC_KEY: ${INTERVIEW_CURSOR_HMAC_KEY:?INTERVIEW_CURSOR_HMAC_KEY is required}
       JWT_ISSUER: ${JWT_ISSUER:-https://auth.recruitment.local}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-recruitment-api}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       KAFKA_BROKERS: kafka:9092
       KAFKA_INTERVIEW_TOPIC: ${KAFKA_INTERVIEW_TOPIC:-interview-events}
       INTERVIEW_EVENT_PUBLISHER_ENABLED: ${INTERVIEW_EVENT_PUBLISHER_ENABLED:-true}
@@ -237,7 +244,7 @@ services:
       KAFKA_BROKERS: kafka:9092
       KAFKA_CV_TOPIC: ${KAFKA_CV_TOPIC:-cv-events}
       CV_EVENT_PUBLISHER_ENABLED: ${PROFILE_CV_EVENT_PUBLISHER_ENABLED:-true}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       SWAGGER_ENABLED: "true"
     secrets:
       - source: jwt-public-key
@@ -307,60 +314,33 @@ services:
     expose:
       - "3000"
 
-  notification-migrate:
-    build:
-      context: ./services/notification-service
-      target: build
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=notification
-    user: node
-    restart: "no"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    command: [ "npm", "run", "prisma:migrate:deploy" ]
-
   notification-service:
     build:
       context: ./services/notification-service
-      target: runtime
     env_file:
       - ./services/notification-service/.env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=notification
+      DATABASE_URL: postgres://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?sslmode=disable
       KAFKA_BROKERS: kafka:9092
-      KAFKA_APPLICATION_TOPIC: ${KAFKA_APPLICATION_TOPIC:-application-events}
-      KAFKA_NOTIFICATION_GROUP_ID: ${KAFKA_NOTIFICATION_GROUP_ID:-notification-application-inbox-v1}
-      KAFKA_INTERVIEW_TOPIC: ${KAFKA_INTERVIEW_TOPIC:-interview-events}
-      KAFKA_NOTIFICATION_INTERVIEW_GROUP_ID: ${KAFKA_NOTIFICATION_INTERVIEW_GROUP_ID:-notification-interview-inbox-v1}
-      NOTIFICATION_KAFKA_CONSUMER_ENABLED: "true"
-      NOTIFICATION_EVENT_MAX_BYTES: ${NOTIFICATION_EVENT_MAX_BYTES:-65536}
-      NOTIFICATION_APPLICATION_REPLAY_AFTER: ${NOTIFICATION_APPLICATION_REPLAY_AFTER:?NOTIFICATION_APPLICATION_REPLAY_AFTER is required}
-      NOTIFICATION_INTERVIEW_REPLAY_AFTER: ${NOTIFICATION_INTERVIEW_REPLAY_AFTER:?NOTIFICATION_INTERVIEW_REPLAY_AFTER is required}
-      NOTIFICATION_CURSOR_HMAC_KEY: ${NOTIFICATION_CURSOR_HMAC_KEY:?NOTIFICATION_CURSOR_HMAC_KEY is required}
-      JWT_JWKS_URI: ""
-      JWT_ALLOW_INSECURE_JWKS: "false"
-      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt-public.pem
-      JWT_ISSUER: ${JWT_ISSUER:?JWT_ISSUER is required}
-      JWT_AUDIENCE: ${JWT_AUDIENCE:?JWT_AUDIENCE is required}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
-    secrets:
-      - source: jwt-public-key
-        target: jwt-public.pem
+      JWT_JWKS_URI: http://auth-service:8080/auth/.well-known/jwks.json
+      JWT_ALLOW_INSECURE_JWKS: "true"
+      JWT_ISSUER: ${JWT_ISSUER:-https://auth.recruitment.local}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-recruitment-api}
+      CURSOR_HMAC_KEY: ${NOTIFICATION_CURSOR_HMAC_KEY:?NOTIFICATION_CURSOR_HMAC_KEY is required}
+      ALLOWED_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      PORT: "8080"
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
-      notification-migrate:
-        condition: service_completed_successfully
       kafka-init:
         condition: service_completed_successfully
       auth-service:
         condition: service_started
     expose:
-      - "3000"
+      - "8080"
     healthcheck:
-      test: [ "CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3000/health/ready" ]
+      test: [ "CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health/ready" ]
       interval: 10s
       timeout: 3s
       retries: 6
@@ -412,7 +392,7 @@ services:
       MEDIA_CLEANUP_CLEAN_INTERVAL_SECONDS: ${MEDIA_CLEANUP_CLEAN_INTERVAL_SECONDS:-60}
       MEDIA_CLEANUP_EXPIRED_RETENTION_SECONDS: ${MEDIA_CLEANUP_EXPIRED_RETENTION_SECONDS:-86400}
       MEDIA_CLEANUP_STARTUP_JITTER_SECONDS: ${MEDIA_CLEANUP_STARTUP_JITTER_SECONDS:-30}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       SWAGGER_ENABLED: "true"
     secrets:
       - source: jwt-public-key
@@ -432,16 +412,25 @@ services:
     build: ./services/chat-service
     env_file:
       - ./services/chat-service/.env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?search_path=chat,public&sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      JWT_JWKS_URI: http://auth-service:8080/auth/.well-known/jwks.json
     secrets:
       - source: jwt-public-key
         target: jwt-public.pem
     restart: unless-stopped
     depends_on:
-      - mongo
-      - redis
-      - kafka
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_started
+      auth-service:
+        condition: service_started
     expose:
-      - "3001"
+      - "8080"
 
   # Run migrations once; API replicas and workers never start before success.
   ai-migrate:
@@ -520,6 +509,30 @@ services:
         condition: service_completed_successfully
     volumes:
       - ai-model-cache:/models
+
+  video-service:
+    build: ./services/video-service
+    env_file:
+      - ./services/video-service/.env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?sslmode=disable
+      JWT_JWKS_URI: http://auth-service:8080/auth/.well-known/jwks.json
+      JWT_ALLOW_INSECURE_JWKS: "true"
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-secret}
+      LIVEKIT_URL: ${LIVEKIT_URL:-http://localhost:7880}
+      KAFKA_BROKERS: kafka:9092
+    secrets:
+      - source: jwt-public-key
+        target: jwt-public.pem
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+    expose:
+      - "8080"
 
   frontend:
     build:
