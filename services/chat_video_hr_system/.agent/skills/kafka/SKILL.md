@@ -1,2 +1,0 @@
-# Kafka Skill
-Use Kafka only as the asynchronous event bus. Topics may include user.created, message.created/read, video.call.started/ended, notification.created. Events contain event_id, event_type, key, aggregate_id, occurred_at, producer, payload. Use conversation_id/call_id/user_id as ordering keys where appropriate. Consumers should be idempotent; use retries, DLQ, and monitor lag. Never send video/audio through Kafka.
