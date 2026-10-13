@@ -2,9 +2,10 @@ package test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
-	"strings"
 
 	"chat-service/internal/db"
 	"chat-service/internal/kafka"
@@ -29,7 +30,7 @@ func TestChatServiceIntegration(t *testing.T) {
 		postgres.WithPassword("chat_secure_pass_123"),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).WithStartupTimeout(10*time.Second),
+				WithOccurrence(2).WithStartupTimeout(60*time.Second),
 		),
 	)
 	if err != nil {
@@ -104,6 +105,27 @@ func TestChatServiceIntegration(t *testing.T) {
 		}
 		if len(convs) != 1 {
 			t.Errorf("expected 1 conversation, got %d", len(convs))
+		}
+
+		loaded, err := chatSvc.GetConversation(ctx, conv.ID, creatorID)
+		if err != nil || loaded.Title != "Test Group" || len(loaded.Members) != 2 {
+			t.Fatalf("cannot read owned conversation: %v, %v", loaded, err)
+		}
+		outsider := uuid.New()
+		if _, err := chatSvc.GetConversation(ctx, conv.ID, outsider); !errors.Is(err, service.ErrNotMember) {
+			t.Fatalf("non-member read was not rejected: %v", err)
+		}
+		direct, err := chatSvc.CreateConversation(ctx, creatorID, "", []uuid.UUID{member2ID}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		directRead, err := chatSvc.GetConversation(ctx, direct.ID, member2ID)
+		if err != nil || directRead.Title != "Đối tác" || len(directRead.Members) != 2 {
+			t.Fatalf("direct conversation requires another service database: %v, %v", directRead, err)
+		}
+		empty, err := chatSvc.ListUserConversations(ctx, outsider)
+		if err != nil || empty == nil || len(empty) != 0 {
+			t.Fatalf("expected empty list: %v, %v", empty, err)
 		}
 
 		// Send Message

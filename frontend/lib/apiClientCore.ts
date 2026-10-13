@@ -346,6 +346,8 @@ export function toNoStoreHeaders(): Record<string, string> {
 }
 
 function apiBaseUrl(): string {
+  // HttpOnly access cookies are forwarded by the same-origin Next middleware.
+  if (typeof window !== "undefined") return "/api";
   const configured = (typeof window === "undefined"
     ? process.env.API_INTERNAL_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL
     : process.env.NEXT_PUBLIC_API_BASE_URL)?.trim() ?? "";
@@ -498,9 +500,6 @@ export async function requestApi<T>(
         }
         assertCurrentSession();
         clearApiSession();
-        if (typeof window !== "undefined") {
-          window.location.assign(`/login?returnTo=${encodeURIComponent(window.location.pathname)}`);
-        }
         throw apiError;
       }
       if (!TRANSIENT_STATUSES.has(response.status) || transientAttempt >= maxRetries) throw apiError;

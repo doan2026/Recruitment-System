@@ -35,7 +35,7 @@ function validateLoginResponse(value: LoginResponse): void {
   }
 }
 
-configureApiSessionRefresh(async () => {
+export async function refreshAuthSession() {
   const current = getCurrentAccount();
   if (!current) return null;
   
@@ -53,7 +53,9 @@ configureApiSessionRefresh(async () => {
   }
   account = result.data.user;
   return { token: null, accountId: account.id }; // Token is handled by cookies
-});
+}
+
+configureApiSessionRefresh(refreshAuthSession);
 
 export async function hydrateSession(): Promise<void> {
   if (initialized) return;
@@ -66,6 +68,7 @@ export async function hydrateSession(): Promise<void> {
     });
     
     if (result.data?.id) {
+      validateLoginResponse({ user: result.data });
       account = result.data;
       hydrating = false;
       setApiSession({ token: null, accountId: account.id });
@@ -74,8 +77,9 @@ export async function hydrateSession(): Promise<void> {
       clearApiSession();
     }
   } catch (error) {
-    // Not logged in or expired
     hydrating = false;
+    // A newer login owns the session when the hydration request was cancelled.
+    if (error instanceof ApiClientError && error.code === "REQUEST_CANCELLED") return;
     clearApiSession();
   }
 }
@@ -89,6 +93,7 @@ export async function signIn(email: string, password: string): Promise<CurrentAc
     authRecovery: false, attachAccessToken: false, maxRetries: 0,
   });
   validateLoginResponse(response.data);
+  hydrating = false;
   account = response.data.user;
   setApiSession({ token: null, accountId: account.id });
   return account;

@@ -4,7 +4,7 @@ import { CandidateShell } from "@/components/CandidateShell";
 
 export default function CandidateLayout({ children }: { children: ReactNode }) {
   return (
-    <SessionGate role="CANDIDATE">
+    <SessionGate role="CANDIDATE" publicJobRoutes>
       <CandidateShell>{children}</CandidateShell>
     </SessionGate>
   );

@@ -1,6 +1,15 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-const gateway = "http://127.0.0.1:4174";
+const gateway = "http://127.0.0.1:4173/api";
+test.beforeEach(async ({ page }) => {
+  await page.route("http://127.0.0.1:4173/api/notifications**", (route) => route.fulfill({
+    status: 200, contentType: "application/json", body: JSON.stringify({ data: route.request().url().includes("unread-count") ? { unread_count: 0 } : [], meta: null }),
+  }));
+  await page.route("http://127.0.0.1:4173/api/auth/me", (route) => route.fulfill({
+    status: 401, contentType: "application/json", body: JSON.stringify({ code: "AUTH_INVALID" }),
+  }));
+});
+
 const companyId = "3795c0de-7908-4ab5-9bed-4c4f1cf9c212";
 const accountId = "4795c0de-7908-4ab5-9bed-4c4f1cf9c213";
 const baseCompany = {
@@ -51,9 +60,7 @@ async function openCompany(page: Page, options: { verified?: boolean; conflictFi
       logo: body.removeLogo ? null : current.logo };
     return reply(route, current);
   });
-  await page.route(`${gateway}/auth/login`, (route) => reply(route, {
-    accessToken: "company-edit-contract-access", refreshToken: "company-edit-contract-refresh",
-    tokenType: "Bearer", user: { id: accountId, role: "RECRUITER", email: "fixture@example.com" },
+  await page.route(`${gateway}/auth-cookie/login`, (route) => reply(route, { user: { id: accountId, role: "RECRUITER", email: "fixture@example.com" },
   }));
   await page.goto("/login?returnTo=%2Frecruiter%2Fcompany");
   await page.getByLabel("Email", { exact: true }).fill("fixture@example.com");
@@ -88,6 +95,8 @@ test("company profile validates and saves all fields with the loaded version and
   }]);
   await expect(page.getByText("Mô tả mới Giữ nguyên xuống dòng.", { exact: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: test.info().outputPath("company-profile-verified.png"), fullPage: true });
 });
 
 test("verified legal edit confirms once and preserves nonlegal fields through the dialog", async ({ page }) => {
