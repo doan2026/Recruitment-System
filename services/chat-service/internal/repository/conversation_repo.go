@@ -84,87 +84,72 @@ func (r *ConversationRepository) FindDirectConversation(ctx context.Context, u1,
 	}
 
 	members, err := r.GetMemberIDs(ctx, c.ID)
-	if err == nil {
-		c.Members = members
+	if err != nil {
+		return nil, err
 	}
+	c.Members = members
 
 	return &c, nil
 }
 
 func (r *ConversationRepository) FindByID(ctx context.Context, convID uuid.UUID, currentUserID uuid.UUID) (*model.Conversation, error) {
+	// Conversation titles belong to Chat. Profile enrichment must use an API or
+	// projection, never a join against another service's private database.
 	query := `
-		SELECT c.id, c.is_group, c.created_at, c.updated_at,
-		       CASE WHEN c.is_group THEN c.title 
-		            ELSE COALESCE(p2.full_name, SPLIT_PART(u2.email, '@', 1), 'Đối tác') 
-		       END as title,
-		       p2.avatar_url
-		FROM conversations c
-		JOIN conversation_members cm ON c.id = cm.conversation_id
-		LEFT JOIN conversation_members cm2 ON cm2.conversation_id = c.id AND cm2.user_id != $2 AND NOT c.is_group
-		LEFT JOIN profile.profiles p2 ON p2.user_id = cm2.user_id
-		LEFT JOIN auth.users u2 ON u2.id = cm2.user_id
-		WHERE c.id = $1 AND cm.user_id = $2
-	`
+        SELECT c.id, c.is_group, c.created_at, c.updated_at,
+               COALESCE(NULLIF(c.title, ''), 'Đối tác')
+        FROM conversations c
+        JOIN conversation_members cm ON c.id = cm.conversation_id
+        WHERE c.id = $1 AND cm.user_id = $2
+    `
 	var c model.Conversation
-	var avatarURL sql.NullString
-	err := r.db.QueryRowContext(ctx, query, convID, currentUserID).Scan(&c.ID, &c.IsGroup, &c.CreatedAt, &c.UpdatedAt, &c.Title, &avatarURL)
+	err := r.db.QueryRowContext(ctx, query, convID, currentUserID).Scan(&c.ID, &c.IsGroup, &c.CreatedAt, &c.UpdatedAt, &c.Title)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrConversationNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	if avatarURL.Valid {
-		c.AvatarURL = avatarURL.String
-	}
 
 	members, err := r.GetMemberIDs(ctx, convID)
-	if err == nil {
-		c.Members = members
+	if err != nil {
+		return nil, err
 	}
+	c.Members = members
 
 	return &c, nil
 }
 
 func (r *ConversationRepository) ListByUserID(ctx context.Context, userID uuid.UUID) ([]*model.Conversation, error) {
 	query := `
-		SELECT c.id, c.is_group, c.created_at, c.updated_at,
-		       CASE WHEN c.is_group THEN c.title 
-		            ELSE COALESCE(p2.full_name, SPLIT_PART(u2.email, '@', 1), 'Đối tác') 
-		       END as title,
-		       p2.avatar_url
-		FROM conversations c
-		JOIN conversation_members cm ON c.id = cm.conversation_id
-		LEFT JOIN conversation_members cm2 ON cm2.conversation_id = c.id AND cm2.user_id != $1 AND NOT c.is_group
-		LEFT JOIN profile.profiles p2 ON p2.user_id = cm2.user_id
-		LEFT JOIN auth.users u2 ON u2.id = cm2.user_id
-		WHERE cm.user_id = $1
-		ORDER BY c.updated_at DESC
-	`
+        SELECT c.id, c.is_group, c.created_at, c.updated_at,
+               COALESCE(NULLIF(c.title, ''), 'Đối tác')
+        FROM conversations c
+        JOIN conversation_members cm ON c.id = cm.conversation_id
+        WHERE cm.user_id = $1
+        ORDER BY c.updated_at DESC
+    `
 	rows, err := r.db.QueryContext(ctx, query, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var convs []*model.Conversation
+	convs := make([]*model.Conversation, 0)
 	for rows.Next() {
 		var c model.Conversation
-		var avatarURL sql.NullString
-		if err := rows.Scan(&c.ID, &c.IsGroup, &c.CreatedAt, &c.UpdatedAt, &c.Title, &avatarURL); err != nil {
+		if err := rows.Scan(&c.ID, &c.IsGroup, &c.CreatedAt, &c.UpdatedAt, &c.Title); err != nil {
 			return nil, err
-		}
-		if avatarURL.Valid {
-			c.AvatarURL = avatarURL.String
 		}
 		convs = append(convs, &c)
 	}
 
 	for _, c := range convs {
 		members, err := r.GetMemberIDs(ctx, c.ID)
-		if err == nil {
-			c.Members = members
+		if err != nil {
+			return nil, err
 		}
+		c.Members = members
 	}
 
 	return convs, rows.Err()

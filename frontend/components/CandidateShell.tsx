@@ -1,9 +1,14 @@
+"use client";
+
 import Link from "next/link";
 import { ReactNode } from "react";
 import { AccountNavigation } from "./AccountNavigation";
 import { Logo } from "./Logo";
+import { useCurrentAccount } from "./SessionGate";
+import { isDemoPerson2Api } from "../lib/person2Api";
 
 export function CandidateShell({ children }: { children: ReactNode }) {
+  const account = useCurrentAccount();
   return (
     <div className="app-shell candidate-shell" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <header className="topbar">
@@ -15,8 +20,8 @@ export function CandidateShell({ children }: { children: ReactNode }) {
           <AccountNavigation />
         </div>
       </header>
-      <div className="shell-body" style={{ display: 'flex', flex: 1, margin: '0 auto', width: '100%', gap: '24px', padding: '24px 20px' }}>
-        <aside className="sidebar" style={{ width: 240, flexShrink: 0 }}>
+      <div className="shell-body">
+        {(isDemoPerson2Api || account?.role === "CANDIDATE") && <aside className="sidebar">
           <nav className="stack" style={{ gap: '8px' }}>
             <Link href="/candidate/dashboard" className="sidebar-link">Dashboard</Link>
             <Link href="/candidate/profile" className="sidebar-link">Hồ sơ cá nhân</Link>
@@ -26,8 +31,8 @@ export function CandidateShell({ children }: { children: ReactNode }) {
             <Link href="/candidate/bookmarks" className="sidebar-link">Việc làm đã lưu</Link>
             <Link href="/messages" className="sidebar-link">Tin nhắn</Link>
           </nav>
-        </aside>
-        <main className="content" style={{ flex: 1 }}>
+        </aside>}
+        <main className="content">
           {children}
         </main>
       </div>

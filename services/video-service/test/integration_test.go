@@ -2,9 +2,9 @@ package test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
-	"strings"
 
 	"video-service/internal/db"
 	"video-service/internal/kafka"
@@ -37,7 +37,7 @@ func TestVideoServiceIntegration(t *testing.T) {
 		postgres.WithPassword("video_secure_pass_123"),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).WithStartupTimeout(10*time.Second),
+				WithOccurrence(2).WithStartupTimeout(60*time.Second),
 		),
 	)
 	if err != nil {
@@ -96,13 +96,19 @@ func TestVideoServiceIntegration(t *testing.T) {
 		callerID := uuid.New()
 		participantID := uuid.New()
 
-		call, err := videoSvc.CreateCall(ctx, callerID, "Test Call", []uuid.UUID{participantID})
+		conversationID := uuid.New().String()
+		call, err := videoSvc.CreateCall(ctx, callerID, "Test Call", []uuid.UUID{participantID}, conversationID)
 		if err != nil {
 			t.Fatalf("failed to create call: %v", err)
 		}
 
 		if call.Status != "waiting" && call.Status != "initiating" {
 			t.Errorf("unexpected status: %s", call.Status)
+		}
+
+		stored, err := videoRepo.FindByID(ctx, call.ID)
+		if err != nil || stored.ConversationID != conversationID {
+			t.Fatalf("conversation link was not persisted: %v, %v", stored, err)
 		}
 
 		// Join Call

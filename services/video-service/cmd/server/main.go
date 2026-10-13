@@ -55,7 +55,8 @@ func main() {
 	}
 
 	// Initialize JWT Verifier
-	verifier, err := jwt.NewVerifier(jwtJwksURI, jwtPublicKeyPath)
+	verifier, err := jwt.NewVerifier(jwtJwksURI, jwtPublicKeyPath,
+		getEnv("JWT_ISSUER", "https://auth.recruitment.local"), getEnv("JWT_AUDIENCE", "recruitment-api"))
 	if err != nil {
 		log.Fatalf("[Video Service] Failed to initialize JWT verifier: %v", err)
 	}

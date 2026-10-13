@@ -11,17 +11,14 @@ export function useCurrentAccount(): CurrentAccount | null | undefined {
   return useSyncExternalStore(subscribeToApiSession, getCurrentAccount, () => undefined);
 }
 
-export function SessionGate({ children, role }: { children: ReactNode; role: CurrentAccount["role"] }) {
+export function SessionGate({ children, role, publicJobRoutes = false }: { children: ReactNode; role: CurrentAccount["role"]; publicJobRoutes?: boolean }) {
   const account = useCurrentAccount();
   const pathname = usePathname();
   
-  if (typeof window !== "undefined" && account === null && !isDemoPerson2Api) {
-    window.location.assign(`/login?returnTo=${encodeURIComponent(pathname)}`);
-    return null;
-  }
+  if (publicJobRoutes && /^\/candidate\/jobs(?:\/[^/]+)?\/?$/.test(pathname)) return <>{children}</>;
   if (isDemoPerson2Api) return <>{children}</>;
   if (account === undefined) return (
-    <div className="flex justify-center p-12">
+    <div className="flex justify-center p-12" role="status" aria-label="Đang kiểm tra phiên đăng nhập">
       <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full"></div>
     </div>
   );

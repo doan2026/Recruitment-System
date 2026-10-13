@@ -38,11 +38,12 @@ func (s *VideoService) CreateCall(ctx context.Context, hostID uuid.UUID, title s
 
 	roomName := fmt.Sprintf("interview_%s", uuid.New().String()[:8])
 	call := &model.VideoCall{
-		ID:       uuid.New(),
-		RoomName: roomName,
-		HostID:   hostID,
-		Title:    title,
-		Status:   "waiting",
+		ID:             uuid.New(),
+		RoomName:       roomName,
+		HostID:         hostID,
+		Title:          title,
+		Status:         "waiting",
+		ConversationID: conversationID,
 	}
 
 	if err := s.repo.CreateCall(ctx, call, participantIDs); err != nil {

@@ -15,8 +15,8 @@ export function RecruiterShell({ children }: { children: ReactNode }) {
           <AccountNavigation />
         </div>
       </header>
-      <div className="shell-body" style={{ display: 'flex', flex: 1 }}>
-        <aside className="sidebar recruiter-sidebar" style={{ width: 260, flexShrink: 0, borderRight: '1px solid var(--line)', background: '#f5f7fa', padding: '24px 20px' }}>
+      <div className="shell-body">
+        <aside className="sidebar recruiter-sidebar">
           <nav className="stack" style={{ gap: '8px' }}>
             <Link href="/recruiter/dashboard" className="sidebar-link">Dashboard</Link>
             <Link href="/recruiter/jobs" className="sidebar-link">Quản lý tin tuyển dụng</Link>
@@ -25,7 +25,7 @@ export function RecruiterShell({ children }: { children: ReactNode }) {
             <Link href="/messages" className="sidebar-link">Tin nhắn</Link>
           </nav>
         </aside>
-        <main className="content" style={{ flex: 1, padding: '24px 32px' }}>
+        <main className="content">
           {children}
         </main>
       </div>
