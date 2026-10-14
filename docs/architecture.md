@@ -31,6 +31,17 @@ uses parameterized SQL with escaped literal email search. Endpoint paths,
 JSON field names, JWT contracts and existing transaction boundaries are preserved.
 See [Auth Service structure](../services/auth-service/README.md#rest-mvc-structure).
 
+## Admin REST MVC layers
+
+Admin follows Auth's layer layout with `@RestController`, validated DTOs, services,
+JDBC repositories, model records, configuration, security filters and infrastructure adapters.
+Controllers delegate all privileged decisions and persistence work to services.
+Moderation, reports, audit and statistics have separate endpoints/services; HTTP
+gateway calls, Kafka consumption, scheduled aggregation and CSV/XLSX generation
+have explicit owners. The JDBC/Flyway stack, append-only audit, report version
+checks, event idempotency and existing REST/upstream/Kafka contracts are preserved.
+See [Admin Service structure](../services/admin-service/README.md#rest-mvc-structure).
+
 ## Kafka event contracts
 
 Kafka payloads are topic-specific; there is no implemented global camelCase

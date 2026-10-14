@@ -2,6 +2,36 @@
 
 Spring Boot 3 / Java 21. Admin stores only moderation/audit/statistics data in its own `admin` schema. It never reads another service's database.
 
+## REST MVC structure
+
+Admin follows the same layer layout as Auth, using `@RestController` for JSON APIs and constructor injection. JDBC/Flyway remain the persistence stack; this refactor does not introduce JPA or change the database schema.
+
+```text
+com.recruitment.admin
+├── AdminServiceApplication.java    Application entry point and component-scan root
+├── controller/                    Moderation, reports, audit, statistics and health endpoints
+├── dto/                           Validated request records and explicit JSON responses
+├── service/                       Authorization checks and business orchestration
+├── repository/                    Moderation/audit and statistics SQL
+├── model/                         Report, audit, event, daily statistic and page values
+├── config/                        Spring Security, OpenAPI and Kafka retry configuration
+├── security/filter/               Request IDs and private response headers
+├── infrastructure/
+│   ├── client/                    Auth, Company and Job HTTP gateway
+│   ├── kafka/                     Event parser and Kafka listener adapter
+│   └── scheduler/                 Daily statistics aggregation trigger
+├── exception/                     Business failures and @RestControllerAdvice
+└── support/                       Shared moderation-reason validation
+```
+
+Controllers bind/validate HTTP input and map responses; they do not execute SQL, call persistence repositories or HTTP gateways directly, implement moderation decisions, or build CSV/XLSX files. Services recheck durable Admin state through Auth before privileged work. `POST /reports` remains available to any authenticated Candidate, Recruiter or Admin.
+
+`ModerationRepository` owns report row locks, version checks, hourly quotas and append-only audit writes. Its audit method retains `REQUIRES_NEW`, and remote mutations remain outside a shared database transaction. Typed `Report` and `AuditEntry` values are mapped to response DTOs with the original snake_case JSON fields.
+
+`StatisticsRepository` owns event idempotency, poison-record quarantine, dirty dates and cohort queries. The Kafka listener and scheduler call transactional methods on the injected `StatisticsService` bean so commit/acknowledgment order and `SKIP LOCKED` semantics remain intact. `StatisticsExportService` owns bounded CSV/XLSX generation.
+
+Existing paths, status codes, `{data, meta}` / `{code, message, details}` envelopes, upstream origins, Kafka contracts, UTC aggregation schedule and Flyway migrations are preserved. Upstream moderation/directory JSON is forwarded as `JsonNode`; owned data uses explicit DTOs. Tests mirror the new packages, with cross-layer PostgreSQL checks under `integration`.
+
 ## Implemented routes
 
 Gateway strips `/admin`; direct service routes below have no prefix.
@@ -52,11 +82,11 @@ Copy `.env.example` and resolve values as described in the root README. Existing
 ```powershell
 $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
 mvn test
-mvn -Pintegration -Dapi.version=1.44 verify
+mvn -Pintegration '-Dapi.version=1.44' verify
 ```
 
 Integration tests use a disposable PostgreSQL 16 Testcontainer, apply Flyway migrations, and cover duplicates, late events, poison events, CAS report handling, audit immutability, application startup and OpenAPI/security. Docker must be running. The api.version property is for newer Docker engines whose minimum API exceeds the Java client's default.
 
-Verified on 24/09/2026: 12 unit tests and 4 PostgreSQL integration tests passed with Docker Desktop 29.5.3.
+REST MVC refactor verified on 14/10/2026: **22/22 unit tests and 5/5 PostgreSQL integration tests passed (27/27 total)**. Checks cover role restrictions, authenticated report submission, audit ordering, ambiguous report outcomes, CSV/XLSX contents, statistics replay/late events, report version checks, audit immutability, DTO JSON compatibility and secured application startup/OpenAPI.
 
 Runtime starts migrations automatically. Configure migration/runtime roles separately in a production deployment, and use a migration job if runtime DDL is prohibited. Container readiness uses Actuator database health. Internal service URLs, Kafka broker and CORS origins are explicit in `.env.example`.
