@@ -1,18 +1,13 @@
 package com.recruitment.admin;
 
-import java.util.Map;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
-@org.springframework.scheduling.annotation.EnableScheduling
+@EnableScheduling
 public class AdminServiceApplication {
-  public static void main(String[] args) { SpringApplication.run(AdminServiceApplication.class, args); }
-}
-
-@RestController
-class HealthController {
-  @GetMapping("/health") Map<String, String> health() { return Map.of("service", "admin-service", "status", "UP"); }
+  public static void main(String[] args) {
+    SpringApplication.run(AdminServiceApplication.class, args);
+  }
 }
