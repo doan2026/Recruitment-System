@@ -14,18 +14,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nimbusds.jose.JOSEObjectType;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jwt.SignedJWT;
-import com.recruitment.auth.identity.AuthUser;
-import com.recruitment.auth.identity.AuthUserRepository;
-import com.recruitment.auth.identity.RefreshSession;
-import com.recruitment.auth.identity.RefreshSessionRepository;
-import com.recruitment.auth.identity.RefreshSessionRevocationReason;
-import com.recruitment.auth.registration.OtpEmailSender;
+import com.recruitment.auth.infrastructure.mail.OtpEmailSender;
+import com.recruitment.auth.model.AuthUser;
+import com.recruitment.auth.model.RefreshSession;
+import com.recruitment.auth.model.RefreshSessionRevocationReason;
+import com.recruitment.auth.repository.jpa.AuthUserRepository;
+import com.recruitment.auth.repository.jpa.RefreshSessionRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
