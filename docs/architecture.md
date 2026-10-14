@@ -16,6 +16,21 @@
 | Admin | Spring Boot | `admin` | `/admin` |
 | AI | FastAPI | `ai` + pgvector | `/ai` |
 
+## Auth REST MVC layers
+
+Auth uses `@RestController` for JSON APIs. Its package layout separates
+`controller`, `dto`, `service`, `repository` (`jpa`, `jdbc`, `redis`), `model`,
+`config`, `security`, `infrastructure.mail`, `exception` and `support`.
+Controllers delegate business work to services; repository adapters own persistence.
+DTOs define the HTTP representation, and `@RestControllerAdvice` maps errors.
+
+The internal `/auth/users` directory uses a typed DTO and follows
+`AdminUserDirectoryController → AdminUserDirectoryService → AdminUserDirectoryRepository`.
+The service rechecks durable admin role and bounds pagination; the repository
+uses parameterized SQL with escaped literal email search. Endpoint paths,
+JSON field names, JWT contracts and existing transaction boundaries are preserved.
+See [Auth Service structure](../services/auth-service/README.md#rest-mvc-structure).
+
 ## Kafka event contracts
 
 Kafka payloads are topic-specific; there is no implemented global camelCase

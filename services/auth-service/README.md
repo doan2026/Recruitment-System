@@ -2,6 +2,37 @@
 
 Spring Boot 3 / Java 21 service that owns user identities. PostgreSQL stores durable account/session data; Redis stores short-lived registration OTP and password-reset state; SMTP delivers registration codes and reset links.
 
+## REST MVC structure
+
+Auth uses Spring MVC REST controllers (`@RestController`), not server-rendered views. JSON DTOs are the HTTP representation consumed by the Next.js frontend. All existing endpoint paths, status codes and response envelopes remain compatible.
+
+```text
+com.recruitment.auth
+├── AuthServiceApplication.java     Application entry point and component-scan root
+├── controller/                     REST endpoints; request binding and response mapping
+├── dto/                            Validated requests and explicit JSON responses by feature
+├── service/                        Registration, login, sessions, recovery and account control
+├── repository/
+│   ├── jpa/                        Durable identity/session repositories
+│   ├── jdbc/                       Typed administrative directory queries
+│   └── redis/                      OTP, login throttling, recovery and Google exchange stores
+├── model/                          JPA entities, domain roles and identity values
+├── config/                         Spring bean and security configuration
+│   └── properties/                Validated configuration properties
+├── security/                       JWT/JWKS, token codecs, OAuth handlers and HTTP filters
+├── infrastructure/mail/            SMTP implementations and delivery interfaces
+├── exception/                      Business exceptions and @RestControllerAdvice
+└── support/                        Shared identity normalization
+```
+
+Business requests follow `RestController → Service → Repository`. Controllers must not execute SQL, depend on persistence repositories, implement account authorization decisions, or return JPA entities. Constructor injection keeps dependencies explicit. DTOs preserve sensitive-field redaction and validation; `GlobalExceptionHandler` preserves the shared error format.
+
+`AdminUserDirectoryController` delegates durable admin-role checks, bounded pagination and literal search normalization to `AdminUserDirectoryService`; `AdminUserDirectoryRepository` alone owns SQL and maps selected columns into `AdminUserResponse`. JSON keeps the existing `is_verified`, `is_locked`, `locked_reason`, `created_at` fields and `{data, meta}` envelope.
+
+Transactional collaborators remain separate Spring beans so OTP fencing, refresh rotation and account locking keep their existing transaction boundaries. Health reads the Actuator health aggregate, and JWKS exposes public keys through the token security component. Flyway migrations, schema names, JWT claims and secret configuration are unchanged.
+
+Tests mirror the production layers. Shared test data lives in `src/test/java/com/recruitment/auth/support`; PostgreSQL/Redis integration tests use isolated Testcontainers databases, not the Compose application database.
+
 ## Current status
 
 Candidate/Recruiter registration, OTP verification, password login, Google OIDC, JWT RS256/JWKS, refresh-token rotation, logout, password reset, `GET /auth/me` and internal Admin account control are implemented. A successful OTP verification signs the user in and returns the same local token pair as password and Google login.
@@ -310,4 +341,4 @@ docker run --rm --network host \
   mvn clean verify -Pintegration-test
 ```
 
-The integration profile validates Flyway/Hibernate on clean PostgreSQL 16 plus authenticated Redis 7: OTP fencing/rate limits, Google exchange exactly-once, password throttling, password-reset privacy/quota/TTL/supersession/transactions/concurrency, JWT/JWKS and `/auth/me`, refresh lineage/reuse/expiry/concurrency, internal Admin account control, CORS and fail-closed outages. The final clean run passed **215/215 unit tests and 40/40 integration tests (255/255 total)** with PostgreSQL 16.15, Redis 7 and Testcontainers 1.21.4. The gateway configuration also passes `nginx -t`.
+The integration profile validates Flyway/Hibernate on clean PostgreSQL 16 plus authenticated Redis 7: OTP fencing/rate limits, Google exchange exactly-once, password throttling, password-reset privacy/quota/TTL/supersession/transactions/concurrency, JWT/JWKS and `/auth/me`, refresh lineage/reuse/expiry/concurrency, internal Admin account control, CORS and fail-closed outages. The REST MVC refactor passed **224/224 unit tests and 42/42 integration tests (266/266 total)** with PostgreSQL 16, Redis 7 and Testcontainers 1.21.4. The directory tests additionally verify typed JSON compatibility, literal wildcard search, pagination and rejection of a demoted admin's old token.
