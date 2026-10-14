@@ -1068,3 +1068,80 @@ body:has(.auth-admin-page) .content-wrap>* { width:100%; }
 .auth-admin-visual-card span { color:#555f6f; font-size:10px; }
 @media(max-width:900px) { .auth-admin-page { grid-template-columns:minmax(390px,52%) minmax(0,48%); } .auth-admin-panel { padding-inline:32px; } .auth-admin-visual { padding:28px; } }
 @media(max-width:680px) { .auth-admin-page { display:block; } .auth-admin-panel { min-height:100svh; gap:30px; padding:28px 22px 18px; } .auth-admin-content { max-width:440px; } .auth-admin-heading h1 { font-size:27px; } .auth-admin-visual { display:none; } .auth-recruiter-login-brand { min-height:90px; } .auth-recruiter-portal .auth-portal-main { padding-bottom:32px; } .auth-recruiter-login-footer { justify-content:center; text-align:center; } .auth-recruiter-login-footer>* { flex-basis:100%; justify-content:center; } }
+/* Match the measured Figma frames (recruiter auth: 22:4976/22:5658, admin: 54:224). */
+.auth-recruiter-login-brand { height:144px; min-height:144px; flex:0 0 144px; align-items:flex-start; padding:64px 16px 0; }
+.auth-recruiter-login-brand img { width:176px; height:48px; }
+.auth-recruiter-portal .auth-portal-main { align-items:flex-start; padding:0 32px 64px; }
+.auth-recruiter-portal .auth-portal-card { width:min(100%,448px); padding:33px; border-radius:12px; }
+.auth-recruiter-portal .auth-portal-heading { display:flex; flex-direction:column; gap:8px; margin-bottom:0; }
+.auth-recruiter-portal .auth-portal-heading h1 { margin:0; font-size:16px; line-height:24px; }
+.auth-recruiter-portal .auth-portal-heading p { font-size:16px; line-height:24px; }
+.auth-recruiter-portal .auth-portal-form { gap:24px; padding-top:8px; }
+.auth-recruiter-portal .auth-portal-field { gap:8px; }
+.auth-recruiter-portal .auth-portal-field>label { font-size:16px; line-height:24px; }
+.auth-recruiter-portal .auth-portal-input-wrap { height:50px; border-radius:4px; }
+.auth-recruiter-portal .auth-portal-input-wrap input { font-size:16px; }
+.auth-recruiter-portal .auth-portal-options { font-size:14px; }
+.auth-recruiter-portal .auth-portal-options input { width:20px; height:20px; }
+.auth-recruiter-portal .auth-portal-card .auth-submit { height:48px; font-size:14px; }
+.auth-recruiter-portal .auth-portal-divider { margin:0; }
+.auth-recruiter-portal .auth-portal-card>.auth-google { height:50px; }
+.auth-recruiter-portal .auth-portal-signup { margin:0; font-size:14px; }
+.auth-recruiter-login-footer { min-height:128px; padding:24px 28px; }
+.auth-recruiter-register .auth-portal-header { min-height:66px; flex:0 0 66px; }
+.auth-recruiter-register-main { min-height:1012px; flex:0 0 1012px; align-items:flex-start; padding:64px 16px; }
+.auth-recruiter-register-card { width:min(100%,448px); gap:32px; padding:33px; border-radius:16px; }
+.auth-recruiter-register-heading { display:flex; flex-direction:column; gap:8px; margin:0; }
+.auth-recruiter-register-heading h1 { margin:0; font-size:32px; line-height:40px; letter-spacing:0; }
+.auth-recruiter-register-heading p { font-size:16px; line-height:24px; }
+.auth-recruiter-register-fields { display:flex; flex-direction:column; gap:20px; width:100%; }
+.auth-recruiter-register-field { gap:4px; }
+.auth-recruiter-register-field label { font-size:12px; line-height:16px; }
+.auth-recruiter-register-field input { height:42px; padding:0 13px; border-radius:8px; background:#f9f9ff; font-size:14px; }
+.auth-recruiter-terms { font-size:12px; line-height:20px; }
+.auth-recruiter-register-card .auth-submit { height:40px; border-radius:4px; font-size:12px; }
+.auth-recruiter-register-card .auth-recruiter-register-divider { margin:0; }
+.auth-recruiter-register-card .auth-google { height:46px; border-radius:4px; font-size:12px; }
+.auth-recruiter-register-card .auth-portal-signup { margin:0; font-size:12px; }
+.auth-recruiter-register-footer { min-height:182px; padding:28px; }
+.auth-recruiter-header-brand-group { display:flex; min-width:max-content; align-items:center; gap:24px; }
+.auth-recruiter-header-brand-group .auth-portal-brand { width:100px; height:32px; }
+.auth-recruiter-header-brand-group .auth-portal-brand img { width:100px; height:28px; object-fit:contain; }
+.auth-recruiter-header-title { color:#00783e !important; font:600 24px/1.2 "Manrope","Inter",sans-serif; text-decoration:none; }
+.auth-recruiter-register-footer-brand { display:grid; flex:0 0 180px; gap:12px; }
+.auth-portal-footer .auth-recruiter-register-footer-brand { display:grid; align-content:start; gap:12px; }
+.auth-recruiter-register-footer-brand span { max-width:190px; font-size:12px; line-height:18px; }
+.auth-recruiter-register-footer-links { display:grid; flex:1; grid-template-columns:repeat(5,minmax(0,1fr)); gap:24px; padding-top:4px; }
+.auth-recruiter-register-footer-links a { color:#596373; font-size:12px; text-decoration:underline; }
+.auth-admin-content { gap:32px; }
+.auth-admin-panel { padding-bottom:48px; }
+.auth-admin-heading { display:grid; gap:12px; }
+.auth-admin-heading h1 { margin:0; font-size:36px; line-height:46px; letter-spacing:-.5px; }
+.auth-admin-heading p { font-size:16px; line-height:26px; }
+.auth-admin-form { gap:24px; }
+.auth-admin-field>label { line-height:20px; }
+.auth-admin-input-wrap { border-radius:8px; }
+.auth-admin-security { min-height:96px; padding:16px; }
+.auth-admin-security strong { font-size:14px; line-height:20px; }
+.auth-admin-security p { font-size:13px; line-height:20px; }
+.auth-admin-support { gap:6px; font-size:14px; line-height:20px; }
+.auth-admin-footer { min-height:37px; padding-top:16px; font-size:12px; line-height:20px; }
+.auth-admin-visual { padding:48px; }
+.auth-admin-visual-card { min-height:269px; padding:32px; }
+.auth-admin-visual-card h2 { margin:0; font-size:32px; line-height:42px; letter-spacing:0; }
+.auth-admin-visual-card p { margin:0; font-size:16px; line-height:26px; }
+.auth-admin-visual-card>div { margin-top:0; padding-top:16px; }
+@media(max-width:680px) {
+  .auth-recruiter-register-main { min-height:1012px; flex-basis:1012px; padding:64px 16px; }
+  .auth-recruiter-register-card { width:min(100%,448px); padding:26px 22px; }
+  .auth-recruiter-register-footer { min-height:182px; }
+  .auth-recruiter-portal .auth-portal-card { padding:26px 22px; }
+  .auth-admin-footer { min-height:37px; }
+}
+.auth-recruiter-portal .auth-portal-card { padding:32px; }
+.auth-recruiter-portal .auth-portal-form { margin-top:24px; }
+.auth-recruiter-portal .auth-portal-divider { height:32px; margin:23px 0 24px; }
+.auth-recruiter-portal .auth-portal-signup { display:flex; min-height:32px; align-items:center; justify-content:center; margin-top:24px; }
+.auth-recruiter-register-card { padding:32px; }
+.auth-recruiter-register-fields { gap:19.5px; }
+@media(max-width:680px) { .auth-recruiter-register-card { padding:26px 22px; } .auth-recruiter-portal .auth-portal-card { padding:26px 22px; } }
