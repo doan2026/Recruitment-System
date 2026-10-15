@@ -64,5 +64,5 @@ Các service ngoài Người 1 được khởi chạy bằng implementation hi�
 - Auth, Profile, Media và Admin health đều trả HTTP 200 qua gateway; frontend `/api/auth/health` cũng trả HTTP 200.
 - Chrome headless đã render form mật khẩu của cả ba vai trò, không có uncaught page error. Đây là kiểm tra hiển thị và routing, chưa phải đăng nhập và thao tác nghiệp vụ đầy đủ.
 - Google chuyển hướng tới `accounts.google.com` với callback đúng `http://localhost:3000/auth/google/callback`; chưa thực hiện đăng nhập Google tương tác.
-- Cloudinary vẫn từ chối tạo preset với HTTP 403 thiếu quyền `create`, dù authenticated ping thành công. Chưa nghiệm thu upload CV/avatar.
+- Tại lần kiểm tra ban đầu 15/10, Cloudinary thiếu quyền tạo preset. **Cập nhật 16/10:** quyền đã có hiệu lực, sáu signed preset đã sẵn sàng; CV và avatar đã upload, confirm, lưu, tải nội dung và xóa thật thành công. Xem [báo cáo Cloudinary](person1-cloudinary-2026-10-16.md).
 - Hai AI worker được build từ Dockerfile gốc; trạng thái build/start cần xem bằng `docker compose ps --all`. Không sửa mã nguồn hoặc Dockerfile các service ngoài Người 1.

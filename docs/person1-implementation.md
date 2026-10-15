@@ -32,7 +32,7 @@ Backend Auth/Profile/Media đã có nhiều nghiệp vụ và kiểm thử trư�
 
 ## Giới hạn tích hợp còn lại
 
-- Cập nhật 15/10/2026 (GMT+7): Gmail SMTP đã kiểm thử thật qua đăng ký Candidate/Recruiter và đặt lại mật khẩu. Google đã cấu hình và kiểm tra chuyển hướng, chưa nghiệm thu thao tác đăng nhập tương tác với Google. Cloudinary xác thực key được nhưng thiếu preset và quyền tạo preset; upload thật bị từ chối. Xem [báo cáo kiểm thử](person1-regression-2026-10-15.md) để phân biệt kiểm thử live và kiểm thử dùng mock.
+- Cập nhật 16/10/2026 (GMT+7): Gmail SMTP đã kiểm thử thật qua đăng ký Candidate/Recruiter và đặt lại mật khẩu. Cloudinary đã có đủ sáu signed preset; CV và avatar đã qua upload/confirm/lưu/đọc/xóa với provider thật trên Docker localhost. Xem [báo cáo Cloudinary](person1-cloudinary-2026-10-16.md). Google đã cấu hình và kiểm tra chuyển hướng, chưa nghiệm thu thao tác đăng nhập tương tác với Google; các giới hạn khác ở [báo cáo hồi quy](person1-regression-2026-10-15.md) vẫn áp dụng.
 - Job/Company chưa có API Admin gỡ đối tượng đã công khai. Báo cáo các loại này được tiếp nhận nhưng không giả lập RESOLVED; cần hợp đồng từ Người 2.
 - UNKNOWN/PROCESSING sau remote timeout cần đối soát vận hành; chưa có tự động phục hồi tác vụ quản trị xuyên service.
 - PostgreSQL Compose hiện tách schema trong một cluster, chưa chuyển thành database/container/credential độc lập như kiến trúc đích.

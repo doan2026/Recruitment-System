@@ -51,7 +51,7 @@ Tất cả thao tác thay đổi dữ liệu chỉ dùng tài khoản/tài nguy�
 
 ## Giới hạn chưa thể nghiệm thu đầy đủ
 
-- **Cloudinary:** key xác thực được, 6 preset yêu cầu vẫn thiếu. API tạo preset trả 403 thiếu quyền `create`; upload thật bị từ chối. Cần hoàn tất quyền/preset theo [hướng dẫn Cloudinary](cloudinary-local-setup.md), rồi chạy lại upload/avatar, confirm, lưu CV, tải private, mặc định, revision và xóa trên cloud. Các chức năng này đã có kiểm thử tự động nhưng chưa qua trọn luồng với provider thật.
+- **Cloudinary tại thời điểm báo cáo ban đầu:** key xác thực được nhưng thiếu sáu preset/quyền `create`. **Cập nhật 16/10:** đã giải quyết quyền và preset; CV/AVATAR đã chạy upload, confirm, lưu, tải nội dung và xóa với provider thật. Xem [báo cáo bổ sung](person1-cloudinary-2026-10-16.md); không suy rộng kết quả này thành nghiệm thu toàn bộ sáu loại file hoặc mọi thao tác revision trên cloud.
 - **Google OAuth:** có cấu hình và kiểm tra redirect/exchange trong kiểm thử hồi quy; chưa chạy tương tác đăng nhập/chấp thuận tại Google bằng tài khoản người dùng. Không coi mock exchange là bằng chứng Google live thành công.
 - Báo cáo Job/Company đã công khai chưa có hợp đồng upstream gỡ nội dung, nên không giả lập RESOLVED. Thống kê người dùng/công ty mới chưa có nguồn sự kiện được thống nhất. UNKNOWN/PROCESSING sau timeout vẫn cần đối soát.
 - Access JWT ở các API stateless giữ TTL tối đa 15 phút sau khóa; Auth và Admin kiểm tra trạng thái tài khoản bền vững theo hợp đồng hiện tại. Token frontend chỉ ở bộ nhớ; tải lại toàn trang yêu cầu đăng nhập lại.
