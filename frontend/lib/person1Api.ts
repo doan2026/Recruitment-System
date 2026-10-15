@@ -170,6 +170,25 @@ export function validatePersonalFile(
         : "Chọn ảnh JPG, PNG, WEBP không quá 2 MB.",
     );
 }
+export function personalFileUploadError(status: number, payload: unknown): Error {
+  const detail = payload && typeof payload === "object" && "error" in payload ? payload.error : null;
+  const message = detail && typeof detail === "object" && "message" in detail && typeof detail.message === "string"
+    ? detail.message.slice(0, 1000).toLowerCase() : "";
+  // Classify only known provider failures; never display its raw response,
+  // which can include account identifiers, URLs or signed parameters.
+  if (status === 401 || status === 403
+    || (/upload preset/.test(message) && /not found|does not exist|invalid|unknown/.test(message))
+    || /invalid signature|invalid api.?key|unknown api.?key/.test(message)) {
+    return new Error("Dịch vụ lưu trữ chưa được cấu hình đầy đủ. Vui lòng liên hệ quản trị viên để hoàn tất cấu hình tải tệp.");
+  }
+  if (status === 413 || /file size too large|maximum file size/.test(message)) {
+    return new Error("Kho lưu trữ từ chối vì tệp vượt quá dung lượng cho phép. Hãy chọn tệp nhỏ hơn.");
+  }
+  if (status === 429 || status >= 500) {
+    return new Error("Dịch vụ lưu trữ đang bận hoặc gián đoạn. Vui lòng thử tải tệp lại sau.");
+  }
+  return new Error("Kho lưu trữ từ chối tệp. Kiểm tra định dạng và dung lượng trước khi thử lại.");
+}
 export async function uploadPersonalFile(
   file: File,
   type: "CV" | "AVATAR",
@@ -218,7 +237,10 @@ export async function uploadPersonalFile(
       redirect: "error",
       signal: abort.signal,
     });
-    if (!uploaded.ok) throw new Error("Tải tệp thất bại. Hãy thử lại.");
+    if (!uploaded.ok) {
+      const payload: unknown = await uploaded.json().catch(() => null);
+      throw personalFileUploadError(uploaded.status, payload);
+    }
   } finally {
     clearTimeout(timeout);
     signal?.removeEventListener("abort", cancel);

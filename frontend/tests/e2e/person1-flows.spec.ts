@@ -261,6 +261,53 @@ test("CV Builder exports Vietnamese PDF then publishes a private snapshot", asyn
     "Nguyễn Văn An",
   );
 });
+test("CV upload explains a missing storage preset, keeps the form and saves only after a successful retry", async ({ page }) => {
+  await base(page);
+  let uploads = 0;
+  let confirms = 0;
+  let saves = 0;
+  let stored: unknown[] = [];
+  await page.route(api + "/profile/cvs", route => {
+    if (route.request().method() === "POST") {
+      saves++;
+      expect(route.request().postDataJSON()).toEqual({ title: "CV thử nghiệm", fileId });
+      stored = [{ id: cvId, title: "CV thử nghiệm", type: "UPLOAD", isDefault: true, aggregateVersion: 1, createdAt: "2026-10-15T12:00:00Z" }];
+      return reply(route, stored[0]);
+    }
+    return reply(route, stored);
+  });
+  await page.route(api + "/files/signature", route => reply(route, {
+    fileId, uploadUrl: "https://api.cloudinary.com/v1_1/test/raw/upload", apiKey: "public-key", signature: "signature",
+    expiresAt: new Date(Date.now() + 600000).toISOString(), maxBytes: 5242880, allowedFormats: ["pdf"], params: { timestamp: 1 },
+  }));
+  await page.route("https://api.cloudinary.com/**", route => {
+    uploads++;
+    return route.fulfill({ status: uploads === 1 ? 400 : 200, headers: { "access-control-allow-origin": "*", "content-type": "application/json" }, body: uploads === 1 ? JSON.stringify({ error: { message: "Upload preset not found: private-config" } }) : "{}" });
+  });
+  await page.route(api + "/files/", route => {
+    confirms++;
+    return reply(route, { id: fileId, status: "ACTIVE" });
+  });
+  await login(page, "CANDIDATE", "/candidate/profile/cvs");
+  await page.getByLabel("Tên CV").fill("CV thử nghiệm");
+  await page.getByLabel("Tệp PDF, tối đa 5 MB").setInputFiles({ name: "cv.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\nTest CV") });
+  await page.getByRole("button", { name: "Tải lên và lưu CV", exact: true }).click();
+  const alert = page.getByRole("alert").filter({ hasText: "chưa được cấu hình đầy đủ" });
+  await expect(alert).toBeVisible();
+  await expect(alert).not.toContainText("private-config");
+  await expect(page.getByLabel("Tên CV")).toHaveValue("CV thử nghiệm");
+  expect(uploads).toBe(1);
+  expect(confirms).toBe(0);
+  expect(saves).toBe(0);
+  await expect(page.getByRole("heading", { name: "Chưa có CV", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Tải lên và lưu CV", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Đã lưu CV" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "CV thử nghiệm", exact: true })).toBeVisible();
+  expect(uploads).toBe(2);
+  expect(confirms).toBe(1);
+  expect(saves).toBe(1);
+});
+
 test("CV delete carries version and explains deferred deletion", async ({
   page,
 }) => {

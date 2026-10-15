@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { passwordError, validatePersonalFile, landing, loginRoute, loginDestination } from "./person1Api";
+import { passwordError, validatePersonalFile, personalFileUploadError, landing, loginRoute, loginDestination } from "./person1Api";
 import { validateBuilder, contentFromProfile } from "./cvPdf";
 import { clearApiSession, requestApi, setApiSession } from "./apiClientCore";
 test("registration password validates Unicode letters and bcrypt byte boundary", () => {
@@ -46,6 +46,23 @@ test("builder rejects foreign shapes and oversized content", () => {
     }).sections,
     [],
   );
+});
+test("upload configuration failures explain the recovery without exposing provider details", () => {
+  for (const [status, payload] of [
+    [400, { error: { message: "Upload preset not found: private-preset; key=private-key" } }],
+    [400, { error: { message: "Invalid Signature private-signature for private-account" } }],
+    [403, { error: { message: "Forbidden for private-key" } }],
+  ] as const) {
+    const error = personalFileUploadError(status, payload);
+    assert.match(error.message, /chưa được cấu hình đầy đủ/);
+    assert.doesNotMatch(error.message, /private-|Upload preset|Signature/);
+  }
+});
+test("upload limits and transient failures suggest different recovery actions", () => {
+  assert.match(personalFileUploadError(413, null).message, /chọn tệp nhỏ hơn/);
+  assert.match(personalFileUploadError(429, {}).message, /thử tải tệp lại sau/);
+  assert.match(personalFileUploadError(503, { error: "malformed" }).message, /thử tải tệp lại sau/);
+  assert.match(personalFileUploadError(400, { error: { message: 123 } }).message, /Kiểm tra định dạng và dung lượng/);
 });
 test("roles have their own entry route", () => {
   assert.equal(landing("ADMIN"), "/admin");
