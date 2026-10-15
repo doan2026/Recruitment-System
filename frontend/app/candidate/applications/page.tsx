@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../components/ui";
+import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import { candidateApplicationActions, type CandidateApplicationAction } from "../../../lib/applicationStateMachine";
 import { getApplicationDetail, getApplications, withdrawCandidateApplication, type CandidateApplication } from "../../../lib/person2Api";

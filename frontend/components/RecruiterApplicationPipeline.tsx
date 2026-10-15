@@ -13,6 +13,8 @@ import { ConflictRecoveryPanel } from "./ConflictRecoveryPanel";
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./ui";
 import { RecruiterCvAccess } from "./RecruiterCvAccess";
 import { RecruiterEvaluation } from "./RecruiterEvaluation";
+import { createConversation } from "../lib/chatApi";
+import { useRouter } from "next/navigation";
 
 const DEFAULT_FILTERS: RecruiterApplicationFilterDraft = {
   status: "ALL",
@@ -42,6 +44,8 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
   const [driftNotice, setDriftNotice] = useState("");
   const [matchStates, setMatchStates] = useState<Record<string, { message: string; polling: boolean }>>({});
   const [conflict, setConflict] = useState<ConflictSnapshot<ApplicationConflictDraft, CandidateApplication> | null>(null);
+  const [chattingId, setChattingId] = useState<string | null>(null);
+  const router = useRouter();
   const expectedTotalRef = useRef<number | null>(null);
   const seenPageIdsRef = useRef<Map<number, Set<string>>>(new Map());
   const applicationsRef = useRef<CandidateApplication[]>([]);
@@ -251,6 +255,20 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
     }
   }
 
+  async function startChat(application: CandidateApplication) {
+    if (!application.candidateId) return;
+    setChattingId(application.id);
+    try {
+      const response = await createConversation(`Chat với ${application.candidateName}`, [application.candidateId], false);
+      router.push(`/messages?chat=${response.data.id}`);
+    } catch (error) {
+      console.error(error);
+      alert("Không thể tạo cuộc trò chuyện: " + toUserMessage(error));
+    } finally {
+      setChattingId(null);
+    }
+  }
+
   return (
     <section className="panel">
       <div className="section-head row-between">
@@ -325,6 +343,11 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
                 ) : (
                   <button key={action.status} className={action.status === "REJECTED" ? "btn btn-danger" : "btn btn-secondary"} type="button" disabled={pendingApplicationId !== null} aria-busy={pending} onClick={() => { void moveStatus(application, action.status); }}>{pending ? "Đang cập nhật…" : action.label}</button>
                 ))}
+                {application.candidateId ? (
+                  <button className="btn" type="button" disabled={chattingId === application.id} onClick={() => startChat(application)}>
+                    {chattingId === application.id ? "Đang tạo..." : "Chat với ứng viên"}
+                  </button>
+                ) : null}
               </div>
               {actions.length === 0 ? <p className="status-line">Không còn recruiter action hợp lệ ở trạng thái này.</p> : null}
             </article>

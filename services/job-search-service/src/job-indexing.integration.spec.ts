@@ -68,6 +68,8 @@ interface StoredDocumentResponse {
   version: number;
 }
 
+const COMPANY_INDEXING_KEY = 'job-search-to-company-indexing-key-0001';
+
 class CompanyHttpStub {
   private readonly server: Server;
   unavailable = false;
@@ -88,16 +90,25 @@ class CompanyHttpStub {
         return;
       }
 
-      const companyId = decodeURIComponent(
-        (request.url ?? '/unknown').split('/').filter(Boolean).at(-1) ??
-          'unknown',
-      );
+      const segments = (request.url ?? '/').split('/').filter(Boolean);
+      if (
+        segments.length !== 2 ||
+        segments[0] !== 'internal' ||
+        request.headers['x-internal-api-key'] !== COMPANY_INDEXING_KEY
+      ) {
+        response.writeHead(401, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ code: 'INVALID_INTERNAL_API_KEY' }));
+        return;
+      }
+      const companyId = decodeURIComponent(segments[1]);
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({
         data: {
           id: companyId,
           name: 'Công ty Ánh Dương',
+          verifiedStatus: 'PENDING',
         },
+        meta: null,
       }));
     });
   }
@@ -934,6 +945,8 @@ integrationDescribe('Job indexing with PostgreSQL, Redis and Elasticsearch', () 
   ): ConfigService {
     const values: Record<string, string | undefined> = {
       COMPANY_SERVICE_URL: companyStub.url,
+      COMPANY_SERVICE_ALLOWED_HOSTS: '127.0.0.1',
+      COMPANY_INTERNAL_API_KEY: COMPANY_INDEXING_KEY,
       REDIS_URL,
       ELASTICSEARCH_NODE,
       ELASTICSEARCH_INDEX: INDEX,

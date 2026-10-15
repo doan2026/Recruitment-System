@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { TransientRecoveryState } from "../../../components/TransientRecoveryState";
-import { EmptyState, LoadingState, Metric, PageHeader, StatusBadge } from "../../../components/ui";
+import { TransientRecoveryState } from "@/components/TransientRecoveryState";
+import { EmptyState, LoadingState, Metric, PageHeader, StatusBadge } from "@/components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import { isRejectedRecruiterJob, recruiterJobActionLabel, recruiterJobActions, recruiterJobEditLabel, type RecruiterJobAction } from "../../../lib/jobLifecycle";
 import { closeRecruiterJob, getCurrentCompanyMembership, getRecruiterJobs, submitJobForApproval, type CompanyMemberRole, type Job, type JobStatus } from "../../../lib/person2Api";

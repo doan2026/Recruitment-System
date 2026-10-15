@@ -38,6 +38,15 @@ const BULK_DETAIL_VISIBLE_STATUSES: JobStatus[] = [
   JobStatus.CLOSED,
   JobStatus.EXPIRED,
 ];
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
+
+function salaryChanged(
+  stored: Prisma.Decimal | null,
+  next: number | null | undefined,
+): boolean {
+  if (stored === null) return next !== null && next !== undefined;
+  return next === null || next === undefined || !stored.equals(next);
+}
 
 @Injectable()
 export class JobService {
@@ -349,15 +358,18 @@ export class JobService {
       deadline:
         dto.deadline ?? current.deadline.toISOString().slice(0, 10),
     };
-    const data: Prisma.JobUpdateManyMutationInput = this.validateAndMap(merged);
-    const criticalChanged = [
-      'title',
-      'description',
-      'requirements',
-      'salaryMin',
-      'salaryMax',
-      'isNegotiable',
-    ].some((field) => dto[field as keyof UpdateJobDto] !== undefined);
+    const mapped = this.validateAndMap(merged);
+    const data: Prisma.JobUpdateManyMutationInput = mapped;
+    // Compare normalized values, not field presence: the recruiter UI always
+    // resubmits the whole form, so a deadline-only edit must stay PUBLISHED.
+    const criticalChanged =
+      mapped.title !== current.title ||
+      mapped.description !== current.description ||
+      mapped.requirements !== current.requirements ||
+      mapped.isNegotiable !== current.isNegotiable ||
+      mapped.currency !== current.currency ||
+      salaryChanged(current.salaryMin, mapped.salaryMin) ||
+      salaryChanged(current.salaryMax, mapped.salaryMax);
     if (
       current.status === JobStatus.PUBLISHED &&
       criticalChanged
@@ -708,6 +720,16 @@ export class JobService {
         throw new ApiException(
           'INVALID_JOB_CONTENT',
           `${field} must contain ${minimum} to ${maximum} non-blank characters`,
+          HttpStatus.BAD_REQUEST,
+          { field },
+        );
+      }
+      // Single-line fields: title is copied into application-events job_title,
+      // whose v1 contract forbids control characters.
+      if ((field === 'title' || field === 'location') && CONTROL_CHARACTERS.test(normalized)) {
+        throw new ApiException(
+          'INVALID_JOB_CONTENT',
+          `${field} must not contain control characters`,
           HttpStatus.BAD_REQUEST,
           { field },
         );

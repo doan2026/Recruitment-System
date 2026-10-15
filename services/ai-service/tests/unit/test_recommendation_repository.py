@@ -16,7 +16,7 @@ from app.recommendation_repository import (
     PsycopgRecommendationRepository,
     _candidate_scope_arrays,
     _distance_item,
-    _require_exact_source_version,
+    _require_current_source_version,
     _source_fingerprint,
     _validate_target_counts,
 )
@@ -104,9 +104,40 @@ def test_candidate_source_version_must_match_authorized_job_exactly(
     source_version: object,
 ) -> None:
     with pytest.raises(RecommendationStoreUnavailable):
-        _require_exact_source_version(source_version, 2)
+        _require_current_source_version(
+            source_version, 2, cursor_version=1, cursor_tombstoned=False
+        )
 
-    _require_exact_source_version(2, 2)
+    _require_current_source_version(2, 2, cursor_version=2, cursor_tombstoned=False)
+
+
+def test_unchanged_newer_job_version_keeps_the_older_embedding_current() -> None:
+    # Deadline-only edit: event v3 was SKIPPED_UNCHANGED, cursor advanced to 3.
+    _require_current_source_version(2, 3, cursor_version=3, cursor_tombstoned=False)
+
+
+@pytest.mark.parametrize(
+    ("source_version", "cursor_version", "cursor_tombstoned"),
+    [
+        (2, 2, False),  # event v3 not ingested yet
+        (2, None, None),  # no cursor row
+        (2, 3, True),  # tombstoned aggregate
+        (2, True, False),  # corrupt cursor value
+        (4, 3, False),  # embedding newer than the authorized Job
+    ],
+)
+def test_older_embedding_is_rejected_unless_the_cursor_reached_the_job_version(
+    source_version: int,
+    cursor_version: object,
+    cursor_tombstoned: object,
+) -> None:
+    with pytest.raises(RecommendationStoreUnavailable):
+        _require_current_source_version(
+            source_version,
+            3,
+            cursor_version=cursor_version,
+            cursor_tombstoned=cursor_tombstoned,
+        )
 
 
 @pytest.mark.parametrize(

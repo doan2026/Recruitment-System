@@ -1,7 +1,16 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  await page.route("http://127.0.0.1:4173/api/notifications**", (route) => route.fulfill({
+    status: 200, contentType: "application/json", body: JSON.stringify({ data: route.request().url().includes("unread-count") ? { unread_count: 0 } : [], meta: null }),
+  }));
+  await page.route("http://127.0.0.1:4173/api/auth/me", (route) => route.fulfill({
+    status: 401, contentType: "application/json", body: JSON.stringify({ code: "AUTH_INVALID" }),
+  }));
+});
+
 const appOrigin = "http://127.0.0.1:4173";
-const gatewayOrigin = "http://127.0.0.1:4174";
+const gatewayOrigin = "http://127.0.0.1:4173/api";
 
 const corsHeaders = {
   "access-control-allow-origin": appOrigin,
@@ -15,9 +24,8 @@ function json(route: Route, body: unknown, status = 200) {
 
 
 async function login(page: Page, role: "CANDIDATE" | "RECRUITER", returnTo: string) {
-  await page.route(`${gatewayOrigin}/auth/login`, (route) => json(route, {
+  await page.route(`${gatewayOrigin}/auth-cookie/login`, (route) => json(route, {
     data: {
-      tokenType: "Bearer", accessToken: "gateway-test-access", refreshToken: "gateway-test-refresh",
       user: { id: "5795c0de-7908-4ab5-9bed-4c4f1cf9c214", email: "test@example.test", role },
     }, meta: null,
   }));
@@ -25,7 +33,7 @@ async function login(page: Page, role: "CANDIDATE" | "RECRUITER", returnTo: stri
   await page.getByLabel("Email", { exact: true }).fill("test@example.test");
   await page.getByLabel("Mật khẩu", { exact: true }).fill("fixture-password");
   await page.getByRole("button", { name: "Đăng nhập", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(returnTo.replace(/[.*+?^${}()|[\]\\]/g, "\\async function expectNoDocumentOverflow") + "$"));
+  await expect(page).toHaveURL(new URL(returnTo, appOrigin).toString());
 }
 
 async function expectNoDocumentOverflow(page: Page) {
@@ -274,7 +282,7 @@ test("Application tracking reloads authoritative version before withdraw", async
   expect(Object.keys(sentWithdraw).sort()).toEqual(["expectedVersion", "note"]);
   expect(sentWithdraw.expectedVersion).toBe(7);
   expect(privateListHeaders["cache-control"]).toBe("no-store");
-  expect(privateListHeaders.authorization).toBe("Bearer gateway-test-access");
+  expect(privateListHeaders.authorization).toBeUndefined();
   await expectNoDocumentOverflow(page);
 });
 
@@ -309,7 +317,7 @@ test("AI chat sends the exact private Gateway contract and renders the answer as
   expect(sentBody.session_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   expect(privateHeaders["cache-control"]).toBe("no-store");
   expect(privateHeaders.pragma).toBe("no-cache");
-  expect(privateHeaders.authorization).toBe("Bearer gateway-test-access");
+  expect(privateHeaders.authorization).toBeUndefined();
   await expectNoDocumentOverflow(page);
 });
 

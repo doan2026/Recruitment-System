@@ -88,10 +88,12 @@
 
 ## Navigation and responsive behavior
 
+- `SessionGate` là owner kiểm tra phiên/role; `/candidate/jobs` và chi tiết một việc làm luôn công khai theo Job Search contract. Các route Candidate khác vẫn cần role CANDIDATE; hết phiên hiển thị CTA đăng nhập trong trang, không tự điều hướng trong render.
+
 - Route document title: `{Page} — CareerHub`; dynamic titles bổ sung theo từng route.
 - 404/403/error: dùng app-owned route state, giữ header điều hướng.
 - Top navigation cuộn ngang trên mobile; các đích riêng tư chỉ hiện theo role tài khoản thật, không giả lập quyền recruiter. Backend vẫn là nơi thực thi quyền.
-- Tables cuộn ngang; card/list reflow một cột ở mobile.
+- Tables cuộn ngang; card/list reflow một cột ở mobile. Candidate/Recruiter shell chuyển sidebar thành navigation cuộn ngang dưới header ở ≤980px; content có `min-width: 0`, form giữ document scrolling. Sidebar Candidate chỉ hiện với role CANDIDATE hoặc demo.
 - Focus dùng `scroll-padding-top: 88px`, không bị header sticky che.
 
 ## Overlays and feedback
@@ -114,7 +116,7 @@
 - Upload trực tiếp provider dùng multipart với `credentials: omit`; chỉ capability public được đưa vào form, private Company signature/confirm/attach vẫn no-store qua API client.
 - `apiClientCore.ts` là owner của envelope, error-code mapping, timeout/abort, retry policy, UUID v4 và allowlist field.
 - `NEXT_PUBLIC_API_MODE=demo|gateway` là lựa chọn tường minh; lỗi gateway không tự rơi về dữ liệu demo.
-- Access token chỉ giữ trong memory; Auth gọi `setApiSession({ token?, accountId })` để refresh cùng account không xóa state, còn đổi account phát revision. `clearApiSession` phát revision khi vô hiệu phiên (kể cả cookie-only chưa vô hiệu), sau đó idempotent để không gây vòng lặp401.
+- Access/refresh token được lưu bằng HttpOnly cookie qua `/api/auth-cookie/*`; refresh cookie scope `/api/auth-cookie` để logout thu hồi phiên máy chủ, đồng thời xóa cookie local kể cả khi upstream lỗi. Browser API luôn dùng `/api` cùng origin; `API_INTERNAL_BASE_URL` chọn Gateway ở Next server. Auth gọi `setApiSession({ token: null, accountId })` để refresh cùng account không xóa state, còn đổi account phát revision. `clearApiSession` phát revision khi vô hiệu phiên (kể cả cookie-only chưa vô hiệu), sau đó idempotent để không gây vòng lặp401.
 
 ## Validation
 

@@ -169,6 +169,7 @@ describe('CompanyService', () => {
     companyMember: { findUnique: jest.Mock };
     company: {
       findFirst: jest.Mock;
+      findUnique: jest.Mock;
       findMany: jest.Mock;
       count: jest.Mock;
       update: jest.Mock;
@@ -273,6 +274,7 @@ describe('CompanyService', () => {
       companyMember: { findUnique: jest.fn() },
       company: {
         findFirst: jest.fn(),
+        findUnique: jest.fn(),
         findMany: jest.fn(),
         count: jest.fn(),
         update: jest.fn(),
@@ -430,6 +432,22 @@ describe('CompanyService', () => {
     const data = transaction.company.create.mock.calls[0][0].data;
     expect(data.name).toBe('Công Ty Ánh');
     expect(data.normalizedName).toBe('công ty ánh');
+  });
+
+  it.each([
+    ['a C1 control character', 'Acme\u0085Vietnam'],
+    ['a bell character', 'Acme\u0007'],
+    ['a single astral code point', '\u{20000}'],
+  ])('rejects a name with %s that Job Service would refuse', async (_, name) => {
+    transaction.companyMember.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.create(RECRUITER_ID, createDto({ name })),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      details: { field: 'name' },
+    });
+    expect(transaction.company.create).not.toHaveBeenCalled();
   });
 
   it('checks OWNER membership before every upload or attachment media call', async () => {
@@ -1392,6 +1410,35 @@ describe('CompanyService', () => {
         },
       }),
     );
+  });
+
+  it('returns the indexing summary for every verification status', async () => {
+    prisma.company.findUnique.mockResolvedValue({
+      id: COMPANY_ID,
+      name: 'Acme Vietnam',
+      verifiedStatus: CompanyVerificationStatus.PENDING,
+    });
+
+    await expect(service.getIndexingSummary(COMPANY_ID)).resolves.toEqual({
+      id: COMPANY_ID,
+      name: 'Acme Vietnam',
+      verifiedStatus: CompanyVerificationStatus.PENDING,
+    });
+    expect(prisma.company.findUnique).toHaveBeenCalledWith({
+      where: { id: COMPANY_ID },
+      select: { id: true, name: true, verifiedStatus: true },
+    });
+  });
+
+  it('reports a missing company to the indexer as COMPANY_NOT_FOUND', async () => {
+    prisma.company.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.getIndexingSummary(COMPANY_ID),
+    ).rejects.toMatchObject({
+      code: 'COMPANY_NOT_FOUND',
+      status: HttpStatus.NOT_FOUND,
+    });
   });
 
   it('searches only verified companies with a minimal keyset page', async () => {

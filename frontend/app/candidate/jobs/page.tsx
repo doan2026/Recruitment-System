@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useCurrentAccount } from "../../../components/SessionGate";
-import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../components/ui";
+import { useCurrentAccount } from "@/components/SessionGate";
+import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import { cursorRestartView } from "../../../lib/cursorRecovery";
 import {

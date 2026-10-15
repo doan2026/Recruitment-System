@@ -1,8 +1,9 @@
 # BÁO CÁO TIẾN ĐỘ DỰ ÁN HỆ THỐNG TUYỂN DỤNG
 
-> Ngày cập nhật: 24/09/2026
-> Nhánh đối chiếu chính: `develop`
-> Pull Request lần cập nhật: PR #138 từ `merge/master-into-develop` vào `develop`
+> Ngày cập nhật: 13/10/2026
+> Nhánh kiểm tra: `develop`, commit `db418e3` (09/10/2026)
+> Căn cứ phân công: [Phan-cong-cong-viec-He-thong-tuyen-dung.md](Phan-cong-cong-viec-He-thong-tuyen-dung.md), mục I.2, III, IV, V và IX.
+> **Kết quả sửa lỗi/kiểm thử mới nhất: mục 2.60; baseline toàn dự án: mục 2.59. Dự án chưa đạt gate nghiệm thu toàn hệ thống.** Các số PASS trong mục 2.1–2.58 là bằng chứng lịch sử; không thay thế kết quả chạy lại trên commit này, đặc biệt với Chat/Notification/Video đã chuyển sang Go.
 
 ## Phạm vi và quy ước đánh giá
 
@@ -13,25 +14,38 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 | ✅ Hoàn thành | Đã có nghiệp vụ, test/build tương ứng và đã merge vào `develop` |
 | 🟡 Một phần | Đã hoàn thành một số luồng hoặc đã code nhưng chưa merge/chưa kiểm thử tích hợp |
 | ⏳ Pending | Mới có scaffold hoặc chưa có nghiệp vụ |
+| ❌ FAIL | Có assertion, biên dịch test hoặc gate hiện tại thất bại |
+| ⚪ Chưa kiểm chứng | Chưa chạy, bị chặn bởi môi trường hoặc bị bỏ qua; không tính là PASS |
 
 ### Tóm tắt trạng thái
 
 | Nhóm task | Người phụ trách | Trạng thái hiện tại |
 | --- | --- | --- |
-| Auth Service | Người 1 | ✅ Core Auth đã hoàn thành gồm đăng ký/OTP, password login, Google OIDC, JWT/JWKS, refresh rotation, logout, reset password, `/auth/me` và Admin account control; account-link Google chỉ còn là hạng mục tùy chọn nếu sản phẩm yêu cầu |
-| User/Profile Service | Người 1 | 🟡 Persistence, Candidate CRUD/completion, hai consent aggregate tách biệt cho Job preferences và Recruiter discovery, Media, Application CV contract v1, skill snapshot contract v2, lifecycle, backend Builder, deletion fence, transactional `cv-events` và controlled historical CV baseline đã hoàn thành; baseline chưa execute trên dữ liệu thật, frontend Builder/PDF renderer cùng consent/preferences UI còn pending |
-| File/Media Service | Người 1 | 🟡 Core signed upload/confirm, Profile consumer, AI private-download consumer contract, durable cleanup/reconciliation và guarded six-policy Cloudinary smoke runner đã hoàn thành; live staging execution, Offer letter, các consumer khác và production hardening còn pending |
-| Admin & Statistics Service | Người 1 | ⏳ Scaffold |
-| Company Service | Người 2 | 🟡 **Đã làm:** nghiệp vụ chính, ownership media, migration backup/restore, domain audit, public search/load, Auth–Company identity gate, Company–Media contract integration, metrics/SLO. **Chưa làm:** real Admin approval E2E — chặn vì Admin Service chưa implement; live Cloudinary thuộc P09 |
-| Job & Search Service | Người 2 | ✅ **P05 đóng 20/20.** Đã làm: CRUD/search, transactional `job-events`, historical baseline, Redis/BullMQ/Elasticsearch, hai chiều recommendation, load/cursor/Vietnamese gate, strict JWT/JWKS, contract gate với Application, metrics/SLO. **Chưa làm:** deployed E2E/load trên hạ tầng thật |
-| Application Service | Người 2 | ✅ **P03 11/11, P04 13/13.** Đã làm: Submission→AI Match, canonical CV contract, usage/deletion gate, skill snapshot, `application-events` v1, strict JWT/JWKS, concurrency gate 10.000 call, Offer terminal-state V9 và auto-expiry V10, contract gate với AI và Job thật, metrics/SLO. **Chưa làm:** deployed E2E và HTTP/multi-replica load trên hạ tầng thật |
-| AI Service | Người 2 | 🟡 **Đã làm:** provider `/match`, consumer `job-events`/`cv-events`, hai chiều recommendation, HNSW/exact-allowlist gate, full-target HTTP gate, chatbot Candidate và recommendation tool, distributed limiter, filter-aware ANN đã điều tra và loại trừ, relevance tiếng Việt đo bằng model thật, bất biến và load cross-replica, metrics/SLO. **Chưa làm:** live Claude 10-FAQ (thiếu API key), corpus production quy mô thật, deployed load/monitoring |
-| Interview & Video Call Service | Người 3 | 🟡 Scheduling foundation, transactional `SCHEDULED interview-events`, role-aware detail/history/my, Recruiter Company calendar và advisory availability v1 đã hoàn thành; arbitrary interviewer/panel, lifecycle/Jitsi/feedback và các event action còn lại pending |
-| Chat Service | Người 3 | ⏳ Prototype realtime |
-| Notification Service | Người 3 | 🟡 `application-events` v1 và `SCHEDULED interview-events` v1 → private in-app inbox đã hoàn thành với PostgreSQL/Kafka thật; BullMQ, FCM, SMTP, device/settings API, Chat/remaining Interview lifecycle và reminder còn pending |
-| Hạ tầng dùng chung | Người 3 | 🟡 Docker Compose, Nginx, database và Kafka base đã có; Notification có one-shot migration, non-root runtime, readiness DB/Kafka, static JWT PEM và route no-store/query-free; distributed limiter, Kafka TLS/SASL, Jitsi và production hardening còn pending |
-| Frontend | Phối hợp cả nhóm | ⏳ Trang khởi tạo |
-| Tích hợp, kiểm thử và vận hành | Phối hợp cả nhóm | 🟡 Nhiều service-level PostgreSQL/Kafka/security suite đã có; deployed cross-service E2E, load và release gate toàn hệ thống còn pending |
+| Auth Service | Người 1 | ✅ Core backend; 215 unit/WebMvc/security + 40 PostgreSQL/Redis integration PASS, JAR build PASS. Luồng frontend auth-cookie đã sửa và có browser regression; deployed Auth/Redis còn pending; account-link Google vẫn tùy chọn |
+| User/Profile Service | Người 1 | 🟡 Backend hồ sơ/CV/Builder/consent/outbox đã có; 62 unit + 88 PostgreSQL integration PASS, 1 ca Kafka chưa chạy. UI sửa hồ sơ và tạo CV online còn scaffold; historical baseline trên dữ liệu thật và PDF renderer chưa nghiệm thu |
+| File/Media Service | Người 1 | 🟡 26 unit + 26 PostgreSQL integration PASS; migration lần đầu/lặp PASS. Live Cloudinary, Offer letter, consumer còn lại và hardening vẫn pending |
+| Admin & Statistics Service | Người 1 | ⏳ Build JAR PASS nhưng không có test/nghiệp vụ quản trị; các màn Admin đang dùng dữ liệu mock |
+| Company Service | Người 2 | 🟡 352 unit + 19 PostgreSQL/Media-contract integration PASS; build PASS. API-mock E2E Company PASS sau sửa; real Admin approval, live Media provider và deployed E2E còn mở |
+| Job & Search Service | Người 2 | 🟡 611 unit + 7 integration PostgreSQL PASS; build PASS. Kafka/Redis/Elasticsearch gate và deployed E2E xem mục 2.59; đã sửa SessionGate cho job công khai (mục 2.60) |
+| Application Service | Người 2 | 🟡 326 unit/WebMvc/security + 99 integration/AI-contract PASS, gồm V11/outbox ordering; JAR build PASS. Job-contract timeout chưa chốt. Offer-file Media và deployed E2E vẫn pending |
+| AI Service | Người 2 | 🟡 672 unit PASS trên Python 3.11; 77 integration PostgreSQL/pgvector/Redis PASS, 2 Kafka chưa chạy; lint/format PASS. Live Claude, corpus production và deployed load/SLO chưa nghiệm thu |
+| Interview Service | Người 3 | 🟡 143 unit + 16 PostgreSQL/Kafka integration PASS, JAR build PASS; scheduling/query/outbox đã có. Confirm/reschedule/cancel/no-show/feedback/panel/reminder còn pending |
+| Chat Service | Người 3 | 🟡 Đã chuyển sang Go + WebSocket + PostgreSQL/Kafka, có conversation/message/read receipt và build PASS; integration và 46 ca JWT PASS sau sửa, đã bỏ JOIN Profile/Auth DB; enrichment/attachment và multi-instance chưa nghiệm thu |
+| Notification Service | Người 3 | 🟡 Đã chuyển sang Go + PostgreSQL/Kafka/SSE, có inbox/read/read-all/push-token API, build và scenario PostgreSQL PASS; 46 ca JWT PASS sau sửa, semantics replay/collision/atomicity của bản NestJS cũ chưa được tái chứng minh |
+| Video Service | Người 3 | 🟡 Có module Go/LiveKit riêng và build PASS; integration và 46 ca JWT PASS sau sửa, giữ ConversationID và chặn người không được mời; nối với Interview còn mở |
+| Hạ tầng dùng chung | Người 3 | 🟡 Đã bổ sung env local, `docker compose config --quiet` PASS; còn phải chốt chuyển Jitsi → LiveKit và triển khai media server thực tế |
+| Frontend theo từng luồng | Cả 3, phân chia theo mục I.2 | 🟡 132/132 unit PASS; typecheck/production build PASS; 64/64 Playwright desktop/mobile PASS. Có giao diện và API adapter thực tế, không còn là trang khởi tạo |
+| Tích hợp, kiểm thử và vận hành | Cả 3; Người 3 điều phối | 🟡 Đã chạy lại các tầng unit/build, PostgreSQL contract, browser và JWT probe; ba hành trình Candidate/Recruiter/Admin trên hệ thống thật chưa được chứng nhận |
+
+### Đối chiếu trách nhiệm của cả 3 người
+
+Giữ người phụ trách theo **luồng nghiệp vụ** trong tài liệu phân công, kể cả khi công nghệ thực tế đã đổi. Company vẫn thuộc Người 2; module Go/LiveKit không được cộng vào tiến độ Người 2.
+
+| Người | Phạm vi theo tài liệu | Phần đã có bằng chứng | Công việc cần ưu tiên |
+| --- | --- | --- | --- |
+| Người 1 | A1 Auth, A2 Profile, A3 Media, A4 Admin; FE danh tính/hồ sơ/CV/Admin; Redis OTP/session, SMTP, Cloudinary | Auth/Profile/Media có test và nghiệp vụ; migration Profile/Media đã được kiểm tra; Admin chỉ build scaffold | Đưa bản sửa auth-cookie/logout qua deployed gate; nối UI Profile/CV Builder/PDF; implement toàn bộ Admin; Media Offer letter và live Cloudinary; phối hợp chuẩn JWT với Người 3 |
+| Người 2 | B1 Company, B2 Job, B3 Application, B4 AI; FE công ty/tìm việc/ứng tuyển/HR/recommendation; Elasticsearch, pgvector, Anthropic | Bốn backend có unit/build; Company/Job/AI có integration chạy lại; FE nghiệp vụ có regression sau sửa (mục 2.60) | Đã sửa public job/auth adapter cùng Người 1; tiếp tục hoàn tất Kafka/ES và deployed E2E; phối hợp Offer-file/Admin approval; live Claude và production corpus/load |
+| Người 3 | C1 Interview/Video, C2 Chat, C3 Notification, C4 hạ tầng; FE lịch/video/chat/inbox/chatbot widget; Kafka/Nginx/Jitsi/FCM | Interview scheduling/query/outbox; Go Chat/Notification/Video build được; FE chat/inbox có API wiring | JWT/Chat DB/Video contract đã sửa và có test local; tiếp tục ngữ cảnh quyền join; phục hồi các bảo đảm Notification sau chuyển Go; triển khai LiveKit/full-stack; hoàn thiện Interview lifecycle, attachment, push/email/reminder và E2E liên service |
 
 ### Cập nhật đồng bộ `master → develop` ngày 24/09/2026
 
@@ -45,7 +59,7 @@ Báo cáo được tổng hợp từ tài liệu phân công, tài liệu nghi�
 
 ---
 
-## Trạng thái chốt của Người 2 (cập nhật 30/08/2026)
+## Mốc lịch sử của Người 2 (30/08/2026; kết quả hiện tại xem mục 2.59)
 
 Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của P03, P04 và P05 đã đóng**; còn sáu checkbox mở ở P06 và P11, trong đó một mục thuộc Người 3.
 
@@ -158,35 +172,34 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 ## T09 — Interview & Video Call Service
 
 - **Mục tiêu:** quản lý lịch phỏng vấn và phòng video Jitsi.
-- **Công nghệ:** Spring Boot 3, Java 21, Spring Data JPA, WebClient, Spring Kafka, PostgreSQL, Jitsi.
+- **Công nghệ:** Interview dùng Spring Boot 3/Java 21/PostgreSQL/Kafka; source đã thêm Video Go 1.25/LiveKit riêng. Jitsi là lựa chọn trong tài liệu phân công, cần chốt lại thay đổi kiến trúc.
 - **Luồng hoạt động:** HR đặt lịch; Candidate xác nhận/đề nghị đổi lịch; vào phòng video; đánh giá sau phỏng vấn; hủy/no-show; xem lịch.
 - **Chức năng chính:** kiểm tra quyền theo application; chống trùng lịch; vòng phỏng vấn; feedback; room URL/token; phát `interview-events`.
 - **Phụ thuộc:** Auth, Application, Notification và Jitsi.
-- **Trạng thái:** scheduling foundation v1 hoàn thành qua PR #51; transactional `SCHEDULED interview-events` v1 và Notification Candidate projection hoàn thành qua PR #52; role-aware detail/history/my, Recruiter Company calendar và advisory availability v1 hoàn thành qua PR #53. Chọn interviewer khác/panel, confirm/reschedule/cancel/no-show, feedback, Jitsi và lifecycle events/reminder còn pending.
+- **Trạng thái:** Video Go integration và 46 ca JWT PASS sau sửa; quyền join host/non-invite có regression; UI InterviewVideoRoom và nối lịch chưa nghiệm thu (mục 2.60). Interview scheduling foundation v1 hoàn thành qua PR #51; transactional `SCHEDULED interview-events` v1 và Notification Candidate projection hoàn thành qua PR #52; role-aware detail/history/my, Recruiter Company calendar và advisory availability v1 hoàn thành qua PR #53. Chọn interviewer khác/panel, confirm/reschedule/cancel/no-show, feedback, Jitsi và lifecycle events/reminder còn pending.
 
 ## T10 — Chat Service
 
-- **Mục tiêu:** nhắn tin realtime 1-1 giữa Candidate và Recruiter theo ngữ cảnh job/application.
-- **Công nghệ:** Node.js, Express, Socket.IO, Mongoose, MongoDB, Redis Adapter, KafkaJS.
-- **Luồng hoạt động:** xác thực socket; tạo conversation; gửi/nhận tin; file đính kèm; typing/seen; phân trang lịch sử.
-- **Chức năng chính:** conversation và message persistence, quyền participant, unread count, reconnect, multi-instance Socket.IO, phát `chat-events`.
-- **Phụ thuộc:** Auth public key, File/Media, Redis, MongoDB, Kafka và Notification.
-- **Trạng thái:** có prototype broadcast cho typing/message/seen và health; JWT verification còn TODO, chưa lưu MongoDB và chưa tích hợp Redis/Kafka.
+- **Người phụ trách:** Người 3, mục C2 của tài liệu phân công.
+- **Công nghệ hiện tại:** Go 1.25, chi, WebSocket, PostgreSQL, kafka-go; đã thay prototype Node/Socket.IO/MongoDB.
+- **Đã có:** migration conversation/member/message, JWT signature verification, HTTP lịch sử/gửi tin/read receipt, WebSocket hub và publish `chat-events` dạng generic `message.created`.
+- **Kiểm thử:** build/type compilation và integration PASS; 46 ca JWT PEM/JWKS PASS sau sửa ở mục 2.60.
+- **Còn thiếu:** enrichment Profile/Auth qua API/projection; xác minh ngữ cảnh application/job, Media attachment, multi-instance/reconnect/delivery/load và contract notification đầy đủ.
 
 ## T11 — Notification Service
 
-- **Mục tiêu:** trung tâm duy nhất gửi thông báo in-app, push và email.
-- **Công nghệ:** NestJS, TypeScript, Prisma, PostgreSQL, KafkaJS, BullMQ, Redis, Firebase Admin, Nodemailer.
-- **Luồng hoạt động:** consume event; chống trùng; đưa job vào queue; worker gửi theo kênh; retry; quản lý notification/device; nhắc lịch.
-- **Chức năng chính:** consume `application-events`, `interview-events`, `chat-events`; in-app inbox; read/read-all; FCM token; SMTP; log gửi thất bại.
-- **Phụ thuộc:** Kafka, Redis, FCM và SMTP.
-- **Trạng thái:** `application-events` v1 và `SCHEDULED interview-events` v1 → in-app inbox đã hoàn thành: Prisma migration, hai dedicated Kafka group/cutoff, durable idempotency/poison ledger, strict JWT, HMAC keyset pagination, unread/read/read-all, Compose/readiness và test PostgreSQL/Kafka thật. Push/email, device/settings API, BullMQ, remaining Interview lifecycle, Chat và reminder chưa làm.
+- **Người phụ trách:** Người 3, mục C3 của tài liệu phân công.
+- **Công nghệ hiện tại:** Go 1.25, PostgreSQL migrations, kafka-go, HTTP/SSE; bản NestJS/Prisma đã bị thay thế.
+- **Đã có mã:** consume Application/Interview/Chat/Video, inbox, unread/read/read-all, HMAC cursor, SSE/online-status, đăng ký push token và bảng processed/poison/log/settings.
+- **Kiểm thử:** build/type compilation, integration scenario và 46 ca JWT PASS sau sửa. Bộ 51 unit + 7 integration của bản NestJS là lịch sử, không tồn tại trong bộ test Go hiện tại.
+- **Chưa được tái chứng minh:** atomic event projection/ledger, payload collision, strict schema, stable replay cutoff, cursor/read-all semantics, Kafka readiness và migration dữ liệu cũ. Go đang dùng một group cố định, auto-migrate khi start; readiness chỉ ping DB.
+- **Còn thiếu:** worker gửi FCM/SMTP thật, retry/delivery log, quản lý device/settings đầy đủ, reminder, đa replica và deployed E2E.
 
 ## T12 — Hạ tầng dùng chung
 
 - **Mục tiêu:** chạy toàn bộ hệ thống bằng Docker Compose và định tuyến qua một API Gateway.
 - **Công nghệ:** Docker Compose, Nginx, PostgreSQL/pgvector, MongoDB, Redis, Kafka KRaft, Elasticsearch và Jitsi.
-- **Luồng hoạt động:** khởi động database/broker; tạo schema và Kafka topic; build 11 service; gateway route; health check; lưu volume; dựng Jitsi.
+- **Luồng hoạt động:** khởi động database/broker; tạo schema và Kafka topic; build 12 service backend hiện tại (gồm Video riêng); gateway route; health check; lưu volume; chốt hạ tầng Jitsi/LiveKit.
 - **Chức năng chính:** mạng nội bộ, env/secrets, service dependency, topic initialization, persistent volumes, gateway HTTP/WebSocket.
 - **Trạng thái:** Compose, Nginx base, schema PostgreSQL, Kafka topics, Redis/MongoDB/Elasticsearch và volumes đã có. Job→AI scoped key, outbound Profile/AI host allowlist, public AI internal-route blocking/header stripping và query-free Candidate-data access log cho Profile/Job/Application đã hoàn thành; Jitsi và production hardening còn thiếu.
 
@@ -196,14 +209,14 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - **Công nghệ:** Next.js 14, React 18, TypeScript.
 - **Chức năng chính:** auth UI; hồ sơ/CV; công ty; job search/detail; apply/bookmark; recruiter pipeline/offer/dashboard; interview/video/chat/notification; admin console.
 - **Phụ thuộc:** API Gateway và hợp đồng API của toàn bộ backend.
-- **Trạng thái:** 🟡 React/Next.js theo Stitch cho phạm vi Người 2 đã có. API adapter `demo|gateway` đã nối các read flow, cập nhật Company và tạo Company qua Gateway; các nền tảng safe error, conflict/transient recovery và private session boundary có unit test. `404 COMPANY_NOT_FOUND` đã thành onboarding thay vì lỗi. Gateway-contract E2E đã chạy trên Chrome desktop/mobile; Auth UI thật, các phụ thuộc Offer và deployed E2E vẫn pending; P16.N2 hiện 47/52.
+- **Trạng thái 13/10/2026:** đã có layout, auth-cookie, các màn Người 2, chat/inbox/video UI; Profile edit/CV Builder/Admin và Candidate interview vẫn có scaffold/mock. Unit hiện 132/132 PASS, typecheck/build PASS; 64/64 Playwright desktop/mobile PASS. P16 và mục 2.60 phân rõ người phụ trách, phần nối API và phần chưa nghiệm thu.
 
 ## T14 — Tích hợp, kiểm thử và vận hành
 
 - **Mục tiêu:** chứng minh các luồng xuyên service chạy thật, ổn định và có thể triển khai.
 - **Công nghệ/công cụ:** unit/integration/E2E test, Docker Compose, CI/CD, Swagger/OpenAPI, logging/metrics/tracing.
 - **Đầu ra:** test contract REST/Kafka; migration sạch; test concurrency/idempotency; security test; smoke test; tài liệu môi trường; backup/restore; monitoring.
-- **Trạng thái:** đã có unit/integration test tập trung ở Company, Job/Search, Application, AI, Profile, Media, Interview và Notification. Company hiện đạt **306/306 unit test + build**, PostgreSQL 16 migration/audit/search-index/invitation-normalization/backup/separate-restore gate PASS, public-search HTTP load gate PASS trên 100.000 Company và real Auth–Company invitation gate PASS; Profile đạt **62/62 unit + 89/89 PostgreSQL/Kafka integration test**, Media **26 + 26**, Job/Search **533 unit + 20 PostgreSQL/Kafka/Redis/Elasticsearch integration**, AI **529 unit/non-integration + 62 PostgreSQL/Kafka/Redis integration (591 tổng)**, Application **286 unit/WebMvc/security + 71 PostgreSQL/Kafka integration**, Interview **143/143 unit/WebMvc/security/client/event/query + 16/16 PostgreSQL/Kafka integration**, Notification **51 unit + 7 PostgreSQL/Kafka integration** với migration deploy lặp sạch. Job/Search controlled load gate trên 100.000 Job đạt 10.000 request ở concurrency 32 với 0 lỗi, p95 402,763 ms, p99 503,771 ms và 164,632 req/s. AI controlled repository gate trên 100.000 CV đạt 10.000 call ở concurrency 32 với 0 lỗi/mismatch, p95 130,089 ms, p99 149,503 ms và 323,129 req/s. AI Candidate-facing full-target HTTP gate trên 100.000 Job đạt 100 warm-up + 1.000 measured call ở concurrency 8 với 0 error/mismatch/timeout/security leak, p95 1.021,163 ms, p99 1.133,728 ms, max 1.299,623 ms và 10,762 req/s dưới DB statement timeout 2 giây. Application controlled transaction gate đạt đúng 10.000 service call ở concurrency 32 với 5.000 giao dịch thắng, 5.000 conflict `409` dự kiến, 0 lỗi bất ngờ/deadlock/timeout, p95 114,567 ms, p99 162,895 ms và 585,53 call/s. Chatbot có deterministic plumbing cho 10 FAQ nhưng live Claude quality/staging smoke chưa chạy vì cần credential ngoài repository. Đây là bằng chứng service-level/local controlled load, không đồng nghĩa deployed E2E toàn hệ thống hoặc production SLO và P17 vẫn pending.
+- **Trạng thái hiện tại:** xem ma trận toàn dự án tại mục 2.59 và bản sửa đã kiểm chứng tại mục 2.60. Các benchmark 100.000 bản ghi/10.000 request cùng kết quả các PR trước được giữ ở mục 2.1–2.58; lượt này không chạy lại production load, live Cloudinary/Claude hay ba hành trình deployed E2E. Không chuyển số PASS lịch sử thành kết quả của commit hiện tại.
 
 ---
 
@@ -1068,6 +1081,179 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 **Gate sau khi sửa:** AI **745/745** test cùng `ruff check`/`ruff format --check` sạch; Company **325 unit + 19 integration**; Job & Search **553 unit + 20 integration**; Application **309 unit + 107 integration**. `docker compose config` giải được mọi biến bắt buộc từ `.env.example` và nginx config parse sạch. Ba mục còn tồn của Người 2 (live Claude, corpus production + hạ tầng, Admin approval E2E) **không đổi** — chúng bị chặn bởi thiếu key, thiếu dữ liệu/hạ tầng thật và một service chưa tồn tại, không phải bởi lỗi mã.
 
 
+
+## 2.58 Kiểm thử lại phần Người 2 và sửa lỗi tìm được — 25/09/2026
+
+> Nhánh `fix/person2/audit-findings` tạo từ `develop` (`bada090`). Chỉ sửa bốn service của Người 2 (Company, Job & Search, Application, AI), FE tiêu thụ chúng và cấu hình Compose của bốn service này; không sửa service của Người 1/3 hay nginx.
+
+**Mức cao — FE hỏng khi chạy qua proxy `/api` của Next (cấu hình Docker):**
+- Next tự redirect 308 `/api/jobs/` → `/api/jobs` rồi proxy thành `/jobs`.
+- Nginx chỉ khai báo `location /jobs/`, nên redirect trình duyệt sang host nội bộ `api-gateway`. Hậu quả: tạo tin, nộp hồ sơ, danh sách hồ sơ của HR và tạo công ty đều hỏng.
+- Cách sửa: `next.config.mjs` bật `skipTrailingSlashRedirect` và thêm rewrite giữ dấu `/`.
+- Đã kiểm bằng cả `next dev` và bản build production (`next start`) với gateway giả ghi log: `/api/jobs/`, `/api/applications/?…`, `/api/companies/` tới đúng `/jobs/`, `/applications/?…`, `/companies/`.
+
+**Mức trung bình:**
+- **Sửa tin đang PUBLISHED:** Job so giá trị đã chuẩn hóa với bản ghi hiện tại, thay vì xét field có được gửi hay không. Chỉ khi đổi tiêu đề, mô tả, yêu cầu, lương, chế độ thỏa thuận hoặc đơn vị tiền (mới thêm `currency`) thì tin mới về `PENDING_APPROVAL`; deadline, số lượng, phúc lợi… được cập nhật ngay. FE chỉ hiện hộp thoại duyệt lại khi các trường đó thay đổi, và giữ nguyên văn `requirements`/`benefits` để form không đụng tới không bị coi là sửa.
+- **Gợi ý ứng viên trả 503 sau khi sửa tin:** AI chấp nhận embedding cũ khi aggregate cursor đã ở đúng `job_version` (event cùng trạng thái được ghi `SKIPPED_UNCHANGED`), thay vì đòi `source_version` khớp tuyệt đối. Cách này không ghi lại `job_embeddings`, nên không làm stale cursor gợi ý việc của Candidate.
+- **Index Job khi công ty về PENDING sau khi sửa trường pháp lý:**
+  - Trước đây indexer lấy tên công ty qua API công khai. API này trả 404 cho công ty chưa VERIFIED, nên tin vào dead-letter và baseline Elasticsearch không bao giờ hoàn tất.
+  - Company thêm `GET /internal/:id`, trả `id`/`name`/`verifiedStatus` với mọi trạng thái. Route được bảo vệ bằng key riêng `INTERNAL_API_KEY_JOB_SEARCH`, và gateway đã xóa `X-Internal-Api-Key` trên `/companies/`.
+  - Job gọi endpoint này bằng `COMPANY_INTERNAL_API_KEY`, có allowlist host, `redirect: error` và đọc JSON có giới hạn.
+
+**Mức thấp:**
+- Job chặn ký tự điều khiển trong `title`/`location`.
+- Application chuẩn hóa `job_title` cũ trước khi nộp đơn, hết lỗi 500 do contract `application-events` v1.
+- Company từ chối tên có ký tự điều khiển hoặc chỉ có 1 code point (những tên Job không chấp nhận).
+- Bulk detail chuẩn hóa UUID về chữ thường.
+- `JOB_EXPIRY_INTERVAL_MS` sai định dạng giờ fail-closed thay vì thành timer 1 ms.
+- `/metrics` của Company có nhãn `/` và `/internal/{id}`.
+- Form gửi Offer tải lại trạng thái khi gặp `APPLICATION_NOT_ELIGIBLE_FOR_OFFER` hoặc `OFFER_ALREADY_EXISTS`.
+
+**Triển khai:** thêm biến bắt buộc `COMPANY_INTERNAL_API_KEY_JOB_SEARCH` vào `.env` gốc (xem `.env.example`). Compose truyền biến này cho cả Company và Job; nếu thiếu, `docker compose` sẽ báo lỗi ngay.
+
+**Gate:**
+- Company **352/352 unit** (có test HTTP thật cho route nội bộ với guard/filter toàn cục), build và typecheck spec PASS.
+- Job & Search **611 unit PASS**, 20 integration bỏ qua vì cần Docker; build và typecheck spec PASS.
+- Application **326/326** và đóng gói JAR PASS.
+- AI **672 PASS**, 79 integration bỏ qua; ruff sạch.
+- FE **132/132 unit**, **54/54 Playwright** desktop + mobile (API giả lập), typecheck và production build PASS.
+- Integration Docker (Job 20, AI 79, Application/Company Testcontainers) và deployed E2E **chưa chạy** vì máy kiểm tra không có Docker.
+
+---
+
+## 2.59 Kiểm thử lại toàn dự án và đối chiếu task cả 3 người — 13/10/2026
+
+### Phạm vi, môi trường và cách đọc kết quả
+
+- Kiểm tra working tree sạch ban đầu trên `develop` tại `db418e3`; lần này chỉ cập nhật báo cáo, không sửa mã nghiệp vụ, test hay nội dung `.env`.
+- Đối chiếu toàn bộ nhóm A1–A4, B1–B4, C1–C4 và phần frontend của từng người trong tài liệu phân công. Source hiện có **12 service backend** vì Video đã tách khỏi Interview; trách nhiệm của Video vẫn thuộc Người 3.
+- Chạy unit, build/typecheck/lint, integration PostgreSQL/Redis/pgvector/Testcontainers, browser E2E hiện có và probe JWT bổ sung. Không coi việc có Dockerfile, có màn hình hoặc build thành công là hoàn thành nghiệp vụ.
+- Toolchain: Node `24.18.0`, Maven `3.9.9`, JDK 21, Go `1.25.0`, Python 3.11 cho gate AI chính thức; PostgreSQL 16. Maven/Go/JDK/Python bổ sung nằm trong `/tmp/recruitment-retest-20261013`, không cài đè công cụ hệ thống.
+- Database kiểm thử dùng cluster/container riêng và tên `*_test`; giữ nguyên database/volume đang dùng của dự án. Company–Media, Profile–Media và nhiều AI provider là deterministic stand-in trong suite, không phải live Cloudinary/Claude.
+- Các số dưới đây lấy từ output của lượt chạy mới. **Skipped, chưa chạy, fail-fast và lỗi môi trường đều không tính là PASS.** Không cộng các lần thử bị gián đoạn hoặc test lại do cấu hình fixture vào tổng thành công.
+
+### Ma trận kết quả theo service và người phụ trách
+
+| Người | Thành phần | Unit / build / lint | Integration hoặc gate bổ sung của lượt này |
+| --- | --- | --- | --- |
+| 1 | Auth | **215/215 PASS**, `mvn verify` và JAR PASS | **40/40 PostgreSQL/Redis PASS** bằng profile `integration-test` |
+| 1 | Profile | **62/62 PASS**, build PASS | **88 PASS, 1 Kafka SKIP** trên PostgreSQL 16; migration upgrade, deploy và deploy lặp PASS |
+| 1 | Media | **26/26 PASS**, build PASS | **26/26 PostgreSQL PASS**; migrate/remigrate PASS. Docker target test bị chặn tải Alpine, đã chạy suite trực tiếp với DB tạm |
+| 1 | Admin | `mvn verify` / JAR **PASS** | **0 test**; chỉ scaffold, không có chứng cứ nghiệp vụ Admin |
+| 2 | Company | **352/352 PASS**, build PASS | **19/19 PostgreSQL/Media-contract PASS**; migrate/remigrate PASS |
+| 2 | Job & Search | **611/611 PASS**, build PASS | **7/7 PostgreSQL PASS** ở detail, historical baseline, recommendation revalidation; **13 ca Kafka/Redis/Elasticsearch chưa chạy** trong suite Job riêng |
+| 2 | Application | **326/326 PASS**, JAR PASS | **81 PostgreSQL/Kafka PASS + 6/6 outbox ordering PASS + 12/12 real AI-contract PASS**; Job-contract timeout khi dựng Docker image, gate toàn phần chưa PASS |
+| 2 | AI | **672/672 PASS** trên Python 3.11; Ruff check/format PASS | **77 PASS, 2 Kafka SKIP** trên PostgreSQL/pgvector + Redis thật; không chạy live provider |
+| 3 | Interview | **143/143 PASS**, JAR PASS | **16/16 PostgreSQL/Kafka PASS** |
+| 3 | Chat Go | Build **PASS**; **1 unit JWT hiện hữu PASS** | **Integration PostgreSQL/Redpanda FAIL**: `relation profile.profiles does not exist`; **4/4 probe canonical claim FAIL** |
+| 3 | Notification Go | Build **PASS**; không có unit test trong `internal` | **Integration PostgreSQL PASS**; **4/4 probe canonical claim FAIL** |
+| 3 | Video Go | Build **PASS**; **1 unit JWT hiện hữu PASS** | **FAIL compile integration test** tại `test/integration_test.go:99`; **4/4 probe canonical claim FAIL** |
+| Cả 3 | Frontend | **130 PASS / 2 FAIL** trong 132 unit; typecheck **PASS**; production build **PASS** | Playwright: **6 FAIL / 48 chưa chạy / 0 PASS**, dừng ở `--max-failures=6`; đây là API-mock E2E, không phải deployed E2E |
+| 3 điều phối | Root Compose / release | **FAIL** khi đọc cấu hình hiện tại | Thiếu key Company↔Job và file env Video; chưa dựng lại toàn bộ hệ thống từ commit này |
+
+**Lưu ý về môi trường test:**
+
+- Frontend build mặc định bị gián đoạn khi tạo nhiều worker. Chạy lại cùng source với `CIRCLE_NODE_TOTAL=2` (một worker theo cấu hình Next hiện tại) và `NODE_OPTIONS=--max-old-space-size=512` đã hoàn tất production build.
+- AI trên Python 3.12 có 671 PASS / 1 FAIL ở test JSON lồng sâu (`INVALID_CV_EVENT` khác `INVALID_CV_EVENT_JSON`). Python 3.11 đúng Dockerfile cho **672/672 PASS**. Không coi kết quả 3.12 là regression của runtime 3.11.
+- Media/Profile test trực tiếp ban đầu chịu ảnh hưởng của `.env` runtime: JWKS, scoped internal keys và `SWAGGER_ENABLED=false`. Lượt chốt dùng fixture riêng, `JWT_JWKS_URI=''`, đầy đủ scoped keys và bật Swagger theo assertion. Không thay `.env` thật hoặc làm yếu xác thực của ứng dụng để ép test xanh.
+- Media Docker build gặp `DNS: transient error` khi tải Alpine APK index, khiến `apk add openssl` thất bại. Company Docker test image bị gián đoạn ở bước export. Các suite PostgreSQL tương ứng đã chạy trực tiếp bằng dependency của source; **không ghi Docker image gate là PASS**.
+- Application full integration dừng sau 600 giây tại `JobServiceContractIT` khi dựng image từ source Job; Elasticsearch đã lên, nhưng image gate chưa hoàn tất. Real AI-contract đã PASS 12 test. Chạy riêng các IT còn lại với `-Dit.test=*IT,!JobServiceContractIT,!AiMatchContractIT`: 87 test được thu thập, 81 PASS và 6 ordering ban đầu SKIP do chưa opt-in. Sau đó cấp `APPLICATION_OUTBOX_TEST_URL` trỏ đúng DB tạm `person2_outbox_test` và chạy `ApplicationOutboxOrderingPostgresIT`: cả 6 PASS. Tổng bằng chứng Application integration là **81 + 6 + 12 = 99 test PASS**, chưa gồm Job-contract, nên gate toàn phần chưa PASS.
+- Không chạy lại các benchmark 100.000 bản ghi/10.000 request, production SLO, live Cloudinary/Claude/FCM/SMTP hay luồng WebRTC qua LiveKit/Jitsi thật. Những kết quả lịch sử ở mục 2.1–2.58 vẫn giữ nguyên phạm vi ban đầu.
+
+### Lỗi và chênh lệch cần xử lý
+
+| Mã | Bằng chứng mới | Ảnh hưởng / việc cần làm | Người phụ trách theo phân công |
+| --- | --- | --- | --- |
+| R01 | `docker compose config --quiet` FAIL vì thiếu `COMPANY_INTERNAL_API_KEY_JOB_SEARCH`; thử bằng key tạm trong môi trường tiến trình mới lộ tiếp thiếu `services/video-service/.env` | Bổ sung cấu hình môi trường và kiểm tra lại Compose trước smoke/E2E. Key Company↔Job đã được yêu cầu từ mục 2.58 | Người 3 điều phối env/deploy; Người 2 xác nhận contract/key Company↔Job |
+| R02 | Hai ca `frontend/lib/person2Flow.test.ts` FAIL ở auth session. `authSession.ts` đã gọi `/auth-cookie/login\|refresh\|logout`, fixture vẫn giả lập `/auth/login` và token trong memory | Đồng bộ contract/harness với proxy cookie, test đủ login/refresh/logout và hydrate session. Đây là test regression; chưa đủ để kết luận toàn bộ backend Auth hỏng | Người 1 phụ trách FE Auth; Người 2 phối hợp client/test của các flow tiêu thụ |
+| R03 | Năm ca Company Playwright không vượt được bước login; `person2-flow-fixes.spec.ts:39` còn chứng minh người chưa login vào `/candidate/jobs/:id` bị chuyển sang `/login` | `frontend/app/candidate/layout.tsx` bọc cả trang job bằng Candidate `SessionGate`; khôi phục public search/detail theo nghiệp vụ rồi chạy lại đủ 54 ca desktop/mobile | Người 2 phụ trách Job/Company FE; Người 1 phối hợp session |
+| R04 | Probe ký token bằng RSA test hợp lệ: Chat, Notification và Video đều chấp nhận sai `iss`, sai `aud`, thiếu `sub`, thiếu `role` — **12 assertion FAIL** | Các `internal/jwt/verify.go` hiện kiểm thuật toán/chữ ký/expiry nhưng chưa khóa canonical claims. Bổ sung kiểm tra cùng negative test; không dùng số strict-JWT PASS của Notification NestJS cũ | Người 3 thực hiện; Người 1 cung cấp chuẩn JWT/Auth |
+| R05 | `services/video-service/test/integration_test.go:99` gọi `CreateCall` với 4 tham số, implementation cần 5 (thêm `conversationID`) | Test Video không biên dịch dù binary build được; cập nhật fixture/contract rồi chạy lại cả integration và quyền join | Người 3 |
+| R06 | Source Video đã có kiểm tra người được mời tại `VideoRepository.AddParticipant` (không có row thì từ chối), nhưng chưa có gate nối với lịch Interview; FE `InterviewVideoRoom` vẫn chủ động ném lỗi chưa cấu hình | Giữ và kiểm thử negative authorization hiện có; nối Interview↔Video và chốt việc thay Jitsi bằng LiveKit. Đây là khoảng trống tích hợp từ source, chưa phải kết quả WebRTC E2E | Người 3 |
+| R07 | Notification Go hard-code một consumer group, không đọc hai replay cutoff cũ; readiness chỉ ping DB; insert notification/processed ledger riêng; nhánh dedupe chỉ tra `event_id`, chưa đối chiếu hash khi trùng | Tái lập contract/replay/collision/atomicity, kiểm migration dữ liệu cũ và Kafka readiness; bảng poison/log/settings có sẵn chưa chứng minh các workflow tương ứng hoạt động | Người 3; Người 2 phối hợp `application-events` |
+| R08 | Proxy login đặt `careerhub_refresh` chỉ cho Path `/api/auth-cookie/refresh`; `signOut()` gửi body rỗng, còn logout route cần cookie/token để gọi backend revoke | Theo source, trình duyệt không gửi cookie này tới `/api/auth-cookie/logout`, nên cần sửa phạm vi cookie hoặc cơ chế revoke và thêm browser test. Chưa coi việc xóa cookie local là logout server thành công | Người 1 |
+| R09 | Admin chỉ có application/config; FE Admin chứa `mockUsers/mockJobs/mockCompanies/mockReports`; Profile edit/CV Builder và Candidate interview còn scaffold/mock | Không đánh dấu hoàn thành dựa trên UI/build. Tiếp tục P08/P10/P12/P16 theo từng người; Admin approval E2E vẫn là phụ thuộc chưa được giải quyết | Người 1: Admin/Profile/CV; Người 3: Interview UI; Người 2: phối hợp approval |
+| R10 | Chat Go integration đã khởi động PostgreSQL/Redpanda thành công nhưng FAIL tại `test/integration_test.go:103`: `pq: relation "profile.profiles" does not exist`. Repository conversation JOIN trực tiếp `profile.profiles` và `auth.users` | Thay phụ thuộc DB chéo service bằng contract/API hoặc projection được sở hữu rõ ràng; đồng bộ fixture và kiểm tra lại truy vấn người tham gia. Không tạo giả bảng service khác chỉ để làm test xanh | Người 3 sửa Chat; Người 1 phối hợp Profile/Auth contract |
+
+### Task bàn giao theo từng người
+
+| Người / nhóm task gốc | Có thể ghi nhận sau lượt này | Task còn mở để nghiệm thu |
+| --- | --- | --- |
+| **Người 1 — A1 / P07 Auth** | Core Auth 215 unit + 40 integration và build PASS | Auth-cookie/session/logout ở FE; account-link Google chỉ nếu sản phẩm yêu cầu |
+| **Người 1 — A2 / P08 Profile** | Profile/CV/Builder/consent, 62 unit + 88 PostgreSQL integration; migration upgrade/deploy lặp PASS | Một ca Kafka chưa chạy; UI profile edit, CV Builder/PDF, consent/preferences và baseline dữ liệu thật |
+| **Người 1 — A3 / P09 Media** | Signed upload/ownership/reference/cleanup, 26 unit + 26 integration; migration PASS | Offer-letter policy/consumer, live sáu preset Cloudinary, các consumer còn lại và production hardening |
+| **Người 1 — A4 / P10 Admin** | Scaffold build được | Cả 8 task P10: approval company/job, users, reports, event aggregation, dashboard, export và integration; frontend Admin hiện mock |
+| **Người 2 — B1 / P06 Company** | 352 unit + 19 contract integration và build PASS | Real Auth/Admin/Media deployed gate; phối hợp R01 và khôi phục Company FE E2E |
+| **Người 2 — B2 / P05 Job** | 611 unit + 7 PostgreSQL integration, build PASS | 13 integration Kafka/indexing chưa chạy trong suite riêng; public Job FE; deployed search/load và approval E2E |
+| **Người 2 — B3 / P01–P04 Application** | Pipeline/evaluation/offer/dashboard/match, 326 unit và 99 integration/contract PASS, gồm migration V11/outbox ordering | Job-contract timeout cần chạy lại; Offer-file Media contract, deployed E2E và HTTP/multi-replica load |
+| **Người 2 — B4 / P11 AI** | 672 unit + 77 integration, lint/format PASS | Hai ca Kafka; live Claude 10-FAQ, production corpus/relevance và capacity/SLO thật. Widget vẫn thuộc Người 3 |
+| **Người 3 — C1 / P12 Interview + Video** | Interview 143 unit/build; Go Video binary build được | R04–R06; confirm/reschedule/cancel/no-show/feedback/panel/reminder; nối lịch với quyền vào phòng; chốt và triển khai LiveKit/Jitsi |
+| **Người 3 — C2 / P13 Chat** | Go persistence/WebSocket/Kafka và FE messages có source, binary build PASS | R04/R10: JWT canonical, bỏ JOIN trực tiếp Profile DB; participant/context, attachment, event durability, reconnect/multi-instance/load và deployed browser flow |
+| **Người 3 — C3 / P14 Notification** | Go inbox/SSE/push-token và consumer có source, binary build PASS | R04/R07; khôi phục test semantics đã mất, FCM/SMTP worker, device/settings, reminder và E2E liên service |
+| **Người 3 — C4 / P15 + nhóm / P17** | Compose/gateway có cấu hình; đã tổ chức các gate service-level tách biệt | Sửa env blockers; khởi động mới cả stack, health/route/JWT/Kafka smoke; ba hành trình Candidate/Recruiter/Admin; CI và release gate |
+
+Không quy đổi các bảng này thành phần trăm hoàn thành chung: một test PASS không tương đương một yêu cầu nghiệp vụ đã nghiệm thu; đặc biệt Admin và chuyển đổi Go còn thiếu chức năng hoặc có regression.
+
+### Lệnh và bằng chứng tái kiểm
+
+- Java: `mvn -B -ntp verify`; sau đó `mvn -P integration-test failsafe:integration-test failsafe:verify` với Docker test riêng. Riêng ordering: cấp URL exact-guard tới DB tạm `person2_outbox_test` rồi dùng `-Dit.test=ApplicationOutboxOrderingPostgresIT`. Dùng JDK 21 đầy đủ; Java runtime có sẵn ban đầu thiếu compiler phù hợp.
+- Company/Job: `npm test`, `npm run build`; Profile/Media: `npm run test:unit`. Company không có lockfile nên cài bằng `npm install --package-lock=false`, các package có lockfile dùng `npm ci`.
+- PostgreSQL integration: `npm run test:integration` của Company/Media/Profile với DB `*_test` riêng và guard `ALLOW_*_SCHEMA_RESET=true`; chạy migration trước/sau. Profile chạy thêm `npm run test:migration-upgrade`. Kafka/Profile chưa bật trong lượt PostgreSQL này.
+- Job PostgreSQL subset: `JOB_INTEGRATION_TEST=1 npx jest --runInBand --runTestsByPath src/job-detail.integration.spec.ts src/job-event-baseline.integration.spec.ts src/job-recommendation.integration.spec.ts` trên `job_test` riêng.
+- AI: Python 3.11, cài `requirements-dev.txt` + `requirements-chat.txt`; `python -m pytest -m 'not integration' -q`; `python -m pytest tests/integration -q` với `AI_TEST_DATABASE_URL`/`AI_TEST_REDIS_URL` tách biệt; Ruff check/format theo Dockerfile. Không cấp broker nghĩa là hai test Kafka SKIP.
+- Go: `go test -count=1 -p 2 -timeout 240s ./...` và `go build ./cmd/server`. Probe JWT bổ sung dùng Go overlay trỏ tới file test trong `/tmp`, không sửa source hoặc khóa của dự án.
+- Frontend: `npm test`, `npm run typecheck`, `CIRCLE_NODE_TOTAL=2 npm run build`; `npm run test:e2e -- --max-failures=6 --reporter=json`.
+- Log, JSON/XML và script fixture của lượt này: `/tmp/recruitment-retest-20261013/`; lỗi browser có trace/screenshot tại `frontend/test-results/`. Đây là artifact cục bộ để đối chiếu, không được đưa secret `.env` vào báo cáo hoặc Git.
+
+**Kết luận nghiệm thu:** backend đã có nhiều bằng chứng unit/integration tốt, nhưng release toàn dự án vẫn **chưa PASS** do cấu hình triển khai, frontend/auth/public routing, canonical JWT, truy vấn Chat xuyên database và test/tích hợp Video. Sau khi xử lý R01–R10 cần chạy lại các gate lỗi, phần bị bỏ qua và ba E2E nghiệp vụ thật; không đóng task của bất kỳ người nào chỉ dựa vào số liệu lịch sử.
+
+---
+
+## 2.60. Sửa lỗi sau lượt kiểm thử toàn dự án — 13/10/2026
+
+Lượt này sửa các lỗi có bằng chứng tại mục 2.59, dựa trên `develop` tại `db418e3`. Kết quả bên dưới được thu thập trước khi commit; trạng thái tích hợp được ghi trong lịch sử Git/PR. Các kết quả Java/NestJS/Python ở mục 2.59 vẫn là bằng chứng lượt trước, không ghi thành đã chạy lại sau bản sửa này.
+
+### Những lỗi đã xử lý
+
+| Mã | Bản sửa | Người sở hữu theo phân công |
+| --- | --- | --- |
+| R01 | Bổ sung scoped key `COMPANY_INTERNAL_API_KEY_JOB_SEARCH` vào `.env` local và tạo `services/video-service/.env`; Compose truyền issuer/audience vào Chat/Video. `docker compose config --quiet` PASS. Các giá trị secret không đưa vào báo cáo/Git | Người 3; Người 2 phối hợp Company–Job |
+| R02 | Đổi fixture unit/E2E Auth sang contract `/api/auth-cookie/*`, response chỉ có account; browser không giữ access/refresh token trong memory. Cấu hình lại refresher giữa các unit test để không mất callback sau `afterEach`; bảo vệ phiên mới khỏi response hydration cũ | Người 1; Người 2 phối hợp các flow tiêu thụ |
+| R03 | `SessionGate` cho phép anonymous đọc `/candidate/jobs` và `/candidate/jobs/:id`; vẫn bảo vệ các route Candidate khác theo role. Hết phiên hiển thị CTA đăng nhập; bỏ điều hướng bằng `window.location.assign` trong render và nhánh 401 của API client. Browser API dùng `/api` cùng origin để middleware chuyển HttpOnly access cookie đến Gateway | Người 2; Người 1 phối hợp session |
+| UI mobile | Chuyển geometry Candidate/Recruiter shell từ inline CSS sang owner chung; sidebar thành navigation cuộn ngang trên màn hẹp, content co được, tránh sidebar/header che nút thao tác; anonymous không thấy sidebar Candidate riêng tư | Người 1/2 phối hợp shell; Người 3 dùng chung |
+| R04 | Cả ba verifier Go kiểm issuer/audience, UUIDv4 subject/jti, enum system role, thời gian phát hành/hết hạn, RS256, `typ=JWT`, `kid` thumbprint và RSA ≥2048 bit. Bỏ xung đột hai trường JSON `sub`; identity middleware lấy từ subject đã kiểm tra. Mỗi service có 46 ca PEM/JWKS gồm token hợp lệ và negative claims/header/signature | Người 3; contract Auth thuộc Người 1 |
+| R05 | Sửa lời gọi `CreateCall` trong test theo đủ năm tham số; sửa implementation bỏ sót `ConversationID` khi lưu call. Integration kiểm tra đọc lại liên kết hội thoại, token join của host và từ chối người không được mời | Người 3 |
+| R08 | Dùng chung server proxy cho login/refresh/logout; refresh cookie scope `/api/auth-cookie`, xóa cookie path cũ khi đổi/xóa phiên. Logout chuyển refresh token hiện tại tới Auth, hỗ trợ upstream `204`, xóa cookie local khi upstream lỗi nhưng trả lỗi thu hồi thay vì báo thành công giả. Response `no-store`, token không trả cho JavaScript; kiểm Origin/Host và cookie Secure khi HTTPS | Người 1 |
+| R10 | Chat chỉ đọc bảng conversation/member do Chat sở hữu; bỏ JOIN `profile.profiles`/`auth.users`. Giữ title đã lưu, fallback `Đối tác` nếu title trống, giữ member IDs; trả `[]` cho danh sách rỗng và propagate lỗi đọc members. Integration chạy trên DB chỉ có schema Chat, kiểm quyền đọc của non-member | Người 3 |
+
+**Giới hạn của R10:** tên/ảnh đại diện từ Profile/Auth chưa được bổ sung qua API/projection. Đây là phần enrichment còn mở; không tạo bảng giả của service khác và không coi fallback là đã hoàn tất participant/context nghiệp vụ.
+
+### Kiểm chứng sau sửa
+
+| Gate | Kết quả |
+| --- | --- |
+| Chat / Notification / Video `go test -p 1 -count=1 -timeout 5m -json ./...` | PASS cả ba module; **138 ca JWT leaf** (46/service) và một integration scenario/module. Chat/Video có assertion nghiệp vụ bổ sung. PostgreSQL startup timeout tăng 10 → 60 giây sau lần đầu bị timeout trên máy local |
+| Frontend `npm test` | **132/132 PASS**, trước sửa là 130/132 |
+| Frontend TypeScript / production build | `npm run typecheck` và `CIRCLE_NODE_TOTAL=2 npm run build` PASS; dùng một build worker để phù hợp tài nguyên local |
+| Playwright desktop + mobile | **64/64 PASS** (32 desktop + 32 mobile), gồm 54 ca nghiệp vụ có sẵn và 10 ca hồi quy mới; chạy `PLAYWRIGHT_USE_BUILD=1 npm run test:e2e -- --max-failures=8` trên production build |
+| Root Compose | `docker compose config --quiet` PASS; chưa chạy full-stack `up --build` trên image mới |
+| Strict UI audit | **18 finding còn tồn tại** ở Admin/Profile/CV/settings/recruiter scaffold, chủ yếu nút chưa có hành động và form/textarea chưa theo contract; không phát sinh trong các file UI được sửa ở lượt này |
+| Whitespace / diff | `git diff --check` PASS |
+
+Browser regression mới gồm login/refresh/logout qua cookie thật, thu hồi token mới nhất, lỗi upstream khi logout, chuyển cookie path cũ, chặn Origin khác, và response hydration cũ không được xóa phiên mới. Các flow Company/Job/Application/AI dùng API mock; đã kiểm tra ảnh Company desktop/mobile và assertion không tràn ngang. Bản sửa mobile xử lý sidebar che nút Chỉnh sửa hồ sơ, được test xác nhận thao tác thành công.
+
+Test Chat/Video khởi động PostgreSQL và Redpanda thật, nhưng fixture chưa tạo topic: log producer có `Unknown Topic Or Partition` và service nuốt lỗi publish. **PASS này chỉ chứng minh persistence/service assertions, chưa chứng minh phát/consume Kafka bền vững.** LiveKit token được tạo cục bộ; không có WebRTC/media server thật trong gate này. Test cookie proxy dùng HTTP Auth giả để kiểm chứng browser↔Next↔upstream; không thay thế deployed Auth/Redis E2E.
+
+Artifacts local: `/tmp/recruitment-fixes-20261013/` chứa log Go JSON, frontend unit/typecheck/build/E2E, kết quả runner và `premium-audit.json`. Browser report tại `frontend/playwright-report/` (artifact ignored). Các lần dev E2E hoặc build cache lỗi trước đó không được cộng vào số PASS cuối.
+
+### Việc còn lại cho cả 3 người
+
+- **Người 1 — A1–A4:** deployed Auth-cookie/Redis rotation–revoke/Google callback; UI Profile/CV/PDF, Media live provider/Offer letter; nghiệp vụ Admin và các màn mock. Phối hợp profile enrichment của Chat qua contract được cấp quyền.
+- **Người 2 — B1–B4:** các gate Kafka/Elasticsearch và Job-contract còn thiếu/timeout ở mục 2.59; real Admin approval, Offer-file, live Claude/corpus/SLO; deployed Company/Job/Application/AI E2E. Các flow browser thuộc Người 2 được kiểm lại sau đổi cookie; kết quả cụ thể ở bảng trên.
+- **Người 3 — C1–C4:** R06 nối Interview–Video và chốt/triển khai LiveKit/Jitsi; R07 Notification replay/collision/atomicity/readiness/migration; Chat participant context/enrichment, attachment, event durability và multi-instance; FCM/SMTP/reminder và full-stack smoke.
+
+**Kết luận:** đã sửa nhóm cấu hình, JWT, Chat DB, Video contract và frontend auth/public route; **chưa nghiệm thu toàn hệ thống**. R06/R07/R09 và các integration/live-provider gate còn mở; không đóng các task này chỉ vì unit/build PASS.
+
 ---
 
 # 3. Danh sách task CHƯA làm (Pending)
@@ -1280,7 +1466,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
   - [ ] Chọn interviewer khác/panel và contract xác minh membership cho interviewer tùy chọn còn pending.
 - [ ] Candidate confirm/reschedule; HR accept/reject đề nghị đổi lịch.
 - [ ] Cancel/no-show và giới hạn số lần đổi lịch.
-- [ ] Sinh Jitsi room URL/token có hạn dùng; bảo vệ người không liên quan.
+- [ ] Chốt Jitsi → LiveKit theo source hiện tại; Video Go đã có create/join/end/reject; integration fixture, JWT và kiểm tra host/non-invite đã PASS local tại mục 2.60. Nối token/phòng với Interview thật và bảo vệ người không liên quan.
 - [ ] Feedback sau phỏng vấn và gợi ý chuyển application status.
 - [ ] Publish đầy đủ lifecycle `interview-events` và scheduler reminder.
   - [x] Foundation `SCHEDULED` v1 đã có exact contract, transactional outbox, lease/fence publisher, Kafka/PostgreSQL test và Candidate in-app consumer.
@@ -1288,31 +1474,30 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 
 ## P13 — Chat Service
 
-- [ ] Verify JWT RS256 ở Socket.IO handshake; bỏ TODO bypass hiện tại.
-- [ ] Tạo MongoDB models/indexes cho Conversation và Message.
-- [ ] Kiểm tra participant và ngữ cảnh application/job trước khi tạo conversation.
-- [ ] Persist message, phân trang lịch sử, unread count và read receipt.
+> Cập nhật 13/10/2026 — Người 3. Mã hiện tại dùng Go/WebSocket/PostgreSQL; checklist Socket.IO/MongoDB cũ không còn mô tả đúng triển khai.
+
+- [x] Có migration conversation/member/message, API persistence/history/read receipt, WebSocket hub và Kafka producer; build và unit JWT hiện hữu chạy được.
+- [x] Sửa verifier chung cho HTTP/WebSocket: issuer/audience, subject/role/jti/time/header; 46 ca PEM/JWKS PASS local (mục 2.60). Negative HTTP/socket E2E vẫn cần nghiệm thu riêng.
+- [x] Bỏ JOIN trực tiếp `profile.profiles`/`auth.users`; integration Chat PASS trên DB riêng, kiểm group/direct/non-member và empty list.
+- [ ] Bổ sung tên/avatar qua API/projection; khóa participant cùng ngữ cảnh application/job và negative HTTP/socket tests.
 - [ ] Tích hợp File/Media cho attachment.
-- [ ] Redis Adapter cho nhiều instance, reconnect và delivery semantics.
-- [ ] Publish `chat-events` cho Notification.
-- [ ] Test giả mạo conversation, message ordering, duplicate/reconnect và tải đồng thời.
+- [ ] Hoàn thiện reconnect, dedupe, ordering, phát event bền vững và nhiều instance.
+- [ ] Khóa contract `chat-events` giữa Go Chat và Notification; chạy đầy đủ integration và load/concurrency.
+- [ ] Kiểm thử FE chat + cookie authentication + backend thật.
 
 ## P14 — Notification Service
 
-- [x] Tạo Prisma migration cho Notification, ProcessedEvent, PoisonEvent, DeviceToken, NotificationLog và NotificationSetting; Device/settings cùng kênh PUSH/EMAIL mới ở mức persistence nền.
-- [ ] Consumer ba topic application/interview/chat với idempotency.
-  - [x] Hoàn thành `application-events` v1 bằng dedicated group, manual commit, retained-backlog replay có stable rollout cutoff, atomic idempotency và poison/collision quarantine.
-  - [x] Hoàn thành `SCHEDULED interview-events` v1 bằng group/cutoff riêng, Candidate-only projection và cùng durable ledger semantics.
-  - [ ] Các phần Interview lifecycle còn lại và `chat-events` còn pending.
-- [ ] BullMQ worker, retry/backoff và lưu lỗi cuối.
-- [x] In-app inbox owner-only, unread count, idempotent read, cutoff read-all và HMAC keyset pagination.
-- [ ] Đăng ký/xóa FCM device token.
-- [ ] Template email/push, FCM và SMTP integration.
-- [ ] Scheduler reminder không gửi trùng.
-- [ ] Contract/integration test với event thật từ Application/Interview/Chat.
-  - [x] Application producer có JSON Schema/fixtures/Kafka contract; Notification có PostgreSQL/Kafka integration cho backlog trước startup, duplicate, collision, poison và legacy withdrawal. Deployed cross-service E2E vẫn thuộc P17.
-  - [x] Interview producer/outbox PostgreSQL→Kafka và Notification Interview consumer Kafka→PostgreSQL đã có exact contract, duplicate/collision/poison/backlog/cutoff integration.
-  - [ ] Hợp đồng/integration Chat và deployed cross-service E2E còn pending.
+> Cập nhật 13/10/2026 — Người 3. Các checkbox NestJS/Prisma trước đây chỉ là lịch sử; cần nghiệm thu lại bản Go hiện tại.
+
+- [x] Có mã Go cho migration, inbox, unread/read/read-all, HMAC cursor, SSE, push-token registration và consume Application/Interview/Chat/Video; build PASS.
+- [x] Kiểm claim/header JWT theo contract Auth với 46 ca PEM/JWKS PASS local (mục 2.60). JWKS rotation/deployed gate vẫn cần kiểm riêng.
+- [ ] Tái lập atomic projection + processed-event ledger, collision theo payload hash, strict event schema, poison/quarantine và replay cutoff ổn định.
+- [ ] Thống nhất group/topic/config của bản Go với `.env` và hợp đồng Application/Interview.
+- [ ] Kiểm thử quyền inbox, cursor tamper/cross-owner, pagination/read-all cutoff, SSE reconnect và đa replica.
+- [ ] Chốt migration dữ liệu từ schema Notification cũ; kiểm tra readiness cả DB/Kafka và chiến lược one-shot migration.
+- [ ] Triển khai worker/retry/backoff, FCM/SMTP thật, device revoke/settings và delivery log; API lưu push token chưa đồng nghĩa gửi push được.
+- [ ] Hoàn thiện reminder và các Interview lifecycle còn lại.
+- [ ] Khôi phục contract/integration Kafka thật và deployed E2E với Application/Interview/Chat; không dùng lại số 51 + 7 của bản NestJS.
 
 ## P15 — Hạ tầng và API Gateway
 
@@ -1327,26 +1512,31 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
   - [x] Auth Service có health Actuator thật, trả `503` khi dependency `DOWN/OUT_OF_SERVICE`; Redis có healthcheck/auth và Auth chờ Redis healthy trong Compose.
   - [x] Profile image có healthcheck non-root; Compose chạy `profile-migrate` one-shot và chỉ khởi động Profile sau khi migration thành công.
   - [x] Media image Node 24 chạy non-root và fail-fast; Compose chạy `media-migrate` one-shot trước runtime, nhưng full Compose toàn hệ thống vẫn chưa smoke test.
-  - [x] Notification image Node 24 chạy non-root; Compose chạy `notification-migrate` one-shot, runtime chờ migration và `/health/ready` kiểm PostgreSQL cùng Kafka group đã join.
+  - [ ] Notification Go cần khôi phục one-shot migration/non-root và readiness Kafka; hiện migrate trong `main`, readiness chỉ ping DB (13/10/2026).
 - [x] Route `/notifications/` giữ prefix, strip internal headers, không log query/referrer và ép private/no-store cho cả success/error response.
 - [ ] Dựng Jitsi self-host đầy đủ: web, Prosody, Jicofo, JVB, domain và TLS.
 - [ ] Quản lý secrets an toàn cho JWT private key, Cloudinary, FCM, SMTP và LLM key.
 - [ ] Cấu hình CORS, rate limit, request ID, timeout và WebSocket upgrade nhất quán.
 - [ ] Thêm logging tập trung, metrics, tracing và cảnh báo.
 - [ ] Backup/restore volume và migration strategy.
-- [ ] Chạy `docker compose up --build` và smoke test toàn bộ route; Docker daemon/Testcontainers đã hoạt động nhưng Compose/smoke toàn hệ thống chưa được chạy.
+- [ ] Chạy `docker compose up --build` và smoke test toàn bộ route trên image của commit hiện tại. Config thiếu env đã sửa và validate PASS ở mục 2.60; health của các container cũ không thay thế full-stack gate này.
 
 ## P16 — Frontend
 
-- [ ] Thiết kế layout, design system, route guard và API client.
-- [ ] Màn đăng ký/OTP/đăng nhập/quên mật khẩu.
-- [ ] Candidate profile, CV manager/builder, search/detail, bookmark, apply, tracking và offer response.
-- [ ] Recruiter company/verification/member, job management, applicant pipeline, evaluation, offer và dashboard.
-- [ ] Frontend Interview calendar/Jitsi, realtime chat và notification center.
-- [ ] Admin dashboard, company/job approval, user/report management và export.
-- [ ] Loading/error/empty state, responsive UI, accessibility và E2E test.
+> Cập nhật 13/10/2026: frontend đã vượt scaffold; regression sau sửa tại mục 2.60, deployed gate và các màn scaffold/mock vẫn chưa nghiệm thu. Mỗi người sở hữu frontend của luồng mình theo mục I.2 của tài liệu phân công.
 
-### P16.N2 — FE tiêu thụ bốn service của Người 2 (47/52 tích hợp API thật; baseline UI đã có)
+| Người | Đã có trong source | Chưa hoàn tất / cần kiểm thử lại |
+| --- | --- | --- |
+| Người 1 | Login/register/OTP/reset và proxy auth-cookie; cookie login/refresh/logout có browser regression PASS; trang CV manager | Deployed Auth/Redis/OAuth gate; profile edit/CV Builder/PDF còn scaffold; Admin dùng mock, backend Admin chưa có |
+| Người 2 | Company/member/media, Job/search/detail, apply/bookmark/tracking, HR pipeline/evaluation/offer/dashboard/recommendation; public Job và browser gate đã sửa | Deployed E2E, Offer-file và Admin approval vẫn cần phối hợp Người 1 |
+| Người 3 | FE messages/inbox/SSE và VideoRoom gọi API `/calls` | Candidate interview list còn mock; `InterviewVideoRoom` chủ động báo chưa cấu hình backend; lifecycle/calendar và video interview E2E chưa xong; chatbot widget cần nghiệm thu |
+
+- [x] Typecheck và production build PASS trên commit kiểm tra, với `CIRCLE_NODE_TOTAL=2` để giới hạn một worker build.
+- [x] Unit frontend **132/132 PASS** sau sửa auth session (mục 2.60).
+- [x] Browser desktop/mobile **64/64 PASS** sau sửa: 54 ca cũ + 10 ca cookie/hydration mới; API-mock E2E, chưa phải deployed E2E.
+- [ ] Ba hành trình Candidate/Recruiter/Admin dùng backend thật, responsive và accessibility cần nghiệm thu trước phát hành.
+
+### P16.N2 — FE tiêu thụ bốn service của Người 2 (mốc lịch sử 48/52; gate hiện tại xem mục 2.60)
 
 > Bổ sung ngày 30/08/2026 theo yêu cầu. Đây là danh sách chi tiết task FE **chưa làm**, nhưng **chỉ giới hạn ở phần tiêu thụ bốn service của Người 2** (Company, Job & Search, Application, AI chatbot). FE của Auth, Profile, Media, Interview, Notification, Admin và Chat **không** nằm trong danh sách này. Bản thân việc code FE vẫn **thuộc Người 3** — mục này ghi ra để thấy backend của Người 2 đang chờ FE làm những gì, không phải chuyển việc sang Người 2.
 >
@@ -1417,7 +1607,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 #### Nền tảng dùng chung (làm trước mọi màn hình)
 
 - [x] API client bóc envelope thống nhất: thành công là `{data, meta}`, lỗi là `{code, message, details}`. Hiển thị theo `code` chứ không hiển thị `message` thô; `details` mới là chỗ mang thông tin điều hướng (`currentStatus`, `reason`, `eligibleAt`, `retryAfterSeconds`).
-- [x] Gọi đúng đường dẫn có **dấu `/` cuối** cho ba route collection — `POST /companies/`, `POST /jobs/`, `POST|GET /applications/`. Gateway chỉ khai báo `location /companies/`, `/jobs/`, `/applications/`, nên bỏ dấu `/` là nhận 404 **từ nginx**, không phải từ service; lỗi này không có mã nghiệp vụ để bắt.
+- [x] Gọi đúng đường dẫn có **dấu `/` cuối** cho ba route collection — `POST /companies/`, `POST /jobs/`, `POST|GET /applications/`. Gateway chỉ khai báo `location /companies/`, `/jobs/`, `/applications/`, nên bỏ dấu `/` là bị nginx redirect sang host nội bộ `api-gateway`, không phải lỗi từ service; lỗi này không có mã nghiệp vụ để bắt. Khi FE gọi qua proxy `/api` của Next (cấu hình Docker), `next.config.mjs` phải bật `skipTrailingSlashRedirect` và giữ dấu `/` trong rewrite, nếu không Next tự redirect 308 và bỏ dấu `/` trước khi proxy (sửa ở mục 2.58).
 - [x] Bộ xử lý `409` dùng chung cho optimistic locking: tải lại resource, so sánh, cho người dùng quyết định gửi lại — **không retry mù**. Áp cho `APPLICATION_CHANGED_CONCURRENTLY`, `JOB_STATE_CHANGED`, `COMPANY_UPDATE_CONFLICT`.
   - Shared primitive và Company consumer đã hoàn thành; Job/Application consumer sẽ đóng cùng mutation flow tương ứng.
 - [x] Bộ xử lý `429`/`503` phân biệt hai nhóm: nhóm **có** `Retry-After` đếm ngược và tự thử lại đúng một lần; nhóm **không có** như `MEDIA_UPLOAD_RATE_LIMITED` của Company hay AI rate-limit quy về `503` ở Application dùng local backoff 2–30 giây và khóa nút đến khi được phép thử lại.
@@ -1432,7 +1622,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [x] Dialog cảnh báo chuyển trạng thái ngầm: sửa `name` hoặc `taxCode` của công ty đang `VERIFIED` mở shared accessible warning dialog trước khi gọi `PUT /companies/:id`; chỉ mutation sau xác nhận, hủy giữ nguyên draft, pending khóa nút, rồi cập nhật badge về `PENDING` và xóa `rejectReason` theo response backend.
 - [x] Handshake tải media ba bước: gọi đúng Company boundary `POST /companies/:id/media/signature` với `Idempotency-Key` ổn định → upload multipart thẳng lên `uploadUrl` không cookie → `POST /companies/:id/media/confirm` → rồi mới `PUT /companies/:id` với `fileId`. FE kiểm `maxBytes`/`allowedFormats` trước và sau signature, đếm ngược `expiresAt`, xin chữ ký mới khi hết hạn; file đã confirm được giữ để retry attach hoặc bỏ local cho durable backend cleanup.
 - [x] Ngữ nghĩa **replace-all** của media trong `PUT`: editor kéo thả và có nút bàn phím để sắp xếp, xóa ảnh/video bằng cách bỏ khỏi mảng, luôn gửi lại toàn bộ gallery với `sortOrder` liên tục; FE chặn quá 10 IMAGE + 1 VIDEO và mọi `fileId` trùng logo/gallery; luồng xóa logo chỉ gửi `removeLogo=true`, không gửi đồng thời `logo`.
-- [x] Xử lý `409 COMPANY_UPDATE_CONFLICT`: API **không** có `If-Match` hay `version` trong body; form đã `GET /companies/me` lại, so `aggregateVersion` và từng field, giữ draft trong memory, cho chọn bản rồi yêu cầu người dùng bấm lưu lại kèm thông báo "dữ liệu vừa bị người khác sửa".
+- [x] Xử lý `409 COMPANY_UPDATE_CONFLICT`: `PUT /companies/:id` bắt buộc `expectedVersion` trong body (lấy từ `aggregateVersion` đang hiển thị), không dùng `If-Match`; form đã `GET /companies/me` lại, so `aggregateVersion` và từng field, giữ draft trong memory, cho chọn bản rồi yêu cầu người dùng bấm lưu lại kèm thông báo "dữ liệu vừa bị người khác sửa".
 - [x] Trang tìm kiếm công ty công khai với cursor pagination: route `/companies` giữ `nextCursor` mờ trong memory, khóa `q`/`limit` giữa các lần tải thêm, debounce 300 ms có IME guard, append khử trùng, infinite scroll kèm nút fallback và kết thúc chỉ theo `hasMore`; không hiển thị cursor, `total` hay thanh số trang.
 - [x] Trang công ty công khai: route `/companies/[companyId]` dùng placeholder khi `logoUrl=null`, chỉ render media hợp lệ có trong public response, có empty state và ghi rõ media vừa confirm có thể chưa xuất hiện ngay; `404 COMPANY_NOT_FOUND` được trình bày theo ngữ cảnh hồ sơ chưa xác minh/không còn công khai.
 - [x] Luồng mời thành viên phía OWNER: form gọi `POST /companies/:id/members`, normalize/validate email và hiện `invitationToken` đúng trong response tạo lời mời để copy/gửi thủ công; token chỉ ở React memory, có clipboard fallback và cảnh báo reload/mời lại cùng email sẽ mất hoặc vô hiệu token cũ.
@@ -1461,7 +1651,7 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 
 - [x] Lưu và gắn `expectedVersion` cho **mọi lệnh ghi** (đổi trạng thái, rút hồ sơ, gửi offer, phản hồi offer, làm mới match score): giữ `version` từ mọi response và gắn vào request kế tiếp.
 - [x] Luồng phản hồi offer giữ **hai version độc lập** (`expectedOfferVersion` + `expectedApplicationVersion`) và tách **bốn** loại `409` thành bốn thông báo/hành động khác nhau: `OFFER_EXPIRED`, `OFFER_ALREADY_RESPONDED`, `OFFER_CHANGED_CONCURRENTLY`, `APPLICATION_CHANGED_CONCURRENTLY`.
-- [x] Máy trạng thái hồ sơ phía client để chỉ hiện nút hợp lệ: `APPLIED→REVIEWING`, `REVIEWING→INTERVIEW`, `→REJECTED` (bắt buộc lý do) từ `APPLIED`/`REVIEWING`/`INTERVIEW`/`OFFER`; `INTERVIEW→OFFER` chỉ qua `POST /offer`; `OFFER→HIRED|REJECTED` chỉ do ứng viên phản hồi; `WITHDRAWN` từ bốn trạng thái active. Đoán sai là `409 INVALID_APPLICATION_TRANSITION`.
+- [x] Máy trạng thái hồ sơ phía client để chỉ hiện nút hợp lệ: `APPLIED→REVIEWING`, `REVIEWING→INTERVIEW`, `→REJECTED` (bắt buộc lý do) từ `APPLIED`/`REVIEWING`/`INTERVIEW`/`OFFER`; `INTERVIEW→OFFER` chỉ qua `POST /offer`; `OFFER→HIRED|REJECTED` chỉ do ứng viên phản hồi; `WITHDRAWN` từ bốn trạng thái active. `PATCH /status` đoán sai là `409 INVALID_APPLICATION_TRANSITION`; riêng `POST /offer` trả `409 APPLICATION_NOT_ELIGIBLE_FOR_OFFER` hoặc `409 OFFER_ALREADY_EXISTS` và form Offer tải lại trạng thái cho cả hai.
 - [x] Màn nộp hồ sơ xử lý cooldown: `details.eligibleAt` cho biết mốc 30 ngày kể từ lần `REJECTED` gần nhất — hiện ngày cụ thể thay vì lỗi chung.
 - [x] Bảng hồ sơ của nhà tuyển dụng: phân trang **offset** (`page`/`size`, tối đa 100) cùng bộ lọc `job_id`/`status`/`appliedFrom`/`appliedTo`/`skills` và ba kiểu sắp xếp. Đây **không** phải cursor nên phải xử lý trôi dữ liệu khi có hồ sơ mới chèn vào giữa các trang; tự validate `appliedFrom <= appliedTo` trước khi gửi.
 - [ ] Handshake upload file offer với Media **trước khi** gọi `POST /offer`: phải có cặp `fileId` + `fileUrl` đã xác nhận, thiếu một trong hai là `400`; bỏ file thì gửi cả hai rỗng.
@@ -1469,10 +1659,10 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 - [x] Hai loại phản hồi suy giảm phải render được thay vì báo lỗi: danh sách bookmark trả `200` với `job=null` khi Job Service lỗi (thẻ placeholder), và dashboard trả `warnings[]` cùng `summary.activeJobs.available=false` (hiện số liệu một phần kèm cảnh báo).
 - [x] Nút làm mới match score xử lý riêng `409 AI_MATCH_NOT_READY` kèm `details.reason`: đây là trạng thái "chưa sẵn sàng" cần cho thử lại/poll, **khác hẳn** `409` xung đột version.
 - [x] Màn xem/tải CV của recruiter: `expiresAt` rất ngắn nên phải mở ngay và xin link mới khi hết hạn; không cache metadata lẫn link.
-- [ ] Bù ba lỗ hổng API hiện có: ứng viên **không lấy được `version`** từ `GET /applications/my` (phải gọi thêm `GET /applications/:id` trước khi rút hồ sơ); **không có endpoint đọc offer** nên `offerId` phải lấy từ Notification Service; **không có endpoint GET đánh giá** nên phải tự nhớ trạng thái "đã đánh giá" từ `409`.
+- [x] Bù ba lỗ hổng API ban đầu: ứng viên **không lấy được `version`** từ `GET /applications/my` (phải gọi thêm `GET /applications/:id` trước khi rút hồ sơ); đọc Offer và đọc đánh giá nay đã có endpoint riêng.
   - [x] Candidate withdraw đã lấy detail/version authoritative trước mutation.
-  - [ ] Offer route đã nhận `offerId` theo deep link nhưng chưa có Notification handoff chứa hai version; không giả lập GET Offer không tồn tại.
-  - [x] Evaluation ghi nhớ “đã đánh giá” từ POST thành công hoặc exact duplicate `409` trong React session.
+  - [x] Offer route nhận `offerId` theo deep link rồi gọi `GET /offers/:id` (Candidate sở hữu hoặc Recruiter cùng công ty) để lấy `version` + `applicationVersion` từ cùng một snapshot; `offerId` nullable có trong list/detail Application.
+  - [x] Evaluation đọc lại bằng `GET /applications/:id/evaluations` (chỉ Recruiter cùng công ty) và vẫn coi exact duplicate `409` là “đã đánh giá”.
 - [x] Chú ý ba prefix khác nhau: hồ sơ ở `/applications/`, bookmark ở `/applications/bookmarks`, còn **phản hồi offer nằm ở prefix riêng `/offers/`**.
 
 #### AI chatbot — 1 endpoint
@@ -1498,13 +1688,13 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
   - [x] Job producer đã được kiểm tra từ PostgreSQL transaction/outbox tới Kafka thật: rollback khi outbox lỗi, concurrent CAS, version `1/2/3`, salary biên, Kafka key/payload và trạng thái published.
   - [x] Profile CV producer đã được kiểm tra PostgreSQL transaction/outbox → Kafka 3.8 thật: exact key/chín trường, version order, `published_at` và terminal flush không phát thêm.
   - [x] AI CV consumer Kafka 3.8 → PostgreSQL/pgvector kiểm `UPSERTED → DEACTIVATED`, source unavailable → `DELETED`, malformed/oversized JSON, redacted DLQ và commit offset. Duplicate/order/ownership/tombstone được kiểm ở PostgreSQL integration; Media/parser dùng fake deterministic nên deployed E2E vẫn pending.
-  - [x] Application producer PostgreSQL outbox → Kafka 3.8 và Notification consumer Kafka → PostgreSQL đã kiểm exact v1 fixtures, Offer transitions, retained backlog, duplicate/collision, poison continuation và offset terminal; deployed hai service cùng lúc vẫn pending.
-  - [x] Interview producer PostgreSQL outbox → Kafka 3.8 và Notification consumer Kafka → PostgreSQL đã kiểm exact 15 fields/privacy, atomic rollback, lease/fence/order, retained backlog/cutoff, duplicate/collision, poison continuation và offset terminal; deployed hai service cùng lúc vẫn pending.
+  - [ ] Application producer có Kafka test PASS trong lượt mới; Notification Go cần tái kiểm contract, collision/replay/poison và deployed E2E. Gate consumer NestJS trước đây chỉ là lịch sử (mục 2.1–2.58).
+  - [ ] Interview producer có PostgreSQL/Kafka test PASS trong lượt mới; Notification Go cần tái kiểm exact-contract/privacy/replay/collision và deployed E2E. Không chuyển PASS của consumer NestJS cũ sang bản Go.
 - [ ] E2E Candidate: đăng ký → hồ sơ/CV → tìm việc → bookmark/apply → interview → offer → hired.
 - [ ] E2E Recruiter: công ty → xác minh → job → duyệt → nhận hồ sơ → interview → offer.
 - [ ] E2E Admin: duyệt, khóa user, report và dashboard.
 - [ ] Security test JWT giả/hết hạn/sai role, IDOR, injection, file upload và secret leakage.
-  - [x] Notification đã test strict RS256/JWKS/static PEM, issuer/audience/header/claim, unknown-`kid` cooldown, owner isolation/404, cursor tamper/cross-owner và no-store.
+  - [ ] Notification Go phải tái kiểm strict JWT/cursor/owner isolation. Probe 13/10 đã chứng minh sai issuer/audience và thiếu subject/role vẫn được chấp nhận; các số PASS NestJS trước không áp dụng.
   - [x] Interview Query đã test Candidate/Recruiter/Admin/anonymous, cross-Candidate/cross-Company IDOR, DTO redaction, cursor tamper/cross-scope, unknown/repeated query, bounded range/limit và Company/Application fail-closed.
   - [x] Job & Search đã test strict canonical Bearer/RS256/JWKS/static PEM, issuer/audience/`typ`/thumbprint `kid`/UUID/role/time claims, current-previous rotation, cache/cooldown/timeout/body cap, malformed upstream, error redaction và no-stale-key. Đây là service-level gate; deployed Auth–Job negative E2E vẫn pending.
   - [x] Application đã test strict canonical Bearer/RS256/JWKS/static PEM, issuer/scalar audience/`typ`/thumbprint `kid`/UUIDv4/role/time claims, current-previous rotation, atomic cache/single-flight/cooldown/total timeout/body cap/no-stale và sanitized 401/503/500. Đây là service-level gate; deployed Auth–Application negative E2E vẫn pending.
@@ -1527,6 +1717,8 @@ Bốn service Company, Job & Search, Application và AI. **44/44 checkbox của 
 Live Cloudinary smoke với sáu preset thật vẫn là hạng mục P09 độc lập cần credential/preset ngoài repository; không chặn unit/service contract bằng fake provider deterministic, nhưng là staging/production rollout gate và bắt buộc hoàn tất trước production.
 
 ## Rủi ro và điểm cần chốt ngay
+
+> Các số test và mô tả runtime trong phần dưới thuộc các mốc lịch sử trước 13/10/2026. Hiện trạng kiểm thử, chuyển Go và lỗi cần ưu tiên được chốt ở mục 2.59; không lấy các số lịch sử dưới đây để kết luận release PASS.
 
 - Core Auth đã hoàn thành qua OTP, password login, Google OIDC, JWT/refresh, forgot/reset password và Admin account control. Account-link Google có re-auth chỉ là hạng mục tùy chọn; production vẫn cần quy trình provisioning/bootstrap Admin được kiểm soát.
 - Admin account control bị ẩn khỏi public gateway và chưa có AuditLog vì proxy/audit thuộc P10 Admin Service. Access JWT stateless đã phát cho service khác vẫn có thể dùng tối đa 15 phút; chưa có denylist/introspection để thu hồi tức thời toàn hệ thống. API hiện là set-state idempotent theo last-commit-wins và chưa nhận expected version/`If-Match`; P10 phải serialize command hoặc bổ sung conditional mutation nếu nghiệp vụ cần chặn delayed unlock.

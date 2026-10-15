@@ -1,8 +1,12 @@
-FROM node:20-alpine
+FROM golang:1.25-alpine AS builder
 WORKDIR /app
-COPY package*.json ./
-RUN npm install --omit=dev
-COPY src src
-EXPOSE 3001
-CMD ["npm", "run", "start"]
+RUN apk add --no-cache git
+COPY go.mod ./
+COPY . .
+RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o server ./cmd/server
 
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates tzdata
+COPY --from=builder /app/server /server
+EXPOSE 8080
+ENTRYPOINT ["/server"]

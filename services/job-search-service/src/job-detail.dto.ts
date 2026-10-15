@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import { JobStatus, JobType } from '@prisma/client';
 import {
   ArrayMaxSize,
@@ -19,6 +20,11 @@ export class BulkJobDetailRequestDto {
     maxItems: MAX_BULK_JOB_DETAIL_IDS,
     uniqueItems: true,
   })
+  // PostgreSQL returns ids in lowercase; normalize before the uniqueness
+  // check so 'ABC…' and 'abc…' are one id and still resolve to the job.
+  @Transform(({ value }: { value: unknown }) => Array.isArray(value)
+    ? value.map((item) => typeof item === 'string' ? item.toLowerCase() : item)
+    : value)
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(MAX_BULK_JOB_DETAIL_IDS)

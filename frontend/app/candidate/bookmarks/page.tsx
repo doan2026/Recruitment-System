@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../components/ui";
+import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import { bookmarkCardView } from "../../../lib/applicationDegradedStates";
 import { getCandidateBookmarks, removeCandidateBookmark, type CandidateBookmark } from "../../../lib/person2Api";

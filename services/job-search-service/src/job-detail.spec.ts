@@ -78,10 +78,23 @@ describe('BulkJobDetailRequestDto', () => {
       label: 'more than 100 ids',
     },
     { jobIds: ['not-a-uuid'], label: 'invalid ids' },
+    {
+      jobIds: [PUBLISHED_ID, PUBLISHED_ID.toUpperCase()],
+      label: 'duplicates that differ only in case',
+    },
   ])('rejects $label', async ({ jobIds }) => {
     const dto = plainToInstance(BulkJobDetailRequestDto, { jobIds });
 
     expect(await validate(dto)).not.toHaveLength(0);
+  });
+
+  it('lowercases ids so an uppercase UUID still resolves to its job', async () => {
+    const dto = plainToInstance(BulkJobDetailRequestDto, {
+      jobIds: [PUBLISHED_ID.toUpperCase()],
+    });
+
+    await expect(validate(dto)).resolves.toHaveLength(0);
+    expect(dto.jobIds).toEqual([PUBLISHED_ID.toLowerCase()]);
   });
 });
 

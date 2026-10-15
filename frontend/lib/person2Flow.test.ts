@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 import {
   ApiClientError, clearApiSession, configureApiSessionRefresh, getApiSessionAccountId,
   getApiSessionRevision, requestApi, setApiSession,
 } from "./apiClientCore";
-import { getCurrentAccount, signIn, signOut } from "./authSession";
+import { getCurrentAccount, refreshAuthSession, signIn, signOut } from "./authSession";
 
 process.env.NEXT_PUBLIC_API_MODE = "gateway";
 process.env.NEXT_PUBLIC_API_BASE_URL = "http://gateway.test";
@@ -14,6 +14,7 @@ const companyId = "3795c0de-7908-4ab5-9bed-4c4f1cf9c212";
 const applicationId = "4795c0de-7908-4ab5-9bed-4c4f1cf9c213";
 const offerId = "5795c0de-7908-4ab5-9bed-4c4f1cf9c214";
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(status < 400 ? { data, meta: null } : data), { status, headers: { "content-type": "application/json" } });
+beforeEach(() => configureApiSessionRefresh(refreshAuthSession));
 afterEach(() => { globalThis.fetch = originalFetch; configureApiSessionRefresh(null); clearApiSession(); delete process.env.API_INTERNAL_BASE_URL; });
 
 test("repeated anonymous 401 invalidates protected state once, never an endless remount", async () => {
@@ -55,38 +56,38 @@ test("server requests use internal Gateway origin without changing public browse
   assert.equal(process.env.NEXT_PUBLIC_API_BASE_URL, "http://gateway.test");
 });
 
-test("Auth login, token refresh and logout consume existing JSON contracts in memory", async () => {
+test("Auth cookie login, refresh and logout keep credentials out of browser memory", async () => {
   const user = { id: companyId, email: "fixture@example.test", role: "CANDIDATE" };
   const calls: string[] = [];
   let protectedCalls = 0;
   globalThis.fetch = async (input, options) => {
     const url = String(input); calls.push(url);
-    if (url.includes("/auth/")) assert.equal(new Headers(options?.headers).get("authorization"), null);
-    if (url.endsWith("/auth/login")) return json({ accessToken: "first-token", refreshToken: "refresh-one", tokenType: "Bearer", user });
-    if (url.endsWith("/auth/refresh")) {
-      assert.deepEqual(JSON.parse(String(options?.body)), { refreshToken: "refresh-one" });
-      return json({ accessToken: "new-token", refreshToken: "refresh-two", tokenType: "Bearer", user });
+    if (url.includes("/auth-cookie/")) assert.equal(new Headers(options?.headers).get("authorization"), null);
+    if (url.endsWith("/auth-cookie/login")) return json({ user });
+    if (url.endsWith("/auth-cookie/refresh")) {
+      assert.deepEqual(JSON.parse(String(options?.body)), {});
+      return json({ user });
     }
-    if (url.endsWith("/auth/logout")) {
-      assert.deepEqual(JSON.parse(String(options?.body)), { refreshToken: "refresh-two" });
+    if (url.endsWith("/auth-cookie/logout")) {
+      assert.deepEqual(JSON.parse(String(options?.body)), {});
       return new Response(null, { status: 204 });
     }
     protectedCalls += 1;
     if (protectedCalls === 1) return json({ code: "AUTH_INVALID" }, 401);
-    assert.equal(new Headers(options?.headers).get("authorization"), "Bearer new-token");
+    assert.equal(new Headers(options?.headers).get("authorization"), null);
     return json([]);
   };
   await signIn(user.email, "fixture-password");
   assert.deepEqual(getCurrentAccount(), user);
   await requestApi("/applications/my", { privateData: true });
-  assert.equal(calls.filter((url) => url.endsWith("/auth/refresh")).length, 1);
+  assert.equal(calls.filter((url) => url.endsWith("/auth-cookie/refresh")).length, 1);
   await signOut();
   assert.equal(getCurrentAccount(), null);
 });
 
 test("logout clears private UI even when server is temporarily unavailable", async () => {
-  globalThis.fetch = async (input) => String(input).endsWith("/auth/login")
-    ? json({ accessToken: "fixture-token", refreshToken: "refresh-fixture", tokenType: "Bearer", user: { id: companyId, email: "fixture@example.test", role: "RECRUITER" } })
+  globalThis.fetch = async (input) => String(input).endsWith("/auth-cookie/login")
+    ? json({ user: { id: companyId, email: "fixture@example.test", role: "RECRUITER" } })
     : json({ code: "UNAVAILABLE" }, 503);
   await signIn("fixture@example.test", "fixture-password");
   await assert.rejects(signOut());

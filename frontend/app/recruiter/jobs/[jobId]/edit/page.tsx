@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../../../components/ui";
-import { ConfirmationDialog } from "../../../../../components/ConfirmationDialog";
-import { ConflictRecoveryPanel } from "../../../../../components/ConflictRecoveryPanel";
+import { ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
+import { ConfirmationDialog } from "@/components/ConfirmationDialog";
+import { ConflictRecoveryPanel } from "@/components/ConflictRecoveryPanel";
 import { ApiClientError, toUserMessage } from "../../../../../lib/apiClient";
 import { prepareConflictSnapshot, type ConflictSnapshot } from "../../../../../lib/conflictRecovery";
 import { JOB_CONFLICT_FIELDS } from "../../../../../lib/person2ConflictFields";
 import {
+  jobEditRequiresReview,
   normalizeRecruiterJobForm,
   validateRecruiterJobForm,
   type RecruiterJobFormValues,
@@ -35,8 +36,8 @@ function toDraft(job: Job): RecruiterJobFormValues {
     quantity: String(job.quantity ?? 1),
     skills: job.skills.join(", "),
     description: job.description,
-    requirements: job.requirements.join("\n"),
-    benefits: job.benefits.join("\n"),
+    requirements: job.requirementsText ?? job.requirements.join("\n"),
+    benefits: job.benefitsText ?? job.benefits.join("\n"),
   };
 }
 
@@ -100,7 +101,7 @@ export default function EditRecruiterJobPage() {
       document.getElementById(Object.keys(errors)[0])?.focus();
       return;
     }
-    if (job.status === "PUBLISHED" && !confirmed) {
+    if (job.status === "PUBLISHED" && !confirmed && jobEditRequiresReview(toDraft(job), draft)) {
       setConfirmPublishedEdit(true);
       return;
     }
@@ -170,7 +171,7 @@ export default function EditRecruiterJobPage() {
       <PageHeader
         eyebrow="RECRUITER · JOB REVIEW"
         title={job.rejectionReason ? "Sửa tin theo góp ý" : "Sửa tin tuyển dụng"}
-        description="Sửa nội dung tuyển dụng. Tin đang công khai sẽ được gửi duyệt lại sau khi lưu."
+        description="Sửa nội dung tuyển dụng. Với tin đang công khai, đổi tiêu đề, mô tả, yêu cầu, lương hoặc đơn vị tiền cần admin duyệt lại; hạn nộp, số lượng và các trường khác được cập nhật ngay."
         action={<Link className="btn" href="/recruiter/jobs">Về danh sách</Link>}
       />
 

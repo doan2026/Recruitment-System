@@ -50,12 +50,13 @@ a {
 }
 
 .topbar-inner {
-  max-width: 1240px;
+  width: 100%;
+  min-height: 72px;
   margin: 0 auto;
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 14px 20px;
+  padding: 14px 5vw;
 }
 
 .brand {
@@ -84,9 +85,10 @@ a {
 }
 
 .content-wrap {
-  max-width: 1240px;
+  width: 100%;
   margin: 0 auto;
-  padding: 24px;
+  padding: 36px 5vw 64px;
+  flex: 1;
 }
 
 .page-title {
@@ -368,25 +370,14 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 textarea { resize: none; }
 
 .app-shell { display: flex; min-height: 100vh; flex-direction: column; }
-.content-wrap { width: 100%; flex: 1; padding: 36px 24px 56px; }
 
 .topbar { border-bottom-color: rgba(188, 203, 185, 0.6); }
-.topbar-inner { min-height: 72px; max-width: 1280px; padding: 12px 24px; }
 .brand { display: inline-flex; align-items: center; gap: 10px; min-width: max-content; }
-.brand-mark {
-  display: inline-grid;
-  width: 36px;
-  height: 36px;
-  place-items: center;
-  border-radius: 10px 4px 10px 10px;
-  background: var(--primary);
-  color: white;
-  font-size: 1.1rem;
-}
-.top-nav { flex: 1; justify-content: center; gap: 4px; }
+
+.top-nav { justify-content: flex-start; gap: 16px; margin-left: 24px; }
 .top-nav a { padding: 10px 12px; border-radius: 8px; color: #3d4a3d; }
 .top-nav a:hover { background: var(--surface-2); }
-.profile-chip { display: flex; align-items: center; gap: 10px; min-width: max-content; }
+.profile-chip { display: flex; align-items: center; gap: 10px; min-width: max-content; margin-left: auto; }
 .avatar { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 50%; background: #d7f5df; color: var(--primary); font-weight: 700; }
 .profile-copy { display: flex; flex-direction: column; line-height: 1.2; }
 .profile-copy strong { font-size: 0.82rem; }
@@ -402,13 +393,13 @@ textarea { resize: none; }
 .hero {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
-  gap: 48px;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.9fr);
+  gap: clamp(24px, 4vw, 56px);
   overflow: hidden;
-  margin: -8px 0 56px;
-  padding: clamp(32px, 6vw, 72px);
+  margin: 0 0 56px;
+  padding: clamp(40px, 8vw, 80px) clamp(32px, 6vw, 72px);
   border: 1px solid rgba(188, 203, 185, 0.7);
-  border-radius: 24px;
+  border-radius: 28px;
   background: linear-gradient(135deg, #ffffff 0%, #eef6f0 65%, #dcfbe4 100%);
   box-shadow: 0 18px 60px rgba(24, 67, 39, 0.08);
 }

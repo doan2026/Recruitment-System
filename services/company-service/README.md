@@ -64,6 +64,7 @@ dashboards, alert rules and error budgets remain infrastructure work.
 | `DELETE /:id/members/:userId` | `DELETE /companies/:id/members/:userId` | Company OWNER |
 | `PATCH /:id/members/:userId/transfer-ownership` | `PATCH /companies/:id/members/:userId/transfer-ownership` | Company OWNER |
 | `GET /by-user/:userId` | `GET /companies/by-user/:userId` | Self recruiter / ADMIN |
+| `GET /internal/:id` | Not routable publicly (gateway strips `X-Internal-Api-Key`) | Job & Search only, `X-Internal-Api-Key` = `INTERNAL_API_KEY_JOB_SEARCH`; returns `id`, `name`, `verifiedStatus` for any status so PUBLISHED jobs stay indexable during re-review |
 | `GET /search?q=&cursor=&limit=` | `GET /companies/search?q=&cursor=&limit=` | Public, VERIFIED companies only |
 | `GET /:id` | `GET /companies/:id` | Public, VERIFIED companies only |
 | `PUT /:id` | `PUT /companies/:id` | Company OWNER |

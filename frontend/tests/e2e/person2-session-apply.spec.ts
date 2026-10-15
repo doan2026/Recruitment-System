@@ -1,6 +1,15 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-const gateway = "http://127.0.0.1:4174";
+const gateway = "http://127.0.0.1:4173/api";
+test.beforeEach(async ({ page }) => {
+  await page.route("http://127.0.0.1:4173/api/notifications**", (route) => route.fulfill({
+    status: 200, contentType: "application/json", body: JSON.stringify({ data: route.request().url().includes("unread-count") ? { unread_count: 0 } : [], meta: null }),
+  }));
+  await page.route("http://127.0.0.1:4173/api/auth/me", (route) => route.fulfill({
+    status: 401, contentType: "application/json", body: JSON.stringify({ code: "AUTH_INVALID" }),
+  }));
+});
+
 const jobId = "2795c0de-7908-4ab5-9bed-4c4f1cf9c211";
 const companyId = "3795c0de-7908-4ab5-9bed-4c4f1cf9c212";
 const accountId = "4795c0de-7908-4ab5-9bed-4c4f1cf9c213";
@@ -28,8 +37,7 @@ async function reply(route: Route, data: unknown, status = 200) {
 }
 
 async function mockLogin(page: Page) {
-  await page.route(`${gateway}/auth/login`, (route) => reply(route, {
-    accessToken: "browser-contract-access", refreshToken: "browser-contract-refresh", tokenType: "Bearer",
+  await page.route(`${gateway}/auth-cookie/login`, (route) => reply(route, {
     user: { id: accountId, role: "CANDIDATE", email: "fixture@example.com" },
   }));
 }
@@ -61,7 +69,7 @@ test("private applications stay gated anonymously and a failed refresh settles w
     privateReads += 1;
     return reply(route, { code: "UNAUTHORIZED" }, 401);
   });
-  await page.route(`${gateway}/auth/refresh`, (route) => {
+  await page.route(`${gateway}/auth-cookie/refresh`, (route) => {
     refreshRequests.push({
       authorization: route.request().headers().authorization,
       body: route.request().postDataJSON(),
@@ -83,7 +91,7 @@ test("private applications stay gated anonymously and a failed refresh settles w
   expect(privateReads).toBe(settledReads);
   expect(privateReads).toBeGreaterThan(0);
   expect(privateReads).toBeLessThanOrEqual(2);
-  expect(refreshRequests).toEqual([{ authorization: undefined, body: { refreshToken: "browser-contract-refresh" } }]);
+  expect(refreshRequests).toEqual([{ authorization: undefined, body: {} }]);
 });
 
 test("Profile CV picker selects the default and sends the chosen CV with actual AI source only once", async ({ page }) => {
@@ -167,4 +175,28 @@ test("bookmark save and both detail/list removals handle empty 204 responses", a
   await expect(page.getByText("Đã bỏ lưu việc làm.", { exact: true })).toBeVisible();
   expect(saves).toEqual([{ jobId }, { jobId }]);
   expect(removals).toEqual(["DELETE", "DELETE"]);
+});
+
+test("a late anonymous hydration response cannot clear a newer login", async ({ page }) => {
+  let release!: () => void;
+  const delayed = new Promise<void>((resolve) => { release = resolve; });
+  let hydrationStarted = false;
+  await page.route(`${gateway}/auth/me`, async (route) => {
+    hydrationStarted = true;
+    await delayed;
+    await reply(route, { code: "AUTH_INVALID" }, 401);
+  });
+  await mockLogin(page);
+  await mockJobDetail(page);
+  await page.route(`${gateway}/applications/bookmarks`, (route) => reply(route, []));
+  await page.route(`${gateway}/profile/cvs`, (route) => reply(route, []));
+  await page.goto(`/login?returnTo=${encodeURIComponent(`/candidate/jobs/${jobId}`)}`);
+  await expect.poll(() => hydrationStarted).toBe(true);
+  await submitLogin(page);
+  await expect(page.getByRole("button", { name: "Đăng xuất", exact: true })).toBeVisible();
+  const response = page.waitForResponse(`${gateway}/auth/me`);
+  release();
+  await response;
+  await expect(page).toHaveURL(`http://127.0.0.1:4173/candidate/jobs/${jobId}`);
+  await expect(page.getByRole("button", { name: "Đăng xuất", exact: true })).toBeVisible();
 });

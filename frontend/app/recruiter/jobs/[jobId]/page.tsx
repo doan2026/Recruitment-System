@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { RecruiterApplicationPipeline } from "../../../../components/RecruiterApplicationPipeline";
-import { ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../../components/ui";
+import { RecruiterApplicationPipeline } from "@/components/RecruiterApplicationPipeline";
+import { ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
 import { ApiClientError, toUserMessage } from "../../../../lib/apiClient";
 import { getRecruiterJob, type Job } from "../../../../lib/person2Api";
 import { RecruiterCandidateRecommendations } from "../RecruiterCandidateRecommendations";

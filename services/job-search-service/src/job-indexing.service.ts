@@ -684,7 +684,7 @@ export class JobIndexingService implements OnModuleInit, OnModuleDestroy {
     );
     let document: JobIndexDocument;
     if (job && searchable) {
-      const companyName = await this.companies.getPublicCompanyName(
+      const companyName = await this.companies.getCompanyNameForIndexing(
         job.companyId,
       );
       document = {

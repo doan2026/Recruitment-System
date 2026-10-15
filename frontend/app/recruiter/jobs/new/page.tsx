@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { PageHeader, StatusBadge } from "../../../../components/ui";
+import { PageHeader, StatusBadge } from "@/components/ui";
 import { toUserMessage } from "../../../../lib/apiClient";
 import {
   emptyRecruiterJobForm,

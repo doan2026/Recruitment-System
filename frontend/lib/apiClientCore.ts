@@ -71,6 +71,7 @@ export const API_PATHS = Object.freeze({
   bookmarks: "/applications/bookmarks",
   offers: "/offers/",
   aiChat: "/ai/chat",
+  chats: "/chat/chats",
 });
 
 type QueryPrimitive = string | number | boolean;
@@ -346,6 +347,8 @@ export function toNoStoreHeaders(): Record<string, string> {
 }
 
 function apiBaseUrl(): string {
+  // HttpOnly access cookies are forwarded by the same-origin Next middleware.
+  if (typeof window !== "undefined") return "/api";
   const configured = (typeof window === "undefined"
     ? process.env.API_INTERNAL_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL
     : process.env.NEXT_PUBLIC_API_BASE_URL)?.trim() ?? "";

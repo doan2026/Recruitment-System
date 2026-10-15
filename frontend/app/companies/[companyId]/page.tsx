@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { EmptyState, PageHeader } from "../../../components/ui";
+import { EmptyState, PageHeader } from "@/components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import { companyLogoFallback, orderPublicCompanyMedia } from "../../../lib/companyPublicProfile";
 import { getPublicCompany } from "../../../lib/person2Api";
