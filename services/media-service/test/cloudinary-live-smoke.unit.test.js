@@ -52,7 +52,7 @@ const presetResponse = (smokeCase) => ({
   name: smokeCase.uploadPreset,
   unsigned: false,
   allowed_formats: [...smokeCase.policy.formats],
-  max_file_size: smokeCase.policy.maxBytes,
+  overwrite: false,
   type:
     smokeCase.policy.deliveryType === 'AUTHENTICATED'
       ? 'authenticated'
@@ -107,6 +107,7 @@ test('live smoke environment is explicit, confirmed and secret-safe', () => {
       }),
     ),
   );
+
 });
 
 test('smoke cases are sourced from exactly six media policies', () => {
@@ -204,6 +205,8 @@ test('fixture magic validation stays local and bounded by format', () => {
 
 test('preset audit validates supported signed policy fields exactly', () => {
   const smokeCase = configuredCases()[0];
+  const { name, unsigned, ...settings } = presetResponse(smokeCase);
+  assert.doesNotThrow(() => validatePresetConfiguration(smokeCase, { name, unsigned, settings }));
   assert.doesNotThrow(() =>
     validatePresetConfiguration(
       smokeCase,
@@ -216,10 +219,6 @@ test('preset audit validates supported signed policy fields exactly', () => {
     { ...presetResponse(smokeCase), name: undefined },
     { ...presetResponse(smokeCase), unsigned: true },
     { ...presetResponse(smokeCase), allowed_formats: ['jpg'] },
-    {
-      ...presetResponse(smokeCase),
-      max_file_size: smokeCase.policy.maxBytes - 1,
-    },
     { ...presetResponse(smokeCase), type: 'upload' },
   ]) {
     assert.throws(

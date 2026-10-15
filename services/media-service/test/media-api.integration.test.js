@@ -567,6 +567,30 @@ test('File/Media signed upload API on PostgreSQL 16', async (t) => {
     assert.equal(internalVerify.payload.data.url, null);
   });
 
+  await t.test('internal download uses service authentication before public parameter routes', async () => {
+    const body = {
+      fileId: cvFileId,
+      expectedOwnerType: 'USER',
+      expectedOwnerId: CANDIDATE_A,
+      expectedType: 'CV',
+    };
+    const download = await api('POST', '/internal/download-url', {
+      headers: internalHeaders('profile-service'), body,
+    });
+    assert.equal(download.response.status, 200);
+    assert.match(download.payload.data.url, /^https:\/\/download\.test\//);
+    const wrongOwner = await api('POST', '/internal/download-url', {
+      headers: internalHeaders('profile-service'),
+      body: { ...body, expectedOwnerId: CANDIDATE_B },
+    });
+    assert.equal(wrongOwner.response.status, 409);
+    assert.equal(wrongOwner.payload.code, 'FILE_EXPECTATION_MISMATCH');
+    const bearerOnly = await api('POST', '/internal/download-url', {
+      token: accessToken(CANDIDATE_A, 'CANDIDATE'), body,
+    });
+    assert.equal(bearerOnly.response.status, 401);
+  });
+
   await t.test('spoofed size and magic bytes are rejected and never activated', async () => {
     const oversizedIntent = await createPublicIntent(
       CANDIDATE_B,

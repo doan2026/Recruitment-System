@@ -118,6 +118,8 @@ Mỗi danh tính service có key riêng và key được so sánh constant-time 
 
 Ảnh/video public chỉ trả canonical HTTPS URL thuộc đúng Cloudinary cloud. `CV` và `CHAT_ATTACHMENT` có `url=null`; download URL AUTHENTICATED chỉ sống 5 phút. Consumer phải lưu `fileId`, không persist URL tạm.
 
+Cloudinary RAW có thể không trả `format`; adapter chỉ suy ra từ phần mở rộng trong `public_id` canonical của provider, rồi confirm vẫn kiểm tra format theo intent và magic bytes. URL Private Download API giữ nguyên public ID RAW gồm phần mở rộng; inspection dùng URL có hạn 60 giây và range tối đa 8 KiB để kiểm tra file riêng tư. Controller nội bộ được đăng ký trước route công khai có `:id`, bảo đảm `/internal/download-url` dùng đúng xác thực service.
+
 ## State, idempotency và concurrency
 
 State được lưu:
@@ -187,7 +189,7 @@ CLOUDINARY_UPLOAD_PRESET_COMPANY_VIDEO=recruitment_company_video_signed
 CLOUDINARY_UPLOAD_PRESET_CHAT_ATTACHMENT=recruitment_chat_attachment_signed
 ```
 
-Sáu preset phải là signed preset và phải enforce đúng allowed format, max file size cùng delivery rule tương ứng bảng policy. Service ký exact format/folder/public ID/context, nhưng Cloudinary chọn `resource_type` bằng upload endpoint chứ không đưa trường đó vào chữ ký. Vì vậy confirm quét context `file_id` trên cả `image`/`video`/`raw`, từ chối và cố xóa toàn bộ identity lệch. Giới hạn upload-side về dung lượng vẫn phụ thuộc cấu hình preset; confirm và database constraints là lớp chặn cuối.
+Sáu preset phải là signed preset, có allowed format và delivery rule đúng policy. Media ký `overwrite=false` để chặn ghi đè. Cloudinary không hỗ trợ giới hạn dung lượng riêng theo preset; tham số `max_file_size` không phải ràng buộc được provider lưu. Client kiểm tra dung lượng trước upload; Media kiểm tra canonical bytes ở confirm và database constraints giữ nguyên giới hạn trước khi ACTIVE. Giới hạn upload-side của Cloudinary phụ thuộc tài khoản, nên file quá policy vẫn có thể tới provider và phải bị reject/cleanup khi confirm. Service ký exact format/folder/public ID/context, nhưng Cloudinary chọn `resource_type` bằng upload endpoint chứ không đưa trường đó vào chữ ký. Vì vậy confirm quét context `file_id` trên cả `image`/`video`/`raw`, từ chối và cố xóa toàn bộ identity lệch. Xem [giới hạn của upload preset](https://cloudinary.com/documentation/upload_presets).
 
 Service không tự tạo hoặc gọi remote để xác minh preset khi khởi động. Health chỉ kiểm tra database, cấu hình JWT, sáu internal key và sự hiện diện của Cloudinary credentials/preset name. Vì vậy cần live smoke test trên environment trước release.
 
@@ -204,7 +206,7 @@ Runner lấy đúng sáu case từ `MEDIA_POLICIES`, audit read-only từng pres
 5. delete bằng exact Media `fileId`;
 6. trong `finally`, retry exact asset locator và sweep exact context `file_id` trên `image`/`video`/`raw`, sau đó xác nhận context rỗng.
 
-Preset audit yêu cầu Admin API trả rõ `unsigned=false`, `allowed_formats`, `max_file_size` và `type`; các giá trị phải khớp chính xác policy. Runner không tạo/sửa/xóa preset, không xóa theo folder/prefix và không ghi secret, signature, private URL hoặc nội dung fixture ra log.
+Preset audit đọc cấu trúc `settings` hiện tại của Admin API (tương thích `options`/flat), yêu cầu `unsigned=false`, `allowed_formats`, `type` đúng policy. Media ký `overwrite=false` trong capability, nên không dựa vào giá trị overwrite mặc định của preset. Giới hạn byte vẫn được kiểm tra ở fixture/capability và canonical confirm, không dựa vào trường preset không được Cloudinary hỗ trợ. Runner không tạo/sửa/xóa preset, không xóa theo folder/prefix và không ghi secret, signature, private URL hoặc nội dung fixture ra log.
 
 Ngoài Cloudinary credential, sáu preset và ba internal key Profile/Company/Chat, cấu hình:
 
@@ -259,7 +261,7 @@ docker compose -p recruitment-media-test-local -f compose.test.yml down -v --rem
 docker compose -p recruitment-media-test-local -f compose.test.yml up --build --abort-on-container-exit --exit-code-from media-tests
 ```
 
-Kết quả xác nhận gần nhất: **26/26 unit + 26/26 TAP integration test**. Integration test dùng PostgreSQL 16 thật và `FakeStorageProvider` deterministic; Cloudinary adapter được unit-test bằng SDK/fetch mock. Đây không phải live Cloudinary integration test.
+Kết quả xác nhận gần nhất: **26/26 unit + 27/27 TAP integration test**. Integration test dùng PostgreSQL 16 thật và `FakeStorageProvider` deterministic; Cloudinary adapter được unit-test bằng SDK/fetch mock. Kiểm thử riêng CV/AVATAR với Cloudinary thật được ghi tại [báo cáo ngày 16/10/2026](../../docs/person1-cloudinary-2026-10-16.md); không coi bộ test dùng fake là bằng chứng live.
 
 Phạm vi test gồm:
 
