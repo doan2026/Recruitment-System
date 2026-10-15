@@ -1,96 +1,103 @@
 "use client";
-
-import { type FormEvent, useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { requestApi } from "../../lib/apiClientCore";
-import { toUserMessage } from "../../lib/apiClient";
-import { PublicShell } from "@/components/PublicShell";
-
+import Link from "next/link";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { requestApi } from "../../lib/apiClient";
+import { publicAuth, passwordError, person1Error } from "../../lib/person1Api";
 export default function ResetPasswordPage() {
-  const router = useRouter();
-  const [token, setToken] = useState("");
+  const token = useRef("");
+  const read = useRef(false);
   const [password, setPassword] = useState("");
-  const [visible, setVisible] = useState(false);
+  const [confirm, setConfirm] = useState("");
   const [pending, setPending] = useState(false);
+  const [done, setDone] = useState(false);
   const [error, setError] = useState("");
-  const [invalid, setInvalid] = useState<"password" | null>(null);
-  const [success, setSuccess] = useState(false);
-
   useEffect(() => {
-    // Extract token from URL fragment e.g., #token=abc
-    const hash = window.location.hash.substring(1);
-    const params = new URLSearchParams(hash);
-    const tokenParam = params.get("token");
-    if (tokenParam) {
-      setToken(tokenParam);
-    } else {
-      setError("Không tìm thấy mã xác thực khôi phục mật khẩu trong liên kết.");
-    }
+    if (read.current) return;
+    read.current = true;
+    token.current =
+      new URLSearchParams(location.hash.slice(1)).get("token") ??
+      new URLSearchParams(location.search).get("token") ??
+      "";
+    history.replaceState(null, "", location.pathname);
+    if (!token.current)
+      setError("Liên kết không hợp lệ. Hãy yêu cầu đặt lại mật khẩu.");
   }, []);
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function submit(e: FormEvent) {
+    e.preventDefault();
     if (pending) return;
-    
-    if (password.length < 8) {
-      setInvalid("password");
-      setError("");
-      document.getElementById("reset-password")?.focus();
+    const problem = passwordError(password);
+    if (problem || password !== confirm) {
+      setError(problem ?? "Hai mật khẩu chưa trùng nhau.");
       return;
     }
-    
-    setInvalid(null);
     setPending(true);
     setError("");
-    
     try {
-      await requestApi<void>("/auth/reset-password", {
-        method: "POST", body: { token, newPassword: password }, privateData: true,
-        authRecovery: false, attachAccessToken: false, maxRetries: 0,
+      await requestApi("/auth/reset-password", {
+        ...publicAuth,
+        method: "POST",
+        body: { token: token.current, newPassword: password },
       });
-      setSuccess(true);
-    } catch (reason) {
-      setError(toUserMessage(reason));
+      token.current = "";
+      setPassword("");
+      setConfirm("");
+      setDone(true);
+    } catch (e) {
+      setError(person1Error(e));
     } finally {
       setPending(false);
     }
   }
-
-  return <PublicShell><section className="page-section" style={{ maxWidth: 460, margin: "60px auto", border: "none", background: "transparent", boxShadow: "none" }}>
-    <div className="page-header" style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: "8px" }}>
-      <h1 className="page-title">Đặt lại mật khẩu</h1>
-      <p className="muted" style={{ margin: 0 }}>Nhập mật khẩu mới cho tài khoản của bạn.</p>
-    </div>
-    
-    {success ? (
-      <div className="card stack" style={{ padding: "32px 24px", alignItems: "center", textAlign: "center" }}>
-        <div style={{ width: "64px", height: "64px", borderRadius: "50%", background: "var(--primary-soft)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "16px", color: "var(--primary-container)" }}>
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-        </div>
-        <h3 style={{ margin: "0 0 12px" }}>Đặt lại thành công</h3>
-        <p className="muted" style={{ margin: 0 }}>
-          Mật khẩu của bạn đã được thay đổi. Bạn có thể sử dụng mật khẩu mới để đăng nhập.
-        </p>
-        <div style={{ marginTop: "24px", paddingTop: "24px", borderTop: "1px solid var(--line)", width: "100%" }}>
-          <button type="button" onClick={() => router.replace("/login")} className="btn btn-primary" style={{ width: "100%", justifyContent: "center" }}>Tiếp tục Đăng nhập</button>
-        </div>
-      </div>
-    ) : (
-      <form className="card stack" noValidate onSubmit={submit} style={{ padding: "32px 24px" }}>
-        <div className="field">
-          <label className="label" htmlFor="reset-password">Mật khẩu mới (tối thiểu 8 ký tự, có chữ và số)</label>
-          <div className="row">
-            <input className="input" id="reset-password" style={{ flex: 1 }} type={visible ? "text" : "password"} maxLength={128} value={password} disabled={pending || !token} onChange={(e) => setPassword(e.target.value)} aria-invalid={invalid === "password"} />
-            <button className="btn btn-secondary" type="button" onClick={() => setVisible(!visible)} disabled={!token}>{visible ? "Ẩn" : "Hiện"}</button>
-          </div>
-          {invalid === "password" && <span className="form-error">Mật khẩu không hợp lệ.</span>}
-        </div>
-        
-        <button className="btn btn-primary btn-large" style={{ marginTop: "12px", width: "100%", justifyContent: "center" }} type="submit" disabled={pending || !token || !password.trim()} aria-busy={pending}>
-          {pending ? "Đang xử lý…" : "Cập nhật mật khẩu"}
-        </button>
-        {error && <p className="notice notice-danger" style={{ marginTop: "12px" }}>{error}</p>}
+  return (
+    <section className="page-section">
+      <h1>Đặt lại mật khẩu</h1>
+      <form className="card form-stack" onSubmit={submit}>
+        {done ? (
+          <p role="status">Mật khẩu đã được cập nhật. Hãy đăng nhập lại.</p>
+        ) : (
+          <>
+            <label className="field">
+              Mật khẩu mới
+              <input
+                className="input"
+                type="password"
+                autoComplete="new-password"
+                required
+                maxLength={128}
+                disabled={pending}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </label>
+            <label className="field">
+              Nhập lại mật khẩu
+              <input
+                className="input"
+                type="password"
+                autoComplete="new-password"
+                required
+                maxLength={128}
+                disabled={pending}
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+              />
+            </label>
+            <button
+              className="btn btn-primary"
+              disabled={pending || !token.current}
+            >
+              {pending ? "Đang lưu…" : "Lưu mật khẩu"}
+            </button>
+          </>
+        )}
+        {error ? (
+          <p role="alert" className="notice notice-danger">
+            {error}
+          </p>
+        ) : null}
+        <Link href="/login">Đăng nhập</Link>
+        <Link href="/forgot-password">Yêu cầu liên kết mới</Link>
       </form>
-    )}
-  </section></PublicShell>;
+    </section>
+  );
 }

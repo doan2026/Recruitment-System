@@ -1,8 +1,47 @@
 spring:
-  application: { name: admin-service }
+  application:
+    name: admin-service
   datasource:
     url: ${DATABASE_URL}
     username: ${POSTGRES_USER}
     password: ${POSTGRES_PASSWORD}
-  jpa: { open-in-view: false, hibernate: { ddl-auto: validate } }
-management: { endpoints: { web: { exposure: { include: health,info } } } }
+    hikari:
+      maximum-pool-size: 10
+      connection-timeout: 5000
+  flyway:
+    schemas: admin
+    default-schema: admin
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+    consumer:
+      group-id: admin-service-group
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      max-poll-records: 100
+    listener:
+      ack-mode: record
+      auto-startup: ${ADMIN_KAFKA_ENABLED:true}
+admin:
+  jwt:
+    jwks-uri: ${JWT_JWKS_URI:http://auth-service:8080/auth/.well-known/jwks.json}
+    issuer: ${JWT_ISSUER}
+    audience: ${JWT_AUDIENCE}
+  auth-url: ${AUTH_SERVICE_URL:http://auth-service:8080}
+  company-url: ${COMPANY_SERVICE_URL:http://company-service:3000}
+  job-url: ${JOB_SERVICE_URL:http://job-search-service:3000}
+  cors-origins: ${CORS_ORIGINS:http://localhost:3000}
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:false}
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:false}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

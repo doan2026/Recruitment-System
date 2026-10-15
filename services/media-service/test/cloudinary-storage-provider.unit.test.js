@@ -154,7 +154,7 @@ test('Cloudinary canonical inspection uses Admin metadata and bounded range byte
       secure_url:
         'https://res.cloudinary.com/test-cloud/raw/authenticated/v1800000000/' +
         publicId,
-      format: 'pdf',
+      // Real RAW responses omit format; the extension is part of public_id.
       bytes: 4096,
       etag: 'etag-1',
       created_at: '2027-01-15T08:00:00.000Z',
@@ -188,10 +188,12 @@ test('Cloudinary canonical inspection uses Admin metadata and bounded range byte
   let fetchOptions;
   global.fetch = async (url, options) => {
     const parsed = url instanceof URL ? url : new URL(url);
-    if (parsed.hostname === 'api.cloudinary.com') {
+    if (parsed.hostname === 'api.cloudinary.com' && parsed.pathname.endsWith('/context')) {
       return fetchContextPage(url, options, contextHandler);
     }
-    assert.match(url, /^https:\/\/res\.cloudinary\.com\/test-cloud\//);
+    assert.equal(parsed.pathname, '/v1_1/test-cloud/raw/download');
+    assert.equal(parsed.searchParams.get('public_id'), publicId);
+    assert.ok(Number(parsed.searchParams.get('expires_at')) > Date.now() / 1000);
     fetchOptions = options;
     return new Response(Buffer.from('%PDF-1.7\n'), { status: 206 });
   };
@@ -211,6 +213,7 @@ test('Cloudinary canonical inspection uses Admin metadata and bounded range byte
   assert.equal(fetchOptions.headers.range, 'bytes=0-8191');
   assert.equal(fetchOptions.redirect, 'error');
   assert.equal(inspected.contextFileId, CONTEXT_FILE_ID);
+  assert.equal(inspected.format, 'pdf');
   assert.equal(inspected.sample.toString(), '%PDF-1.7\n');
   assert.deepEqual(
     new Set(contextLookups.map((options) => options.resource_type)),
@@ -368,9 +371,9 @@ test('Cloudinary private download and deletion preserve raw asset identity', asy
   );
   assert.equal(
     downloadCall.publicId,
-    'recruitment/cv/10000000-0000-4000-8000-000000000001',
+    locator.publicId,
   );
-  assert.equal(downloadCall.format, 'pdf');
+  assert.equal(downloadCall.format, '');
   assert.equal(
     downloadCall.options.expires_at,
     Math.floor(expiresAt.getTime() / 1000),
@@ -407,7 +410,6 @@ test('Cloudinary private download and deletion preserve raw asset identity', asy
             public_id: locator.publicId,
             resource_type: 'raw',
             type: 'authenticated',
-            format: 'pdf',
             context: { custom: { file_id: CONTEXT_FILE_ID } },
           },
         ],

@@ -1,6 +1,7 @@
 package com.recruitment.auth.config;
 
-import com.recruitment.auth.registration.otp.OtpProperties;
+import com.recruitment.auth.config.properties.AuthMailProperties;
+import com.recruitment.auth.config.properties.OtpProperties;
 import java.security.SecureRandom;
 import java.time.Clock;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;

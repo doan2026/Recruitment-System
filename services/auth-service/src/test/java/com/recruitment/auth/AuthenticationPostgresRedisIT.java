@@ -10,22 +10,23 @@ import static org.mockito.Mockito.reset;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nimbusds.jose.JOSEObjectType;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jwt.SignedJWT;
-import com.recruitment.auth.identity.AuthUser;
-import com.recruitment.auth.identity.AuthUserRepository;
-import com.recruitment.auth.identity.RefreshSession;
-import com.recruitment.auth.identity.RefreshSessionRepository;
-import com.recruitment.auth.identity.RefreshSessionRevocationReason;
-import com.recruitment.auth.registration.OtpEmailSender;
+import com.recruitment.auth.infrastructure.mail.OtpEmailSender;
+import com.recruitment.auth.model.AuthUser;
+import com.recruitment.auth.model.UserRole;
+import com.recruitment.auth.model.RefreshSession;
+import com.recruitment.auth.model.RefreshSessionRevocationReason;
+import com.recruitment.auth.repository.jpa.AuthUserRepository;
+import com.recruitment.auth.repository.jpa.RefreshSessionRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -376,11 +377,75 @@ class AuthenticationPostgresRedisIT {
         .andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"));
   }
 
+  @Test
+  void recruiterContactIsPrivateDurableAndOwnerScoped() throws Exception {
+    TokenPair recruiter = registerAndVerify("RECRUITER");
+    AuthUser other = AuthUser.registerOAuth("other-recruiter@example.com", UserRole.RECRUITER, Instant.now());
+    other.updateRecruiterContact("Other Recruiter", "0901112222");
+    users.saveAndFlush(other);
+
+    mvc.perform(get("/auth/me/recruiter-contact")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer " + recruiter.accessToken()))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"));
+
+    for (int attempt = 0; attempt < 2; attempt++) {
+      mvc.perform(put("/auth/me/recruiter-contact")
+              .header(HttpHeaders.AUTHORIZATION, "Bearer " + recruiter.accessToken())
+              .contentType(MediaType.APPLICATION_JSON)
+              .content(objectMapper.writeValueAsBytes(Map.of(
+                  "fullName", "  Nguyễn Recruiter  ", "phone", "+84 901 234 567", "userId", other.getId()))))
+          .andExpect(status().isOk())
+          .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+          .andExpect(jsonPath("$.data.fullName").value("Nguyễn Recruiter"));
+    }
+    AuthUser stored = users.findByNormalizedEmail(EMAIL).orElseThrow();
+    assertThat(stored.getRecruiterFullName()).isEqualTo("Nguyễn Recruiter");
+    assertThat(stored.getRecruiterPhone()).isEqualTo("+84 901 234 567");
+    assertThat(users.findById(other.getId()).orElseThrow().getRecruiterFullName()).isEqualTo("Other Recruiter");
+
+    mvc.perform(put("/auth/me/recruiter-contact")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer " + recruiter.accessToken())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"fullName\":\"Recruiter\",\"phone\":\"++++++\"}"))
+        .andExpect(status().isBadRequest());
+
+    stored.lock("Contact access test", Instant.now());
+    users.saveAndFlush(stored);
+    mvc.perform(get("/auth/me/recruiter-contact")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer " + recruiter.accessToken()))
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.code").value("ACCOUNT_LOCKED"));
+  }
+
+  @Test
+  void candidateCannotReadOrWriteRecruiterContactAndPreflightSupportsPut() throws Exception {
+    TokenPair candidate = registerAndVerify();
+    mvc.perform(get("/auth/me/recruiter-contact")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer " + candidate.accessToken()))
+        .andExpect(status().isForbidden());
+    mvc.perform(put("/auth/me/recruiter-contact")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer " + candidate.accessToken())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"fullName\":\"Candidate\",\"phone\":\"0901234567\"}"))
+        .andExpect(status().isForbidden());
+    mvc.perform(options("/auth/me/recruiter-contact")
+            .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
+            .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "PUT")
+            .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "Authorization, Content-Type"))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_METHODS, containsString("PUT")));
+  }
+
   private TokenPair registerAndVerify() throws Exception {
+    return registerAndVerify("CANDIDATE");
+  }
+
+  private TokenPair registerAndVerify(String role) throws Exception {
     MvcResult registration = postJson("/auth/register", Map.of(
             "email", EMAIL,
             "password", PASSWORD,
-            "role", "CANDIDATE"))
+            "role", role))
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.data.registrationId").isString())
         .andReturn();

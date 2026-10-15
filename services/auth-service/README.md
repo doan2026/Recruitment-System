@@ -2,6 +2,37 @@
 
 Spring Boot 3 / Java 21 service that owns user identities. PostgreSQL stores durable account/session data; Redis stores short-lived registration OTP and password-reset state; SMTP delivers registration codes and reset links.
 
+## REST MVC structure
+
+Auth uses Spring MVC REST controllers (`@RestController`), not server-rendered views. JSON DTOs are the HTTP representation consumed by the Next.js frontend. All existing endpoint paths, status codes and response envelopes remain compatible.
+
+```text
+com.recruitment.auth
+├── AuthServiceApplication.java     Application entry point and component-scan root
+├── controller/                     REST endpoints; request binding and response mapping
+├── dto/                            Validated requests and explicit JSON responses by feature
+├── service/                        Registration, login, sessions, recovery and account control
+├── repository/
+│   ├── jpa/                        Durable identity/session repositories
+│   ├── jdbc/                       Typed administrative directory queries
+│   └── redis/                      OTP, login throttling, recovery and Google exchange stores
+├── model/                          JPA entities, domain roles and identity values
+├── config/                         Spring bean and security configuration
+│   └── properties/                Validated configuration properties
+├── security/                       JWT/JWKS, token codecs, OAuth handlers and HTTP filters
+├── infrastructure/mail/            SMTP implementations and delivery interfaces
+├── exception/                      Business exceptions and @RestControllerAdvice
+└── support/                        Shared identity normalization
+```
+
+Business requests follow `RestController → Service → Repository`. Controllers must not execute SQL, depend on persistence repositories, implement account authorization decisions, or return JPA entities. Constructor injection keeps dependencies explicit. DTOs preserve sensitive-field redaction and validation; `GlobalExceptionHandler` preserves the shared error format.
+
+`AdminUserDirectoryController` delegates durable admin-role checks, bounded pagination and literal search normalization to `AdminUserDirectoryService`; `AdminUserDirectoryRepository` alone owns SQL and maps selected columns into `AdminUserResponse`. JSON keeps the existing `is_verified`, `is_locked`, `locked_reason`, `created_at` fields and `{data, meta}` envelope.
+
+Transactional collaborators remain separate Spring beans so OTP fencing, refresh rotation and account locking keep their existing transaction boundaries. Health reads the Actuator health aggregate, and JWKS exposes public keys through the token security component. Flyway migrations, schema names, JWT claims and secret configuration are unchanged.
+
+Tests mirror the production layers. Shared test data lives in `src/test/java/com/recruitment/auth/support`; PostgreSQL/Redis integration tests use isolated Testcontainers databases, not the Compose application database.
+
 ## Current status
 
 Candidate/Recruiter registration, OTP verification, password login, Google OIDC, JWT RS256/JWKS, refresh-token rotation, logout, password reset, `GET /auth/me` and internal Admin account control are implemented. A successful OTP verification signs the user in and returns the same local token pair as password and Google login.
@@ -198,13 +229,13 @@ Previously issued stateless access JWTs used by other services can remain valid 
 
 ## Google OIDC login
 
-1. Navigate the browser to `GET /auth/google`.
-2. The service creates state, nonce and PKCE S256 verifier material, stores the serialized authorization request in Redis, and redirects to Google.
+1. Candidate pages use `GET /auth/google` (defaults to Candidate) or `?role=CANDIDATE`; Recruiter pages use `?role=RECRUITER`. ADMIN/unknown values are rejected.
+2. The service creates state, nonce and PKCE S256 verifier material, stores the serialized authorization request and portal role in Redis, and redirects to Google. The portal is an internal attribute, not a Google claim.
 3. Spring Security validates the callback and OIDC ID token. Provider access/refresh tokens are never persisted or returned.
-4. The success redirect contains only `#code=<one-time-code>` and sets a short-lived HttpOnly binder cookie.
-5. The frontend calls `POST /auth/google/exchange` with `{ "code": "...", "role": "CANDIDATE" }` and `credentials: "include"`. `role` is optional and is used only when creating a new account; allowed values are `CANDIDATE` and `RECRUITER`.
+4. The success redirect contains `#code=<one-time-code>&role=<portal-role>` and sets a short-lived HttpOnly binder cookie. Only role metadata from the state-validated authorization request is copied to the exchange state.
+5. The frontend clears the fragment and automatically calls `POST /auth/google/exchange` with `{ "code": "...", "role": "CANDIDATE" }` and `credentials: "include"`, exactly once. No role selector or Continue step is displayed. The exchange role is optional; for new flows the server uses the role bound to the one-time code and rejects a conflicting client value with `403 GOOGLE_ROLE_MISMATCH`.
 
-The Redis exchange consumes the code and matching binder exactly once. Google `sub` is the durable provider identity. An already linked subject signs in to its linked user; a new subject with a new verified email creates an OAuth-only user. An existing but unlinked email returns `409 ACCOUNT_LINK_REQUIRED` instead of being auto-linked by email. A future account-link flow must require fresh authentication to the existing account.
+The Redis exchange consumes the code and matching binder exactly once. Google `sub` is the durable provider identity. An already linked subject signs in only when the stored account role matches the requested portal; a mismatch returns `403 GOOGLE_ROLE_MISMATCH` without changing the account or issuing local tokens. A new subject with a new verified email creates an OAuth-only user in the selected portal role. An existing but unlinked email returns `409 ACCOUNT_LINK_REQUIRED` instead of being auto-linked by email. A future account-link flow must require fresh authentication to the existing account. Pending exchange entries from the previous deployment remain readable during their short TTL; new entries always carry the portal role.
 
 The binder cookie is `SameSite=Lax`; therefore production frontend and Auth URLs must be HTTPS and on the same schemeful site (for example `app.example.com` and `auth.example.com`). The frontend origin must also be listed exactly in `CORS_ORIGINS`.
 
@@ -215,6 +246,14 @@ Access tokens are RS256 JWTs with standard `typ=JWT`, a deterministic public-key
 - `GET /auth/.well-known/jwks.json` publishes active and configured previous RSA public keys only (`kty`, `use`, `alg`, `kid`, `n`, `e`).
 - `GET /auth/me` requires `Authorization: Bearer <access-token>` and returns current `id`, `email`, `role` and verification state after rechecking PostgreSQL. Deleted, unverified or locked accounts are rejected.
 - The decoder accepts only `RS256`, standard `typ=JWT`, a known non-empty `kid`, configured issuer/audience, UUID `sub`/`jti` and one of `CANDIDATE`, `RECRUITER`, `ADMIN`.
+
+### Recruiter registration contact
+
+`GET /auth/me/recruiter-contact` and `PUT /auth/me/recruiter-contact` manage the signed-in Recruiter's own `{fullName, phone}`. PUT requires a 2–160 character name and a formatted phone number containing 6–15 digits (maximum 32 characters). Auth stores these account contact fields in its own schema via Flyway V3. Existing accounts start with null contact fields.
+
+Both endpoints require a Recruiter JWT and recheck the durable account role, verification and lock state. They derive the owner from the JWT subject, accept no owner selector, return `Cache-Control: no-store`, and do not add contact PII to access-token claims. Browser PUT preflight is enabled only for this route; internal Admin PATCH remains outside browser CORS permissions. Candidate profile ownership and permissions are unchanged.
+
+After Recruiter OTP verification, the frontend saves contact here and then enters the Recruiter portal. A temporary save failure preserves the onboarding form and offers an explicit retry. Recruiters never call Candidate Profile to save their registration contact.
 
 ## Refresh and logout API
 
@@ -232,6 +271,7 @@ Flyway manages schema `auth` and Hibernate runs with `ddl-auto=validate`:
 
 - `V1__create_auth_persistence.sql` creates `users`, `refresh_sessions` and `oauth_accounts`.
 - `V2__add_registration_flow_identity.sql` adds pending `registration_id`, a monotonic registration fence sequence/column, and database constraints for pending versus verified state.
+- `V3__add_recruiter_contact.sql` adds nullable Recruiter contact fields with role and completeness constraints.
 - `users` stores canonical NFC/lowercase email, bcrypt cost-10 password hash for local accounts, role, verification/lock state, timestamps and optimistic version.
 - `refresh_sessions` stores only lowercase SHA-256 token hashes with lineage and revocation state.
 - `oauth_accounts` stores Google subject linkage and verified canonical provider email; Google access/refresh tokens are not stored.
@@ -310,4 +350,4 @@ docker run --rm --network host \
   mvn clean verify -Pintegration-test
 ```
 
-The integration profile validates Flyway/Hibernate on clean PostgreSQL 16 plus authenticated Redis 7: OTP fencing/rate limits, Google exchange exactly-once, password throttling, password-reset privacy/quota/TTL/supersession/transactions/concurrency, JWT/JWKS and `/auth/me`, refresh lineage/reuse/expiry/concurrency, internal Admin account control, CORS and fail-closed outages. The final clean run passed **215/215 unit tests and 40/40 integration tests (255/255 total)** with PostgreSQL 16.15, Redis 7 and Testcontainers 1.21.4. The gateway configuration also passes `nginx -t`.
+The integration profile validates Flyway/Hibernate on clean PostgreSQL 16 plus authenticated Redis 7: OTP fencing/rate limits, Google exchange exactly-once, password throttling, password-reset privacy/quota/TTL/supersession/transactions/concurrency, JWT/JWKS and `/auth/me`, refresh lineage/reuse/expiry/concurrency, internal Admin account control, CORS and fail-closed outages. The REST MVC refactor passed **224/224 unit tests and 42/42 integration tests (266/266 total)** with PostgreSQL 16, Redis 7 and Testcontainers 1.21.4. The directory tests additionally verify typed JSON compatibility, literal wildcard search, pagination and rejection of a demoted admin's old token.

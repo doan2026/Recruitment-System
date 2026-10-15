@@ -1,11 +1,5 @@
-import { ReactNode } from "react";
-import { SessionGate } from "@/components/SessionGate";
-import { AdminShell } from "@/components/AdminShell";
-
+import type { ReactNode } from "react";
+import { Person1Gate } from "../../components/Person1Gate";
 export default function AdminLayout({ children }: { children: ReactNode }) {
-  return (
-    <SessionGate role="ADMIN">
-      <AdminShell>{children}</AdminShell>
-    </SessionGate>
-  );
+  return <Person1Gate role="ADMIN">{children}</Person1Gate>;
 }

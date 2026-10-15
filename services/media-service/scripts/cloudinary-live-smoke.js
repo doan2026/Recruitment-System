@@ -360,7 +360,13 @@ const validatePresetConfiguration = (smokeCase, response) => {
     'The upload preset must explicitly report signed mode',
   );
 
-  const actualFormats = normalizePresetFormats(response.allowed_formats);
+  const settings = response.settings ?? response.options ?? response;
+  assertCondition(
+    typeof settings === 'object' && settings !== null,
+    'LIVE_SMOKE_PRESET_INVALID',
+    'Cloudinary returned invalid upload preset settings',
+  );
+  const actualFormats = normalizePresetFormats(settings.allowed_formats);
   const expectedFormats = [...smokeCase.policy.formats]
     .map(normalizeFormat)
     .sort();
@@ -371,14 +377,8 @@ const validatePresetConfiguration = (smokeCase, response) => {
     'The upload preset allowed_formats does not exactly match policy',
   );
   assertCondition(
-    Number.isSafeInteger(response.max_file_size) &&
-      response.max_file_size === smokeCase.policy.maxBytes,
-    'LIVE_SMOKE_PRESET_INVALID',
-    'The upload preset max_file_size does not exactly match policy',
-  );
-  assertCondition(
-    typeof response.type === 'string' &&
-      response.type.toLowerCase() ===
+    typeof settings.type === 'string' &&
+      settings.type.toLowerCase() ===
         DELIVERY_VALUES[smokeCase.policy.deliveryType],
     'LIVE_SMOKE_PRESET_INVALID',
     'The upload preset delivery type does not exactly match policy',

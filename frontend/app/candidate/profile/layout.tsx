@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
-import { SessionGate } from "@/components/SessionGate";
+import { Person1Gate } from "../../../components/Person1Gate";
 
 export default function PrivateLayout({ children }: { children: ReactNode }) {
-  return <SessionGate role="CANDIDATE">{children}</SessionGate>;
+  return <Person1Gate role="CANDIDATE">{children}</Person1Gate>;
 }

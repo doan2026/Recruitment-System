@@ -9,7 +9,10 @@ export interface CurrentAccount {
   role: "CANDIDATE" | "RECRUITER" | "ADMIN";
 }
 
-interface LoginResponse {
+export interface TokenResponse {
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
   user: CurrentAccount;
 }
 
@@ -44,27 +47,22 @@ export async function refreshAuthSession() {
     method: "POST", body: {}, privateData: true,
     authRecovery: false, attachAccessToken: false, maxRetries: 0,
   });
-  
-  validateLoginResponse(result.data);
-  if (getCurrentAccount()?.id !== current.id || result.data.user.id !== current.id) return null;
-  if (result.data.user.role !== current.role) {
-    clearApiSession();
-    return null;
-  }
-  account = result.data.user;
-  return { token: null, accountId: account.id }; // Token is handled by cookies
+  validateTokens(response.data);
+  return establishSession(response.data);
 }
 
-configureApiSessionRefresh(refreshAuthSession);
-
-export async function hydrateSession(): Promise<void> {
-  if (initialized) return;
-  initialized = true;
-  if (typeof window === "undefined") return;
-  
-  try {
-    const result = await requestApi<CurrentAccount>("/auth/me", {
-      privateData: true, authRecovery: false, attachAccessToken: false, maxRetries: 0,
+export function establishSession(tokens: TokenResponse): CurrentAccount {
+  validateTokens(tokens);
+  account = tokens.user;
+  refreshToken = tokens.refreshToken;
+  setApiSession({ token: tokens.accessToken, accountId: account.id });
+  configureApiSessionRefresh(async () => {
+    const current = getCurrentAccount();
+    const presented = refreshToken;
+    if (!current || !presented) return null;
+    const result = await requestApi<TokenResponse>("/auth/refresh", {
+      method: "POST", body: { refreshToken: presented }, privateData: true,
+      authRecovery: false, attachAccessToken: false, maxRetries: 0,
     });
     
     if (result.data?.id) {

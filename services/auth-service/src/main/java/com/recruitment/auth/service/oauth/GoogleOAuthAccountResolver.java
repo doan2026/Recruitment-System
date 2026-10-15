@@ -1,0 +1,71 @@
+package com.recruitment.auth.service.oauth;
+
+import com.recruitment.auth.dto.oauth.GoogleOAuthRole;
+import com.recruitment.auth.exception.AuthBusinessException;
+import com.recruitment.auth.model.AuthUser;
+import com.recruitment.auth.model.OAuthAccount;
+import com.recruitment.auth.model.OAuthProvider;
+import com.recruitment.auth.model.UserRole;
+import com.recruitment.auth.model.oauth.GoogleOAuthIdentity;
+import com.recruitment.auth.repository.jpa.AuthUserRepository;
+import com.recruitment.auth.repository.jpa.OAuthAccountRepository;
+import java.time.Clock;
+import java.util.Objects;
+import java.util.UUID;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+class GoogleOAuthAccountResolver {
+  private final AuthUserRepository users;
+  private final OAuthAccountRepository accounts;
+  private final Clock clock;
+
+  GoogleOAuthAccountResolver(
+      AuthUserRepository users,
+      OAuthAccountRepository accounts,
+      Clock clock) {
+    this.users = Objects.requireNonNull(users, "users are required");
+    this.accounts = Objects.requireNonNull(accounts, "accounts are required");
+    this.clock = Objects.requireNonNull(clock, "clock is required");
+  }
+
+  @Transactional
+  public UUID resolveOrCreate(GoogleOAuthIdentity identity, GoogleOAuthRole requestedRole) {
+    GoogleOAuthIdentity safeIdentity = Objects.requireNonNull(identity, "identity is required");
+    return accounts.findByProviderAndProviderSubjectForUpdate(
+            OAuthProvider.GOOGLE, safeIdentity.subject())
+        .map(account -> requireLinkedUser(account.getUserId(), requestedRole))
+        .orElseGet(() -> createOAuthOnlyUser(safeIdentity, requestedRole));
+  }
+
+  private UUID requireLinkedUser(UUID userId, GoogleOAuthRole requestedRole) {
+    AuthUser user = users.findByIdForUpdate(userId)
+        .orElseThrow(() -> new IllegalStateException("linked Google user no longer exists"));
+    if (requestedRole != null && user.getRole() != requestedRole.toUserRole()) {
+      throw new AuthBusinessException("GOOGLE_ROLE_MISMATCH",
+          "This account belongs to a different sign-in portal", HttpStatus.FORBIDDEN);
+    }
+    return user.getId();
+  }
+
+  private UUID createOAuthOnlyUser(
+      GoogleOAuthIdentity identity,
+      GoogleOAuthRole requestedRole) {
+    if (users.findByNormalizedEmailForUpdate(identity.normalizedEmail()).isPresent()) {
+      throw new AuthBusinessException(
+          "ACCOUNT_LINK_REQUIRED",
+          "An account already exists for this email; sign in before linking Google",
+          HttpStatus.CONFLICT);
+    }
+    UserRole role = requestedRole == null
+        ? UserRole.CANDIDATE
+        : requestedRole.toUserRole();
+    AuthUser user = users.saveAndFlush(
+        AuthUser.registerOAuth(identity.normalizedEmail(), role, clock.instant()));
+    accounts.saveAndFlush(OAuthAccount.linkGoogle(
+        user.getId(), identity.subject(), identity.normalizedEmail(), true));
+    return user.getId();
+  }
+}

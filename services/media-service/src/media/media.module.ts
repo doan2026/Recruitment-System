@@ -14,7 +14,8 @@ import {
 import { MEDIA_CLOCK, MediaService } from './media.service';
 
 @Module({
-  controllers: [MediaController, InternalMediaController],
+  // Register static internal paths before the public :id/download-url route.
+  controllers: [InternalMediaController, MediaController],
   providers: [
     MediaService,
     MediaMaintenanceService,

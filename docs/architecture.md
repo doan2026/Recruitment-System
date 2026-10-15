@@ -16,6 +16,43 @@
 | Admin | Spring Boot | `admin` | `/admin` |
 | AI | FastAPI | `ai` + pgvector | `/ai` |
 
+## Auth REST MVC layers
+
+Auth uses `@RestController` for JSON APIs. Its package layout separates
+`controller`, `dto`, `service`, `repository` (`jpa`, `jdbc`, `redis`), `model`,
+`config`, `security`, `infrastructure.mail`, `exception` and `support`.
+Controllers delegate business work to services; repository adapters own persistence.
+DTOs define the HTTP representation, and `@RestControllerAdvice` maps errors.
+
+Auth also owns Recruiter account contact (`fullName`, `phone`) at
+`GET/PUT /auth/me/recruiter-contact`. The owner is always the authenticated subject;
+current durable role/verification/lock checks apply. These fields are not JWT claims.
+Candidate career profile data remains exclusively in Profile. Recruiter onboarding
+must use Auth contact APIs rather than Candidate Profile APIs.
+
+Google sign-in binds the Candidate/Recruiter portal to the Redis OAuth state and
+one-time exchange code. The callback completes automatically without selecting a
+role. Existing linked users must match that portal; OAuth never changes a stored
+account role or auto-links a matching email.
+
+The internal `/auth/users` directory uses a typed DTO and follows
+`AdminUserDirectoryController → AdminUserDirectoryService → AdminUserDirectoryRepository`.
+The service rechecks durable admin role and bounds pagination; the repository
+uses parameterized SQL with escaped literal email search. Endpoint paths,
+JSON field names, JWT contracts and existing transaction boundaries are preserved.
+See [Auth Service structure](../services/auth-service/README.md#rest-mvc-structure).
+
+## Admin REST MVC layers
+
+Admin follows Auth's layer layout with `@RestController`, validated DTOs, services,
+JDBC repositories, model records, configuration, security filters and infrastructure adapters.
+Controllers delegate all privileged decisions and persistence work to services.
+Moderation, reports, audit and statistics have separate endpoints/services; HTTP
+gateway calls, Kafka consumption, scheduled aggregation and CSV/XLSX generation
+have explicit owners. The JDBC/Flyway stack, append-only audit, report version
+checks, event idempotency and existing REST/upstream/Kafka contracts are preserved.
+See [Admin Service structure](../services/admin-service/README.md#rest-mvc-structure).
+
 ## Kafka event contracts
 
 Kafka payloads are topic-specific; there is no implemented global camelCase

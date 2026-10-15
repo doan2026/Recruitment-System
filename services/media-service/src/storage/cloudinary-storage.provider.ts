@@ -203,9 +203,7 @@ export class CloudinaryStorageProvider extends StorageProvider {
     const canonicalUrl = this.validateCanonicalUrl(
       this.requiredString(value.secure_url),
     );
-    const format = this.normalizeFormat(
-      this.requiredString(value.format),
-    );
+    const format = this.assetFormat(value);
     const bytes = this.requiredPositiveInteger(value.bytes);
     const createdAt = new Date(this.requiredString(value.created_at));
     if (!Number.isFinite(createdAt.getTime()) || !version) {
@@ -241,7 +239,6 @@ export class CloudinaryStorageProvider extends StorageProvider {
     if (locator.resourceType === StorageResourceType.RAW) {
       result.sample = await this.readMagicSample(
         locator,
-        result.version,
         canonicalUrl,
       );
     }
@@ -315,9 +312,7 @@ export class CloudinaryStorageProvider extends StorageProvider {
         deliveryType: this.deliveryTypeFromProvider(
           this.requiredString(resource.type),
         ),
-        expectedFormat: this.normalizeFormat(
-          this.requiredString(resource.format),
-        ),
+        expectedFormat: this.assetFormat(resource),
         contextFileId,
       } satisfies AssetLocator,
     }));
@@ -365,13 +360,11 @@ export class CloudinaryStorageProvider extends StorageProvider {
         format: string,
         options: Record<string, unknown>,
       ) => string;
-    const rawSuffix = '.' + locator.expectedFormat;
-    const downloadPublicId =
-      locator.resourceType === StorageResourceType.RAW &&
-      locator.publicId.endsWith(rawSuffix)
-        ? locator.publicId.slice(0, -rawSuffix.length)
-        : locator.publicId;
-    return generator(downloadPublicId, locator.expectedFormat, {
+    // RAW public IDs already include the extension; stripping it addresses a
+    // different asset. The private Download API expects the complete identity.
+    const downloadFormat = locator.resourceType === StorageResourceType.RAW
+      ? '' : locator.expectedFormat;
+    return generator(locator.publicId, downloadFormat, {
       resource_type: RESOURCE_VALUES[locator.resourceType],
       type: DELIVERY_VALUES[locator.deliveryType],
       expires_at: Math.floor(expiresAt.getTime() / 1000),
@@ -430,6 +423,24 @@ export class CloudinaryStorageProvider extends StorageProvider {
     return format.toLowerCase() === 'jpeg'
       ? 'jpg'
       : format.toLowerCase();
+  }
+
+  private assetFormat(resource: CloudinaryResource): string {
+    if (typeof resource.format === 'string' && resource.format.trim()) {
+      return this.normalizeFormat(resource.format.trim());
+    }
+    // Cloudinary RAW metadata omits format; its canonical public_id includes
+    // the extension. Confirm still checks the intent and actual magic bytes.
+    if (resource.resource_type === 'raw') {
+      const publicId = this.requiredString(resource.public_id);
+      const extension = /\.([a-z0-9]+)$/i.exec(
+        publicId.slice(publicId.lastIndexOf('/') + 1),
+      );
+      if (extension) return this.normalizeFormat(extension[1]);
+    }
+    throw new StorageUnavailableError(
+      'Cloudinary returned incomplete asset format metadata',
+    );
   }
 
   private resourceTypeFromProvider(
@@ -527,7 +538,7 @@ export class CloudinaryStorageProvider extends StorageProvider {
         }
         this.requiredString(resource.asset_id);
         this.requiredString(resource.public_id);
-        this.requiredString(resource.format);
+        this.assetFormat(resource);
         const actualResourceType = this.resourceTypeFromProvider(
           this.requiredString(resource.resource_type),
         );
@@ -667,19 +678,16 @@ export class CloudinaryStorageProvider extends StorageProvider {
 
   private async readMagicSample(
     locator: AssetLocator,
-    version: string,
     fallbackUrl: string,
   ): Promise<Buffer> {
-    const deliveryType = DELIVERY_VALUES[locator.deliveryType];
     let inspectionUrl = fallbackUrl;
     if (locator.deliveryType === StorageDeliveryType.AUTHENTICATED) {
-      inspectionUrl = cloudinary.url(locator.publicId, {
-        secure: true,
-        resource_type: RESOURCE_VALUES[locator.resourceType],
-        type: deliveryType,
-        version,
-        sign_url: true,
-      });
+      inspectionUrl = this.createDownloadUrl(
+        locator,
+        'inspection.' + locator.expectedFormat,
+        new Date(Date.now() + 60_000),
+        fallbackUrl,
+      );
     }
 
     let response: Response;

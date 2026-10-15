@@ -90,6 +90,7 @@ export interface ApiRequestOptions {
   attachAccessToken?: boolean;
   maxRetries?: number;
   fetcher?: typeof fetch;
+  responseType?: "json" | "blob";
 }
 
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -417,7 +418,7 @@ export async function requestApi<T>(
   if (options.signal?.aborted) controller.abort();
 
   const headers = new Headers(options.headers);
-  headers.set("Accept", "application/json");
+  headers.set("Accept", options.responseType === "blob" ? "application/octet-stream" : "application/json");
   if (options.privateData) {
     Object.entries(toNoStoreHeaders()).forEach(([key, value]) => headers.set(key, value));
   }
@@ -462,6 +463,11 @@ export async function requestApi<T>(
 
       if (options.privateData && requestRevision !== sessionRevision) {
         throw new ApiClientError({ code: "REQUEST_CANCELLED" });
+      }
+      if (response.ok && options.responseType === "blob") {
+        const blob = await response.blob();
+        assertCurrentSession();
+        return { data: blob as T, meta: null };
       }
       const payload = await readPayload(response);
       assertCurrentSession();
