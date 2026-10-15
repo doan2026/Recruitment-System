@@ -57,10 +57,12 @@ async function login(
   page: Page,
   role = "CANDIDATE",
   path = "/candidate/profile",
+  returnTo = path,
 ) {
   await page.route(api + "/auth/login", (route) => reply(route, tokens(role)));
-  await page.goto("/login?returnTo=" + encodeURIComponent(path));
-  await page.getByLabel("Email", { exact: true }).fill("candidate@example.com");
+  const portal = role === "ADMIN" ? "/admin/login" : role === "RECRUITER" ? "/recruiter/login" : "/login";
+  await page.goto(portal + "?returnTo=" + encodeURIComponent(returnTo));
+  await page.getByLabel(role === "ADMIN" ? "Email quản trị" : role === "RECRUITER" ? "Email công việc" : "Email", { exact: true }).fill("candidate@example.com");
   await page.getByLabel("Mật khẩu", { exact: true }).fill("Password123");
   await page.getByRole("button", { name: "Đăng nhập", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(path.replaceAll("/", "\\/") + "$"));
@@ -79,13 +81,16 @@ test("registration keeps flow identity and OTP signs in without persisting token
     return reply(route, tokens());
   });
   await page.goto("/register");
+  await page.getByLabel("Họ tên", { exact: true }).fill("Nguyễn Văn An");
   await page.getByLabel("Email", { exact: true }).fill("candidate@example.com");
   await page.getByLabel("Mật khẩu", { exact: true }).fill("Password123");
+  await page.getByLabel("Xác nhận mật khẩu", { exact: true }).fill("Password123");
+  await page.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Đăng ký", exact: true }).click();
   await page.getByLabel("Mã xác minh").fill("123456");
-  await page.getByRole("button", { name: "Xác minh và tiếp tục" }).click();
+  await page.getByRole("button", { name: "Xác nhận", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Hồ sơ của tôi", exact: true }),
+    page.getByRole("heading", { name: "Hồ sơ cá nhân", exact: true }),
   ).toBeVisible();
   expect(verified).toEqual({
     email: "candidate@example.com",
@@ -142,7 +147,7 @@ test("Google exchange sends the path-scoped HttpOnly binder and consumes the cod
   await page.goto("/auth/callback#code=one-time-google");
   await page.getByRole("button", { name: "Tiếp tục", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Hồ sơ của tôi", exact: true }),
+    page.getByRole("heading", { name: "Hồ sơ cá nhân", exact: true }),
   ).toBeVisible();
   expect(count).toBe(1);
   expect(page.url()).not.toContain("code=");
@@ -169,9 +174,7 @@ test("profile sections save independently with the current candidate identity", 
   await section.getByLabel("Tên kỹ năng").fill("TypeScript");
   await section.getByLabel("Mức độ").fill("Tốt");
   await section.getByRole("button", { name: "Lưu kỹ năng" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Mức độ hoàn thiện: 55%" }),
-  ).toBeVisible();
+  await expect(page.getByRole("progressbar", { name: "Mức độ hoàn thiện hồ sơ" })).toHaveAttribute("value", "55");
   expect(body).toEqual({ name: "TypeScript", level: "Tốt" });
 });
 test("CV Builder exports Vietnamese PDF then publishes a private snapshot", async ({
@@ -266,16 +269,16 @@ test("CV delete carries version and explains deferred deletion", async ({
   ).toBeVisible();
   expect(sent).toEqual({ expectedAggregateVersion: 7 });
 });
-test("candidate cannot load admin data", async ({ page }) => {
+test("candidate login cannot redirect into the admin portal or load admin data", async ({ page }) => {
   await base(page);
   let reads = 0;
   await page.route(api + "/admin/**", (route) => {
     reads++;
     return reply(route, {});
   });
-  await login(page, "CANDIDATE", "/admin");
+  await login(page, "CANDIDATE", "/candidate/profile", "/admin");
   await expect(
-    page.getByRole("heading", { name: "Bạn không có quyền truy cập" }),
+    page.getByRole("heading", { name: "Hồ sơ cá nhân", exact: true }),
   ).toBeVisible();
   expect(reads).toBe(0);
 });
@@ -323,4 +326,86 @@ test("admin rejection requires reason and confirmation before one mutation", asy
     page.getByRole("status").filter({ hasText: "Đã hoàn tất" }),
   ).toBeVisible();
   expect(writes).toBe(1);
+});
+
+test("registration validates identity and matching passwords before sending an OTP", async ({ page }) => {
+  await base(page);
+  let dispatches = 0;
+  await page.route(api + "/auth/register", route => { dispatches++; return reply(route, {}, 202); });
+  await page.goto("/register");
+  await page.getByRole("button", { name: "Đăng ký", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "họ tên" })).toBeVisible();
+  await page.getByLabel("Họ tên", { exact: true }).fill("Nguyễn An");
+  await page.getByLabel("Email", { exact: true }).fill("candidate@example.com");
+  await page.getByLabel("Mật khẩu", { exact: true }).fill("Password123");
+  await page.getByLabel("Xác nhận mật khẩu", { exact: true }).fill("OtherPassword123");
+  await page.getByRole("button", { name: "Đăng ký", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "chưa trùng" })).toBeVisible();
+  expect(dispatches).toBe(0);
+});
+
+test("Google registration links use the selected portal when enabled", async ({ page }) => {
+  await page.goto("/register");
+  await expect(page.getByRole("link", { name: "Đăng ký với Google" })).toHaveAttribute("href", "/auth/google?role=CANDIDATE");
+  await page.goto("/recruiter/register");
+  await expect(page.getByRole("link", { name: "Đăng ký với Google" })).toHaveAttribute("href", "/auth/google?role=RECRUITER");
+});
+
+test("candidate portal rejects a recruiter session and logs it out", async ({ page }) => {
+  await base(page);
+  let logouts = 0;
+  await page.route(api + "/auth/login", route => reply(route, tokens("RECRUITER")));
+  await page.route(api + "/auth/logout", route => { logouts++; return reply(route, {}); });
+  await page.goto("/login");
+  await page.getByLabel("Email", { exact: true }).fill("recruiter@example.com");
+  await page.getByLabel("Mật khẩu", { exact: true }).fill("Password123");
+  await page.getByRole("button", { name: "Đăng nhập", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "dành cho ứng viên" })).toBeVisible();
+  await expect(page).toHaveURL(/\/login$/);
+  expect(logouts).toBe(1);
+});
+
+test("recruiter registration saves contact in Auth and can retry after a temporary failure", async ({ page }) => {
+  await base(page);
+  let contacts = 0;
+  let candidateWrites = 0;
+  await page.route(api + "/profile/**", route => { candidateWrites++; return reply(route, {}, 403); });
+  await page.route(api + "/auth/register", route => {
+    expect(route.request().postDataJSON().role).toBe("RECRUITER");
+    return reply(route, { registrationId: userId }, 202);
+  });
+  await page.route(api + "/auth/otp/verify", route => reply(route, tokens("RECRUITER")));
+  await page.route(api + "/auth/me/recruiter-contact", route => {
+    expect(route.request().postDataJSON()).toEqual({ fullName: "Nguyễn Recruiter", phone: "0901234567" });
+    contacts++;
+    return contacts === 1 ? reply(route, { code: "TEMPORARY_FAILURE" }, 503) : reply(route, {});
+  });
+  await page.goto("/recruiter/register");
+  await page.getByLabel("Họ và tên", { exact: true }).fill("Nguyễn Recruiter");
+  await page.getByLabel("Email công việc", { exact: true }).fill("recruiter@example.com");
+  await page.getByLabel("Số điện thoại", { exact: true }).fill("0901234567");
+  await page.getByLabel("Mật khẩu", { exact: true }).fill("Password123");
+  await page.getByLabel("Xác nhận mật khẩu", { exact: true }).fill("Password123");
+  await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "Đăng ký", exact: true }).click();
+  await page.getByLabel("Mã xác minh OTP").fill("123456");
+  await page.getByRole("button", { name: "Xác minh tài khoản", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Tài khoản Recruiter đã xác minh" })).toBeVisible();
+  expect(contacts).toBe(1);
+  await page.getByRole("button", { name: "Lưu lại thông tin liên hệ" }).click();
+  await expect(page).toHaveURL(/\/recruiter\/jobs$/);
+  expect(contacts).toBe(2);
+  expect(candidateWrites).toBe(0);
+});
+
+test("recruiter portal restores only its own remembered email", async ({ page }) => {
+  await page.goto("/recruiter/login");
+  await page.evaluate(() => {
+    localStorage.setItem("careerhub.remembered-login-email:recruiter", "remembered@example.com");
+    localStorage.setItem("careerhub.remembered-login-email:admin", "admin@example.com");
+  });
+  await page.reload();
+  await expect(page.getByLabel("Email công việc", { exact: true })).toHaveValue("remembered@example.com");
+  await expect(page.getByLabel("Mật khẩu", { exact: true })).toHaveValue("");
+  await expect(page.getByRole("checkbox")).toBeChecked();
 });

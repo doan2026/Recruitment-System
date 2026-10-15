@@ -17,6 +17,24 @@ export function landing(role: CurrentAccount["role"]): string {
       ? "/recruiter/jobs"
       : "/candidate/profile";
 }
+export function loginRoute(role: CurrentAccount["role"]): string {
+  return role === "ADMIN" ? "/admin/login" : role === "RECRUITER" ? "/recruiter/login" : "/login";
+}
+export function loginDestination(role: CurrentAccount["role"], returnTo: string | null): string {
+  if (!returnTo?.startsWith("/") || returnTo.startsWith("//") || /[\\\u0000-\u001f\u007f]/.test(returnTo)) return landing(role);
+  try {
+    const url = new URL(returnTo, "https://careerhub.local");
+    const pathname = decodeURIComponent(url.pathname);
+    if (url.origin !== "https://careerhub.local" || /[\\\u0000-\u001f\u007f]/.test(pathname) || /%2f|%5c|%25/i.test(url.pathname)) return landing(role);
+    const prefix = role === "ADMIN" ? "/admin" : role === "RECRUITER" ? "/recruiter" : "/candidate";
+    const allowed = pathname === prefix || pathname.startsWith(prefix + "/")
+      || (role === "CANDIDATE" && (pathname === "/ai" || pathname.startsWith("/ai/")));
+    if (!allowed || pathname === "/admin/login" || pathname === "/recruiter/login" || pathname === "/recruiter/register") return landing(role);
+    return url.pathname + url.search + url.hash;
+  } catch {
+    return landing(role);
+  }
+}
 export function passwordError(password: string): string | null {
   return Array.from(password).length < 8 ||
     !/\p{L}/u.test(password) ||

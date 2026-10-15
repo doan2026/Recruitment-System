@@ -3,9 +3,9 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { signIn } from "../../lib/authSession";
+import { signIn, signOut } from "../../lib/authSession";
 import { toUserMessage } from "../../lib/apiClient";
-import { landing } from "../../lib/person1Api";
+import { loginDestination } from "../../lib/person1Api";
 
 const rememberedEmailKey = "careerhub.remembered-login-email";
 
@@ -49,6 +49,12 @@ export default function LoginPage() {
     setPending(true);
     try {
       const account = await signIn(normalizedEmail, password);
+      if (account.role !== "CANDIDATE") {
+        await signOut().catch(() => undefined);
+        setError("Trang này dành cho ứng viên. Hãy dùng đúng trang đăng nhập theo vai trò tài khoản.");
+        setPassword("");
+        return;
+      }
       try {
         if (rememberEmail) window.localStorage.setItem(rememberedEmailKey, normalizedEmail);
         else window.localStorage.removeItem(rememberedEmailKey);
@@ -56,8 +62,7 @@ export default function LoginPage() {
         // Never store credentials or session tokens in browser storage.
       }
       const returnTo = new URLSearchParams(window.location.search).get("returnTo");
-      const safeReturn = returnTo && /^\/(?:candidate|recruiter|admin|ai)(?:\/|$)/.test(returnTo) && !returnTo.includes("\\");
-      router.replace(safeReturn ? returnTo : landing(account.role));
+      router.replace(loginDestination(account.role, returnTo));
     } catch (reason) {
       setError(toUserMessage(reason));
       setPassword("");

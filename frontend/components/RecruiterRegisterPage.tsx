@@ -20,6 +20,19 @@ export default function RecruiterRegisterPage() {
   const [notice, setNotice] = useState("");
   const [verified, setVerified] = useState(false);
 
+  async function saveContact() {
+    await requestApi("/auth/me/recruiter-contact", { method: "PUT", privateData: true, body: { fullName: name.trim(), phone: phone.trim() } });
+    router.replace(landing("RECRUITER"));
+  }
+
+  async function retryContact() {
+    if (pending) return;
+    setPending(true); setError("");
+    try { await saveContact(); }
+    catch (reason) { setError(person1Error(reason)); }
+    finally { setPending(false); }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (pending || verified) return;
@@ -27,7 +40,7 @@ export default function RecruiterRegisterPage() {
     if (!registrationId) {
       if (name.trim().length < 2 || name.trim().length > 160) return setError("Họ tên cần từ 2 đến 160 ký tự.");
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return setError("Nhập email công việc hợp lệ.");
-      if (!/^[0-9+(). -]{6,32}$/.test(phone.trim())) return setError("Nhập số điện thoại hợp lệ.");
+      if (!/^[0-9+(). -]{6,32}$/.test(phone.trim()) || !/^(?:\D*\d){6,15}\D*$/.test(phone.trim())) return setError("Nhập số điện thoại hợp lệ, có từ 6 đến 15 chữ số.");
       const issue = passwordError(password);
       if (issue) return setError(issue);
       if (password !== confirm) return setError("Hai mật khẩu chưa trùng nhau.");
@@ -41,10 +54,9 @@ export default function RecruiterRegisterPage() {
         setVerified(true);
         if (account.role !== "RECRUITER") { setNotice("Tài khoản được xác minh với vai trò khác. Vui lòng đăng nhập qua đúng cổng."); return; }
         try {
-          await requestApi(`/profile/${account.id}`, { method: "PUT", privateData: true, body: { fullName: name.trim(), phone: phone.trim() } });
-          router.replace(landing(account.role));
+          await saveContact();
         } catch {
-          setNotice("Tài khoản đã xác minh, nhưng chưa lưu được tên và số điện thoại. Bạn có thể bổ sung sau khi tiếp tục.");
+          setNotice("Tài khoản đã xác minh, nhưng chưa lưu được tên và số điện thoại. Hãy lưu lại thông tin liên hệ để hoàn tất.");
         }
       } else {
         const result = await requestApi<{ registrationId: string }>("/auth/register", { ...publicAuth, method: "POST", body: { email: email.trim(), password, role: "RECRUITER" } });
@@ -72,7 +84,7 @@ export default function RecruiterRegisterPage() {
       <nav aria-label="Điều hướng"><Link href="/">Trang chủ</Link><Link href="/candidate/jobs">Việc làm</Link><Link href="/companies">Công ty</Link><span>Bạn là nhà tuyển dụng?</span><Link className="auth-header-action" href="/recruiter/login">Đăng nhập</Link></nav>
     </header>
     <section className="auth-recruiter-register-main">
-      {verified ? <div className="auth-recruiter-register-card auth-recruiter-success"><h1>Tài khoản Recruiter đã xác minh</h1><p>{notice || "Tài khoản của bạn đã sẵn sàng."}</p><Link className="auth-submit auth-submit-link" href="/recruiter/jobs">Tiếp tục đến khu vực tuyển dụng →</Link></div> :
+      {verified ? <div className="auth-recruiter-register-card auth-recruiter-success"><h1>Tài khoản Recruiter đã xác minh</h1><p>{notice || "Tài khoản của bạn đã sẵn sàng."}</p>{notice ? <button className="auth-submit" type="button" onClick={() => void retryContact()} disabled={pending}>{pending ? "Đang lưu…" : "Lưu lại thông tin liên hệ"}</button> : null}{error ? <p role="alert" className="auth-error">{error}</p> : null}<Link className="auth-submit auth-submit-link" href="/recruiter/jobs">Tiếp tục đến khu vực tuyển dụng →</Link></div> :
         <form className="auth-recruiter-register-card" noValidate onSubmit={submit}>
           <header className="auth-recruiter-register-heading"><h1>{otpStage ? "Xác minh email Recruiter" : <>Đăng ký tài khoản<br />Recruiter</>}</h1><p>{otpStage ? `Nhập mã OTP 6 số đã gửi đến ${email}.` : "Tạo tài khoản để đăng tin tuyển dụng và tìm kiếm ứng viên phù hợp."}</p></header>
           <div className="auth-recruiter-register-fields">

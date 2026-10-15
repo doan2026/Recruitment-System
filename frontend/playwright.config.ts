@@ -30,6 +30,7 @@ export default defineConfig({
       NEXT_E2E: "true",
       NEXT_PUBLIC_API_MODE: "gateway",
       NEXT_PUBLIC_API_BASE_URL: "http://127.0.0.1:4174",
+      NEXT_PUBLIC_GOOGLE_LOGIN_ENABLED: "true",
     },
   },
 });

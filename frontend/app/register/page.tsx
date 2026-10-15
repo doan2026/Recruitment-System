@@ -124,7 +124,9 @@ export default function RegisterPage() {
       </form>
       {!flow ? <>
         <div className="auth-divider"><span>hoặc</span></div>
-        <button className="auth-google" type="button" onClick={() => setError("Đăng ký Google chưa được cấu hình cho môi trường local.")}><img src="/figma/register/bc562.svg" alt="" aria-hidden="true" /><span>Đăng ký với Google</span></button>
+        {process.env.NEXT_PUBLIC_GOOGLE_LOGIN_ENABLED === "true"
+          ? <a className="auth-google" href="/auth/google?role=CANDIDATE"><img src="/figma/register/bc562.svg" alt="" aria-hidden="true" /><span>Đăng ký với Google</span></a>
+          : <button className="auth-google" type="button" onClick={() => setError("Đăng ký Google chưa được cấu hình cho môi trường local.")}><img src="/figma/register/bc562.svg" alt="" aria-hidden="true" /><span>Đăng ký với Google</span></button>}
         <p className="auth-signup">Đã có tài khoản? <Link href="/login">Đăng nhập</Link></p>
       </> : null}
     </section>

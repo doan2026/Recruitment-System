@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { passwordError, validatePersonalFile, landing } from "./person1Api";
+import { passwordError, validatePersonalFile, landing, loginRoute, loginDestination } from "./person1Api";
 import { validateBuilder, contentFromProfile } from "./cvPdf";
 import { clearApiSession, requestApi, setApiSession } from "./apiClientCore";
 test("registration password validates Unicode letters and bcrypt byte boundary", () => {
@@ -51,6 +51,20 @@ test("roles have their own entry route", () => {
   assert.equal(landing("ADMIN"), "/admin");
   assert.equal(landing("CANDIDATE"), "/candidate/profile");
   assert.equal(landing("RECRUITER"), "/recruiter/jobs");
+  assert.equal(loginRoute("ADMIN"), "/admin/login");
+  assert.equal(loginRoute("RECRUITER"), "/recruiter/login");
+  assert.equal(loginRoute("CANDIDATE"), "/login");
+});
+test("login return paths stay in their role portal and reject redirect tricks", () => {
+  assert.equal(loginDestination("CANDIDATE", "/candidate/profile/cvs?tab=online"), "/candidate/profile/cvs?tab=online");
+  assert.equal(loginDestination("RECRUITER", "/recruiter/jobs/new"), "/recruiter/jobs/new");
+  assert.equal(loginDestination("ADMIN", "/admin"), "/admin");
+  assert.equal(loginDestination("CANDIDATE", "/ai"), "/ai");
+  for (const target of [null, "https://evil.example", "//evil.example", "/admin", "/recruiter/jobs", "/candidate/../admin", "/candidate/%2e%2e/admin", "/candidate/\\evil", "/candidate/%5cevil", "/candidate/%2fadmin", "/candidate/%252e%252e/admin", "/candidate/%ZZ"]) {
+    assert.equal(loginDestination("CANDIDATE", target), "/candidate/profile");
+  }
+  assert.equal(loginDestination("ADMIN", "/candidate/profile"), "/admin");
+  assert.equal(loginDestination("RECRUITER", "/recruiter/login"), "/recruiter/jobs");
 });
 test("binary export preserves bearer authentication and no-store", async () => {
   process.env.NEXT_PUBLIC_API_BASE_URL = "http://localhost:8080";

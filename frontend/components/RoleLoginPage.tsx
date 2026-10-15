@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { signIn, signOut } from "../lib/authSession";
 import { toUserMessage } from "../lib/apiClient";
-import { landing } from "../lib/person1Api";
+import { loginDestination } from "../lib/person1Api";
 
 type Portal = "RECRUITER" | "ADMIN";
 
@@ -33,6 +33,16 @@ export default function RoleLoginPage({ portal }: { portal: Portal }) {
   const [remember, setRemember] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(`careerhub.remembered-login-email:${portal.toLowerCase()}`);
+      setEmail(saved ?? "");
+      setRemember(!!saved);
+    } catch {
+      // Login remains usable when storage is unavailable.
+    }
+  }, [portal]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -64,9 +74,7 @@ export default function RoleLoginPage({ portal }: { portal: Portal }) {
         // Login works when browser storage is unavailable.
       }
       const returnTo = new URLSearchParams(window.location.search).get("returnTo");
-      const prefix = portal === "ADMIN" ? "/admin" : "/recruiter";
-      const safeReturn = returnTo?.startsWith(`${prefix}/`) && !returnTo.includes("\\") ? returnTo : content.home;
-      router.replace(safeReturn);
+      router.replace(loginDestination(account.role, returnTo));
     } catch (reason) {
       setError(toUserMessage(reason));
       setPassword("");
