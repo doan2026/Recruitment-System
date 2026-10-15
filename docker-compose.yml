@@ -534,12 +534,14 @@ services:
         # NEXT_PUBLIC values are compiled into the browser bundle.
         NEXT_PUBLIC_API_BASE_URL: /api
         NEXT_PUBLIC_API_MODE: gateway
+        NEXT_PUBLIC_GOOGLE_LOGIN_ENABLED: ${GOOGLE_OAUTH_ENABLED:-false}
     env_file:
       - ./frontend/.env
     environment:
       # Keep runtime consistent even when frontend/.env is set to local demo.
       NEXT_PUBLIC_API_BASE_URL: /api
       NEXT_PUBLIC_API_MODE: gateway
+      NEXT_PUBLIC_GOOGLE_LOGIN_ENABLED: ${GOOGLE_OAUTH_ENABLED:-false}
       API_INTERNAL_BASE_URL: http://api-gateway
     restart: unless-stopped
     ports:

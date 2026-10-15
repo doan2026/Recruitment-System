@@ -75,6 +75,8 @@ export async function exchangeGoogle(
 ) {
   const result = await requestApi<TokenResponse>("/auth/google/exchange", {
     ...publicAuth,
+    // The HttpOnly binder is scoped to this canonical path, not /api/auth/...
+    fetcher: (_url, options) => fetch("/auth/google/exchange", options),
     method: "POST",
     body: { code, role },
   });

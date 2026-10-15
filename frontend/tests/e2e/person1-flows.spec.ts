@@ -116,13 +116,23 @@ test("reset reads a one-time fragment once under StrictMode and clears it from U
     newPassword: "NewPassword123",
   });
 });
-test("Google exchange is explicit and preserves the one-time code", async ({
+test("Google exchange sends the path-scoped HttpOnly binder and consumes the code once", async ({
   page,
 }) => {
   await base(page);
+  await page.context().addCookies([{
+    name: "oauth2_exchange_binder",
+    value: "test-browser-binder",
+    domain: "127.0.0.1",
+    path: "/auth/google/exchange",
+    httpOnly: true,
+    sameSite: "Lax",
+    secure: false,
+  }]);
   let count = 0;
-  await page.route(api + "/auth/google/exchange", (route) => {
+  await page.route("http://127.0.0.1:4173/auth/google/exchange", async (route) => {
     count++;
+    expect(await route.request().headerValue("cookie")).toContain("oauth2_exchange_binder=test-browser-binder");
     expect(route.request().postDataJSON()).toEqual({
       code: "one-time-google",
       role: "CANDIDATE",

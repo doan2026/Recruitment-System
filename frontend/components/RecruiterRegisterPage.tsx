@@ -88,7 +88,7 @@ export default function RecruiterRegisterPage() {
           <button className="auth-submit" type="submit" disabled={pending} aria-busy={pending}>{pending ? "Đang xử lý…" : otpStage ? "Xác minh tài khoản" : "Đăng ký"}</button>
           {otpStage ? <button className="auth-resend" type="button" onClick={resend} disabled={pending}>Gửi lại mã xác minh</button> : <>
             <div className="auth-recruiter-register-divider"><span>Hoặc</span></div>
-            {process.env.NEXT_PUBLIC_GOOGLE_LOGIN_ENABLED === "true" ? <a className="auth-google" href={`${process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api"}/auth/google?role=RECRUITER`}><img src="/figma/login/bc562.svg" alt="" /><span>Đăng ký với Google</span></a> : <button className="auth-google" type="button" onClick={() => setError("Đăng ký Google chưa được cấu hình cho môi trường local.")}><img src="/figma/login/bc562.svg" alt="" /><span>Đăng ký với Google</span></button>}
+            {process.env.NEXT_PUBLIC_GOOGLE_LOGIN_ENABLED === "true" ? <a className="auth-google" href="/auth/google?role=RECRUITER"><img src="/figma/login/bc562.svg" alt="" /><span>Đăng ký với Google</span></a> : <button className="auth-google" type="button" onClick={() => setError("Đăng ký Google chưa được cấu hình cho môi trường local.")}><img src="/figma/login/bc562.svg" alt="" /><span>Đăng ký với Google</span></button>}
             <p className="auth-portal-signup">Đã có tài khoản? <Link href="/recruiter/login">Đăng nhập</Link></p>
           </>}
           </div>

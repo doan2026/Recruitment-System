@@ -67,7 +67,7 @@ export default function LoginPage() {
   }
 
   const googleEnabled = process.env.NEXT_PUBLIC_GOOGLE_LOGIN_ENABLED === "true";
-  const googleHref = `${process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api"}/auth/google`;
+  const googleHref = "/auth/google";
 
   return (
     <main className="auth-page auth-login" data-node-id="22:2">

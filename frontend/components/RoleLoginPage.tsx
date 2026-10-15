@@ -136,7 +136,7 @@ export default function RoleLoginPage({ portal }: { portal: Portal }) {
           <>
             <div className="auth-portal-divider"><span>HOẶC</span></div>
             {process.env.NEXT_PUBLIC_GOOGLE_LOGIN_ENABLED === "true" ? (
-              <a className="auth-google" href={`${process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api"}/auth/google?role=RECRUITER`}><img src="/figma/login/bc562.svg" alt="" aria-hidden="true" /><span>Đăng nhập với Google</span></a>
+              <a className="auth-google" href="/auth/google?role=RECRUITER"><img src="/figma/login/bc562.svg" alt="" aria-hidden="true" /><span>Đăng nhập với Google</span></a>
             ) : (
               <button className="auth-google" type="button" onClick={() => setError("Đăng nhập Google chưa được cấu hình cho môi trường local.")}><img src="/figma/login/bc562.svg" alt="" aria-hidden="true" /><span>Đăng nhập với Google</span></button>
             )}
