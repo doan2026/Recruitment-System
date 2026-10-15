@@ -163,6 +163,8 @@ services:
 
   auth-service:
     build: ./services/auth-service
+    ports:
+      - "127.0.0.1:${AUTH_HOST_PORT:-8081}:8080"
     env_file:
       - ./services/auth-service/.env
     environment:
@@ -244,6 +246,8 @@ services:
 
   admin-service:
     build: ./services/admin-service
+    ports:
+      - "127.0.0.1:${ADMIN_HOST_PORT:-8084}:8080"
     env_file:
       - ./services/admin-service/.env
     environment:
@@ -281,6 +285,8 @@ services:
 
   profile-service:
     build: ./services/profile-service
+    ports:
+      - "127.0.0.1:${PROFILE_HOST_PORT:-8082}:3000"
     env_file:
       - ./services/profile-service/.env
     environment:
@@ -455,6 +461,8 @@ services:
     command: [ "npm", "run", "prisma:migrate:deploy" ]
   media-service:
     build: ./services/media-service
+    ports:
+      - "127.0.0.1:${MEDIA_HOST_PORT:-8083}:3000"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=media
       CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:?CLOUDINARY_CLOUD_NAME is required}

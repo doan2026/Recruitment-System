@@ -19,10 +19,16 @@ Build lần đầu cần tải dependency Node, Maven, Python và model cho AI w
 | Admin đăng nhập | http://localhost:3000/admin/login |
 | API Gateway | http://localhost:8080 |
 | Auth health | http://localhost:8080/auth/health |
+| Auth trực tiếp | http://localhost:8081/actuator/health |
+| Profile trực tiếp | http://localhost:8082/health |
+| Media trực tiếp | http://localhost:8083/health |
+| Admin trực tiếp | http://localhost:8084/actuator/health |
 | PostgreSQL cho pgAdmin | localhost:5433 (hoặc `POSTGRES_HOST_PORT`) |
 | Redis từ máy host | localhost:6380 (hoặc `REDIS_HOST_PORT`) |
 
 Các container dùng `postgres:5432`, `redis:6379` và các tên service Docker. Các cổng được publish chỉ trên loopback của máy. Giữ frontend ở `localhost:3000` để callback Google và cookie trùng cấu hình.
+
+Bốn API Người 1 được publish cổng riêng để mở trực tiếp từ Docker Desktop hoặc gọi bằng Postman. Có thể đổi cổng host qua `AUTH_HOST_PORT`, `PROFILE_HOST_PORT`, `MEDIA_HOST_PORT`, `ADMIN_HOST_PORT` trong `.env` gốc. Các API này trả JSON; giao diện web vẫn ở cổng 3000. Các job migration chạy một lần và không có HTTP port.
 
 ## Dịch vụ ngoài
 
