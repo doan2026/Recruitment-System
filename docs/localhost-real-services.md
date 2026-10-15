@@ -23,12 +23,19 @@ Build lần đầu cần tải dependency Node, Maven, Python và model cho AI w
 | Profile trực tiếp | http://localhost:8082/health |
 | Media trực tiếp | http://localhost:8083/health |
 | Admin trực tiếp | http://localhost:8084/actuator/health |
+| Company trực tiếp | http://localhost:8085 |
+| Job & Search trực tiếp | http://localhost:8086 |
+| Application trực tiếp | http://localhost:8087 |
+| Interview trực tiếp | http://localhost:8088 |
+| Notification trực tiếp | http://localhost:8089 |
+| Chat trực tiếp | http://localhost:8090 |
+| AI trực tiếp | http://localhost:8091 |
 | PostgreSQL cho pgAdmin | localhost:5433 (hoặc `POSTGRES_HOST_PORT`) |
 | Redis từ máy host | localhost:6380 (hoặc `REDIS_HOST_PORT`) |
 
 Các container dùng `postgres:5432`, `redis:6379` và các tên service Docker. Các cổng được publish chỉ trên loopback của máy. Giữ frontend ở `localhost:3000` để callback Google và cookie trùng cấu hình.
 
-Bốn API Người 1 được publish cổng riêng để mở trực tiếp từ Docker Desktop hoặc gọi bằng Postman. Có thể đổi cổng host qua `AUTH_HOST_PORT`, `PROFILE_HOST_PORT`, `MEDIA_HOST_PORT`, `ADMIN_HOST_PORT` trong `.env` gốc. Các API này trả JSON; giao diện web vẫn ở cổng 3000. Các job migration chạy một lần và không có HTTP port.
+Toàn bộ 11 API được publish cổng riêng để mở trực tiếp từ Docker Desktop hoặc gọi bằng Postman. Có thể đổi cổng host qua các biến `*_HOST_PORT` tương ứng trong `.env.example`, đặt giá trị ghi đè trong `.env` gốc. Các API này trả JSON; cần gọi đúng đường dẫn của từng API, đường dẫn gốc có thể trả 404. Giao diện web vẫn ở cổng 3000. Các job migration, Kafka init và AI worker không có HTTP server nên không ánh xạ cổng.
 
 ## Dịch vụ ngoài
 

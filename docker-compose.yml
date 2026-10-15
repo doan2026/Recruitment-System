@@ -186,6 +186,8 @@ services:
 
   application-service:
     build: ./services/application-service
+    ports:
+      - "127.0.0.1:${APPLICATION_HOST_PORT:-8087}:8080"
     env_file:
       - ./services/application-service/.env
     environment:
@@ -209,6 +211,8 @@ services:
 
   interview-service:
     build: ./services/interview-service
+    ports:
+      - "127.0.0.1:${INTERVIEW_HOST_PORT:-8088}:8080"
     env_file:
       - ./services/interview-service/.env
     environment:
@@ -329,6 +333,8 @@ services:
 
   company-service:
     build: ./services/company-service
+    ports:
+      - "127.0.0.1:${COMPANY_HOST_PORT:-8085}:3000"
     env_file:
       - ./services/company-service/.env
     environment:
@@ -352,6 +358,8 @@ services:
 
   job-search-service:
     build: ./services/job-search-service
+    ports:
+      - "127.0.0.1:${JOB_SEARCH_HOST_PORT:-8086}:3000"
     env_file:
       - ./services/job-search-service/.env
     environment:
@@ -405,6 +413,8 @@ services:
     build:
       context: ./services/notification-service
       target: runtime
+    ports:
+      - "127.0.0.1:${NOTIFICATION_HOST_PORT:-8089}:3000"
     env_file:
       - ./services/notification-service/.env
     environment:
@@ -513,6 +523,8 @@ services:
 
   chat-service:
     build: ./services/chat-service
+    ports:
+      - "127.0.0.1:${CHAT_HOST_PORT:-8090}:3001"
     env_file:
       - ./services/chat-service/.env
     environment:
@@ -553,6 +565,8 @@ services:
     build:
       context: ./services/ai-service
       target: runtime
+    ports:
+      - "127.0.0.1:${AI_HOST_PORT:-8091}:8000"
     env_file:
       - ./services/ai-service/.env
     environment:
