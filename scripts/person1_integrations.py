@@ -185,13 +185,19 @@ def media_presets(env):
 
 
 def preset_matches(result, name, formats, delivery, maximum):
-    options = result.get("options", result)
+    # Current Admin API returns options under settings. Cloudinary does not
+    # support per-preset byte limits: maximum remains enforced by Media confirm.
+    options = result.get("settings", result.get("options", result))
+    if not isinstance(options, dict):
+        return False
     actual_formats = options.get("allowed_formats", [])
     if isinstance(actual_formats, str):
         actual_formats = actual_formats.split(",")
+    if not isinstance(actual_formats, list) or any(not isinstance(item, str) for item in actual_formats):
+        return False
     return (result.get("name") == name and result.get("unsigned") is False
             and sorted(actual_formats) == sorted(formats)
-            and options.get("type") == delivery and options.get("max_file_size") == maximum)
+            and options.get("type") == delivery)
 
 
 def setup_cloudinary(env):
@@ -217,7 +223,7 @@ def setup_cloudinary(env):
     for name, formats, delivery, maximum in missing:
         cloudinary_request(env, "/upload_presets", {
             "name": name, "unsigned": "false", "allowed_formats": ",".join(formats),
-            "type": delivery, "max_file_size": str(maximum), "overwrite": "false",
+            "type": delivery, "overwrite": "false",
         })
         result = cloudinary_request(env, "/upload_presets/" + urllib.parse.quote(name, safe=""))
         if not preset_matches(result, name, formats, delivery, maximum):

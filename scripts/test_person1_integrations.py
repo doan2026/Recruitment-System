@@ -12,8 +12,8 @@ import person1_integrations as integrations
 class CloudinarySetupTest(unittest.TestCase):
     def response(self, preset, nested=True):
         name, formats, delivery, maximum = preset
-        options = {"allowed_formats": formats, "type": delivery, "max_file_size": maximum}
-        return {"name": name, "unsigned": False, **({"options": options} if nested else options)}
+        options = {"allowed_formats": formats, "type": delivery, "overwrite": False}
+        return {"name": name, "unsigned": False, **({"settings": options} if nested else options)}
 
     def test_policy_requires_private_pdf_and_six_distinct_signed_presets(self):
         presets = integrations.media_presets({})
@@ -83,7 +83,18 @@ class CloudinarySetupTest(unittest.TestCase):
         self.assertEqual(len(writes), 1)
         self.assertEqual(writes[0]["unsigned"], "false")
         self.assertEqual(writes[0]["type"], "authenticated")
-        self.assertEqual(writes[0]["max_file_size"], str(5 * 1024 * 1024))
+        self.assertNotIn("max_file_size", writes[0])
+        self.assertEqual(writes[0]["overwrite"], "false")
+
+    def test_preset_validation_rejects_wrong_policy_and_malformed_settings(self):
+        preset = integrations.media_presets({})[0]
+        for field, value in [("allowed_formats", ["jpg"]), ("allowed_formats", 1), ("type", "upload")]:
+            result = self.response(preset)
+            result["settings"][field] = value
+            self.assertFalse(integrations.preset_matches(result, *preset))
+        result = self.response(preset)
+        result["options"] = result.pop("settings")
+        self.assertTrue(integrations.preset_matches(result, *preset))
 
     def test_quoted_credentials_are_read_without_logging_and_other_settings_survive(self):
         with tempfile.TemporaryDirectory() as directory:

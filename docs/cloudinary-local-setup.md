@@ -35,7 +35,7 @@ có sẵn, chỉ tạo preset chưa tồn tại và đọc lại để xác nh�
 policy hoặc API không đủ quyền, script dừng; không cập nhật/xóa preset hay asset.
 Các lệnh không in key/secret hoặc URL riêng tư.
 
-| Preset mặc định | Format | Giới hạn | Delivery type |
+| Preset mặc định | Format | Giới hạn tại client/Media | Delivery type |
 |---|---|---|---|
 | `recruitment_cv_signed` | pdf | 5 MiB | authenticated |
 | `recruitment_avatar_signed` | jpg, png, webp | 2 MiB | upload |
@@ -47,6 +47,8 @@ Các lệnh không in key/secret hoặc URL riêng tư.
 Tất cả preset phải là **signed** (`unsigned=false`). Tên có thể đổi bằng các biến
 `CLOUDINARY_UPLOAD_PRESET_*` trong `.env`, nhưng mỗi loại cần tên riêng.
 
+Cloudinary không hỗ trợ giới hạn byte riêng theo upload preset. Không gửi/kiểm tra `max_file_size` như một trường preset bắt buộc. Các giới hạn trong bảng được client kiểm tra trước upload và Media xác minh bằng metadata canonical trước khi ACTIVE; file quá giới hạn bị reject và cleanup. Giới hạn nhận file ở Cloudinary phụ thuộc tài khoản. Script xác minh `settings.allowed_formats`, `settings.type` và `unsigned=false`; Media ký `overwrite=false` trong capability để chặn ghi đè, độc lập mặc định của preset. [Tài liệu Cloudinary](https://cloudinary.com/documentation/upload_presets).
+
 Nếu ping thành công nhưng `POST /upload_presets` trả `403` kèm
 `missing permissions (actions=["create"])`, key hợp lệ nhưng thiếu quyền tạo preset.
 Trong Console, cấp quyền quản lý Upload Presets cho API key của Product Environment,
@@ -56,12 +58,31 @@ mô tả trong [Admin API](https://cloudinary.com/documentation/admin_api#upload
 [Roles and Permissions](https://cloudinary.com/documentation/dam_admin_permissions)
 mô tả quyền của API key.
 
+Trên hệ thống Roles and Permissions hiện tại:
+
+1. Mở **Settings → API Keys** trong đúng Product Environment ứng với cloud name trong `.env`.
+2. Tại key đang dùng, mở menu **⋮ → Assign Roles**.
+3. Chọn role có **Manage upload settings**. Với kiểm thử Docker local, system role **Tech Admin** của Product Environment có quyền quản lý upload settings và tài nguyên cần thiết; không chọn nhầm role cùng tên ở cấp Account.
+4. Lưu quyền, giữ key/secret trong `.env`, rồi chạy lại `setup-cloudinary` và `check-cloudinary --presets`.
+
+Nguồn: [gán role cho API key](https://production.cloudinary.com/documentation/dam_admin_role_management#assign_roles_to_api_keys) và [quyền của system roles](https://production.cloudinary.com/documentation/dam_admin_system_roles_permissions#global_product_environment_level_roles).
+
+Đổi `.env` chỉ có tác dụng khi thay bằng credential được cấp quyền hoặc trỏ đến preset đã tồn tại và đúng policy. Không có biến `.env` nào tự cấp quyền cho key tại Cloudinary. Nếu đổi key/secret hoặc tên preset, phải recreate Media để nạp cấu hình mới; chỉ `docker compose restart` không cập nhật environment:
+
+```powershell
+docker compose up -d --no-deps --force-recreate media-service
+docker compose restart api-gateway
+```
+
 ## Cho phép tải PDF
 
-Với tài khoản Free, Cloudinary có thể chặn delivery PDF theo mặc định. Trong
-Console → Settings → Security, bật **Allow delivery of PDF and ZIP files** khi
-thiết lập CV. CV vẫn phải dùng `authenticated`; không chuyển sang public để xử lý
-lỗi tải. Xem [hướng dẫn PDF](https://cloudinary.com/documentation/ts_how_to_upload_manage_and_deliver_pdf_files).
+Cloudinary có thể chặn delivery PDF qua CDN theo cấu hình tài khoản. Media dùng
+Private Download API với public ID RAW đầy đủ và thời hạn ngắn; luồng CV này đã
+tải PDF thành công mà không cần đổi cài đặt delivery. Chỉ kiểm tra **Settings →
+Security → Allow delivery of PDF and ZIP files** nếu thực sự cần delivery qua CDN
+và provider báo chặn PDF. CV vẫn dùng `authenticated`. Xem
+[hướng dẫn PDF](https://cloudinary.com/documentation/ts_how_to_upload_manage_and_deliver_pdf_files)
+và [kết quả live ngày 16/10/2026](person1-cloudinary-2026-10-16.md).
 
 ## Áp dụng vào Docker
 
@@ -69,6 +90,7 @@ Sau khi credential/preset được xác nhận:
 
 ```powershell
 docker compose up -d --build media-service
+docker compose restart api-gateway
 ```
 
 Media healthcheck không tự kiểm tra Cloudinary từ xa; HTTP health thành công không
