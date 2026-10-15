@@ -6,7 +6,7 @@ Nguồn yêu cầu: phần III/A1–A4 trong tài liệu phân công đính kèm
 
 | Luồng | Triển khai |
 |---|---|
-| Đăng ký Candidate/Recruiter, OTP, gửi lại | Giao diện /register dùng Auth hiện có, giữ registrationId cho đúng lần đăng ký; OTP thành công thiết lập phiên |
+| Đăng ký Candidate/Recruiter, OTP, gửi lại | /register cho Candidate, /recruiter/register cho Recruiter; giữ registrationId cho đúng lần đăng ký; OTP thành công thiết lập phiên; liên hệ Recruiter lưu qua /auth/me/recruiter-contact |
 | Đăng nhập, refresh, logout | Tái sử dụng phiên trong bộ nhớ; refresh rotation; điều hướng đúng Candidate/Recruiter/Admin |
 | Google | /auth/callback nhận code một lần từ fragment, xóa khỏi URL, chọn vai trò cho tài khoản mới; exchange có credentials |
 | Quên/đặt lại mật khẩu | /forgot-password, /reset-password; thông báo quên mật khẩu chung; token không lưu trên thiết bị |
@@ -32,12 +32,12 @@ Backend Auth/Profile/Media đã có nhiều nghiệp vụ và kiểm thử trư�
 
 ## Giới hạn tích hợp còn lại
 
-- Chưa thể nghiệm thu live SMTP, Google OAuth và Cloudinary nếu chưa cấu hình credential/preset thật. Browser tests dùng API mock và không gửi email, không tạo tài khoản bên ngoài.
+- Cập nhật 15/10/2026 (GMT+7): Gmail SMTP đã kiểm thử thật qua đăng ký Candidate/Recruiter và đặt lại mật khẩu. Google đã cấu hình và kiểm tra chuyển hướng, chưa nghiệm thu thao tác đăng nhập tương tác với Google. Cloudinary xác thực key được nhưng thiếu preset và quyền tạo preset; upload thật bị từ chối. Xem [báo cáo kiểm thử](person1-regression-2026-10-15.md) để phân biệt kiểm thử live và kiểm thử dùng mock.
 - Job/Company chưa có API Admin gỡ đối tượng đã công khai. Báo cáo các loại này được tiếp nhận nhưng không giả lập RESOLVED; cần hợp đồng từ Người 2.
 - UNKNOWN/PROCESSING sau remote timeout cần đối soát vận hành; chưa có tự động phục hồi tác vụ quản trị xuyên service.
 - PostgreSQL Compose hiện tách schema trong một cluster, chưa chuyển thành database/container/credential độc lập như kiến trúc đích.
 - Mô hình Auth hiện cho access token cũ tồn tại tối đa TTL 15 phút sau khóa. Admin kiểm tra trạng thái bền vững qua /auth/me trước thao tác; các service khác giữ hợp đồng stateless hiện có.
-- Không provisioning Admin, không tự đổi role tài khoản hiện hữu. Dùng quy trình tạo Admin được chủ dự án quản lý.
+- Không có API tự đăng ký/provisioning Admin. Trong lần kiểm thử 15/10/2026, đã tạo Admin thử riêng tại Docker local theo xác nhận của chủ dự án; không đổi role tài khoản hiện hữu. Credential thử nằm trong `.cache` được Git bỏ qua.
 - Chưa xác nhận toàn bộ 11 service và ba luồng E2E liên người 1/2/3 trên môi trường thật.
 - Chưa thay đổi phương thức quản lý key rotation/production secrets hay cơ chế phân quyền recruiter của Profile vốn do hợp đồng liên service hiện tại quyết định.
 
