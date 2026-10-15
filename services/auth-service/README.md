@@ -247,6 +247,14 @@ Access tokens are RS256 JWTs with standard `typ=JWT`, a deterministic public-key
 - `GET /auth/me` requires `Authorization: Bearer <access-token>` and returns current `id`, `email`, `role` and verification state after rechecking PostgreSQL. Deleted, unverified or locked accounts are rejected.
 - The decoder accepts only `RS256`, standard `typ=JWT`, a known non-empty `kid`, configured issuer/audience, UUID `sub`/`jti` and one of `CANDIDATE`, `RECRUITER`, `ADMIN`.
 
+### Recruiter registration contact
+
+`GET /auth/me/recruiter-contact` and `PUT /auth/me/recruiter-contact` manage the signed-in Recruiter's own `{fullName, phone}`. PUT requires a 2–160 character name and a formatted phone number containing 6–15 digits (maximum 32 characters). Auth stores these account contact fields in its own schema via Flyway V3. Existing accounts start with null contact fields.
+
+Both endpoints require a Recruiter JWT and recheck the durable account role, verification and lock state. They derive the owner from the JWT subject, accept no owner selector, return `Cache-Control: no-store`, and do not add contact PII to access-token claims. Browser PUT preflight is enabled only for this route; internal Admin PATCH remains outside browser CORS permissions. Candidate profile ownership and permissions are unchanged.
+
+After Recruiter OTP verification, the frontend saves contact here and then enters the Recruiter portal. A temporary save failure preserves the onboarding form and offers an explicit retry. Recruiters never call Candidate Profile to save their registration contact.
+
 ## Refresh and logout API
 
 `POST /auth/refresh` and `POST /auth/logout` accept:
@@ -263,6 +271,7 @@ Flyway manages schema `auth` and Hibernate runs with `ddl-auto=validate`:
 
 - `V1__create_auth_persistence.sql` creates `users`, `refresh_sessions` and `oauth_accounts`.
 - `V2__add_registration_flow_identity.sql` adds pending `registration_id`, a monotonic registration fence sequence/column, and database constraints for pending versus verified state.
+- `V3__add_recruiter_contact.sql` adds nullable Recruiter contact fields with role and completeness constraints.
 - `users` stores canonical NFC/lowercase email, bcrypt cost-10 password hash for local accounts, role, verification/lock state, timestamps and optimistic version.
 - `refresh_sessions` stores only lowercase SHA-256 token hashes with lineage and revocation state.
 - `oauth_accounts` stores Google subject linkage and verified canonical provider email; Google access/refresh tokens are not stored.

@@ -277,6 +277,27 @@
       }
     },
     {
+      "name": "Recruiter contact - read own account",
+      "request": {
+        "method": "GET",
+        "description": "Use a verified Recruiter access token. Candidate/Admin tokens are rejected; ownership derives from the token.",
+        "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+        "url": "{{baseUrl}}/auth/me/recruiter-contact"
+      }
+    },
+    {
+      "name": "Recruiter contact - save own account",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": { "mode": "raw", "raw": "{\n  \"fullName\": \"Recruiter Test\",\n  \"phone\": \"0901234567\"\n}" },
+        "url": "{{baseUrl}}/auth/me/recruiter-contact"
+      }
+    },
+    {
       "name": "JWKS",
       "request": {
         "method": "GET",

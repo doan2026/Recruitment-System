@@ -24,6 +24,12 @@ Auth uses `@RestController` for JSON APIs. Its package layout separates
 Controllers delegate business work to services; repository adapters own persistence.
 DTOs define the HTTP representation, and `@RestControllerAdvice` maps errors.
 
+Auth also owns Recruiter account contact (`fullName`, `phone`) at
+`GET/PUT /auth/me/recruiter-contact`. The owner is always the authenticated subject;
+current durable role/verification/lock checks apply. These fields are not JWT claims.
+Candidate career profile data remains exclusively in Profile. Recruiter onboarding
+must use Auth contact APIs rather than Candidate Profile APIs.
+
 The internal `/auth/users` directory uses a typed DTO and follows
 `AdminUserDirectoryController → AdminUserDirectoryService → AdminUserDirectoryRepository`.
 The service rechecks durable admin role and bounds pagination; the repository

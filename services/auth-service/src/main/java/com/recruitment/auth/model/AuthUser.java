@@ -35,6 +35,12 @@ public class AuthUser {
   @Column(name = "password_hash", length = 255)
   private String passwordHash;
 
+  @Column(name = "recruiter_full_name", length = 160)
+  private String recruiterFullName;
+
+  @Column(name = "recruiter_phone", length = 32)
+  private String recruiterPhone;
+
   @Column(name = "registration_id")
   private UUID registrationId;
 
@@ -146,6 +152,20 @@ public class AuthUser {
     lockedReason = null;
   }
 
+  public void updateRecruiterContact(String fullName, String phone) {
+    if (role != UserRole.RECRUITER) {
+      throw new IllegalStateException("Recruiter contact belongs to a recruiter account");
+    }
+    String name = IdentityNormalizer.requireText(fullName, "fullName", 160);
+    String number = IdentityNormalizer.requireText(phone, "phone", 32);
+    if (name.length() < 2 || !number.matches("^[0-9+(). -]{6,32}$")
+        || !number.matches("^(?:\\D*\\d){6,15}\\D*$")) {
+      throw new IllegalArgumentException("Recruiter contact is invalid");
+    }
+    recruiterFullName = name;
+    recruiterPhone = number;
+  }
+
   public void changePasswordHash(String newPasswordHash) {
     passwordHash = requirePasswordHash(newPasswordHash);
   }
@@ -215,6 +235,14 @@ public class AuthUser {
 
   public String getPasswordHash() {
     return passwordHash;
+  }
+
+  public String getRecruiterFullName() {
+    return recruiterFullName;
+  }
+
+  public String getRecruiterPhone() {
+    return recruiterPhone;
   }
 
   public UUID getRegistrationId() {

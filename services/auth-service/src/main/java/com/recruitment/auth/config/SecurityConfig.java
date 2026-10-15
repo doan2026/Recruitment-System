@@ -73,6 +73,8 @@ class SecurityConfig {
                 "/auth/google/exchange")
             .permitAll()
             .requestMatchers(HttpMethod.GET, "/auth/me").authenticated()
+            .requestMatchers(HttpMethod.GET, "/auth/me/recruiter-contact").hasRole("RECRUITER")
+            .requestMatchers(HttpMethod.PUT, "/auth/me/recruiter-contact").hasRole("RECRUITER")
             .requestMatchers(HttpMethod.GET, "/auth/users").hasRole("ADMIN")
             .requestMatchers(HttpMethod.PATCH, "/auth/users/*/lock").hasRole("ADMIN")
             .anyRequest().denyAll();
@@ -110,6 +112,9 @@ class SecurityConfig {
     configuration.setAllowCredentials(true);
     configuration.setMaxAge(600L);
     UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+    CorsConfiguration contact = new CorsConfiguration(configuration);
+    contact.setAllowedMethods(List.of("GET", "HEAD", "PUT", "OPTIONS"));
+    source.registerCorsConfiguration("/auth/me/recruiter-contact", contact);
     source.registerCorsConfiguration("/auth/**", configuration);
     return source;
   }
