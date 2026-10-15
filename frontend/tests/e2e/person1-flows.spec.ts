@@ -121,7 +121,8 @@ test("reset reads a one-time fragment once under StrictMode and clears it from U
     newPassword: "NewPassword123",
   });
 });
-test("Google exchange sends the path-scoped HttpOnly binder and consumes the code once", async ({
+for (const role of ["CANDIDATE", "RECRUITER"] as const) {
+test(`Google automatically signs in to ${role} with the HttpOnly binder exactly once`, async ({
   page,
 }) => {
   await base(page);
@@ -140,16 +141,46 @@ test("Google exchange sends the path-scoped HttpOnly binder and consumes the cod
     expect(await route.request().headerValue("cookie")).toContain("oauth2_exchange_binder=test-browser-binder");
     expect(route.request().postDataJSON()).toEqual({
       code: "one-time-google",
-      role: "CANDIDATE",
+      role,
     });
-    return reply(route, tokens());
+    return reply(route, tokens(role));
   });
-  await page.goto("/auth/callback#code=one-time-google");
-  await page.getByRole("button", { name: "Tiếp tục", exact: true }).click();
-  await expect(
+  await page.goto("/auth/callback#code=one-time-google&role=" + role);
+  await expect(page).toHaveURL(role === "CANDIDATE" ? /\/candidate\/profile$/ : /\/recruiter\/jobs$/);
+  if (role === "CANDIDATE") await expect(
     page.getByRole("heading", { name: "Hồ sơ cá nhân", exact: true }),
   ).toBeVisible();
   expect(count).toBe(1);
+  expect(page.url()).not.toContain("code=");
+  await expect(page.getByRole("combobox", { name: "Vai trò", exact: true })).toHaveCount(0);
+});
+}
+
+for (const fragment of ["code=one-time-google", "code=one-time-google&role=ADMIN", "role=RECRUITER"]) {
+test(`Google callback rejects incomplete or invalid portal metadata: ${fragment}`, async ({ page }) => {
+  await base(page);
+  let exchanges = 0;
+  await page.route("http://127.0.0.1:4173/auth/google/exchange", route => { exchanges++; return reply(route, tokens()); });
+  await page.goto("/auth/callback#" + fragment);
+  await expect(page.getByRole("alert").filter({ hasText: "Hãy bắt đầu lại" })).toBeVisible();
+  await expect(page).toHaveURL("http://127.0.0.1:4173/auth/callback");
+  await expect(page.getByRole("combobox")).toHaveCount(0);
+  expect(exchanges).toBe(0);
+});
+}
+
+test("Google role mismatch stays signed out, offers the original portal and never replays exchange", async ({ page }) => {
+  await base(page);
+  let exchanges = 0;
+  await page.route("http://127.0.0.1:4173/auth/google/exchange", route => {
+    exchanges++;
+    return reply(route, { code: "GOOGLE_ROLE_MISMATCH" }, 403);
+  });
+  await page.goto("/auth/callback#code=one-time-google&role=RECRUITER");
+  await expect(page.getByRole("alert").filter({ hasText: "thuộc vai trò khác" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Quay lại đăng nhập", exact: true })).toHaveAttribute("href", "/recruiter/login");
+  await expect(page.getByRole("button", { name: "Tiếp tục", exact: true })).toHaveCount(0);
+  expect(exchanges).toBe(1);
   expect(page.url()).not.toContain("code=");
 });
 test("profile sections save independently with the current candidate identity", async ({

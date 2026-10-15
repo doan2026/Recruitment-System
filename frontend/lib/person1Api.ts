@@ -55,6 +55,7 @@ export function person1Error(error: unknown): string {
       ACCOUNT_LINK_REQUIRED:
         "Email này đã có tài khoản. Hãy đăng nhập bằng mật khẩu.",
       GOOGLE_OAUTH_DISABLED: "Đăng nhập Google chưa được cấu hình.",
+      GOOGLE_ROLE_MISMATCH: "Tài khoản Google này thuộc vai trò khác. Hãy dùng đúng trang đăng nhập của tài khoản.",
       CV_VERSION_CONFLICT:
         "CV đã thay đổi. Tải lại danh sách trước khi thao tác tiếp.",
       REPORT_VERSION_CONFLICT: "Báo cáo đã được người khác xử lý. Hãy tải lại.",

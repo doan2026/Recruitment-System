@@ -79,3 +79,13 @@ npm.cmd test
 npm.cmd run typecheck
 npx.cmd playwright test person1-flows.spec.ts --reporter=line
 ```
+
+## Bổ sung: Google tự chọn vai trò theo cổng đăng nhập
+
+Theo yêu cầu tiếp theo ngày 15/10/2026, bỏ form chọn vai trò và nút Tiếp tục tại `/auth/callback`. Candidate nhận role CANDIDATE; Recruiter nhận RECRUITER. Backend giữ cổng bắt đầu trong OAuth state ở Redis, chỉ chuyển metadata sau khi state hợp lệ, rồi ràng buộc role với exchange code một lần. Callback xóa fragment và tự exchange đúng một lần trong StrictMode.
+
+Tài khoản đã liên kết Google nhưng khác role với cổng bắt đầu nhận `403 GOOGLE_ROLE_MISMATCH`; không đổi role, không cấp phiên. Việc sửa role tại callback/body không thay được role đã lưu tại server. Chính sách không tự liên kết theo email giữ nguyên.
+
+Đợt kiểm thử riêng cho thay đổi này: **232/232 Auth unit**, **44/44 Auth PostgreSQL/Redis integration**, **138/138 frontend unit**, **36/36 Playwright desktop/mobile**, typecheck và build Docker thành công. Playwright dùng mock exchange; giới hạn kiểm thử tương tác Google thật ở trên vẫn áp dụng.
+
+Đã recreate Auth/frontend và reload gateway trên Docker local. Kiểm tra HTTP qua `localhost:3000` xác nhận Candidate/Recruiter chuyển đúng role đến authorization endpoint, có PKCE/state/nonce và Redis lưu đúng role gắn với state. `role=ADMIN` bị từ chối 400. Không đăng nhập/chấp thuận Google thay người dùng trong bước kiểm tra này.

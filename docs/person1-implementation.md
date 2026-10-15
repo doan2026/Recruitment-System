@@ -8,7 +8,7 @@ Nguồn yêu cầu: phần III/A1–A4 trong tài liệu phân công đính kèm
 |---|---|
 | Đăng ký Candidate/Recruiter, OTP, gửi lại | /register cho Candidate, /recruiter/register cho Recruiter; giữ registrationId cho đúng lần đăng ký; OTP thành công thiết lập phiên; liên hệ Recruiter lưu qua /auth/me/recruiter-contact |
 | Đăng nhập, refresh, logout | Tái sử dụng phiên trong bộ nhớ; refresh rotation; điều hướng đúng Candidate/Recruiter/Admin |
-| Google | /auth/callback nhận code một lần từ fragment, xóa khỏi URL, chọn vai trò cho tài khoản mới; exchange có credentials |
+| Google | Cổng Candidate/Recruiter gửi role ngay từ /auth/google; Auth giữ role theo state và exchange code trong Redis. /auth/callback xóa fragment và tự exchange một lần, không có bước chọn vai trò; tài khoản khác role nhận lỗi và không bị đổi quyền |
 | Quên/đặt lại mật khẩu | /forgot-password, /reset-password; thông báo quên mật khẩu chung; token không lưu trên thiết bị |
 | Hồ sơ | /candidate/profile: thông tin chung, liên kết, avatar, CRUD học vấn/kinh nghiệm/kỹ năng/chứng chỉ/dự án, % hoàn thiện |
 | CV PDF | /candidate/profile/cvs: upload signed trực tiếp, confirm bằng fileId, lưu metadata, đổi tên, mặc định, tải riêng tư, xóa có expectedAggregateVersion |

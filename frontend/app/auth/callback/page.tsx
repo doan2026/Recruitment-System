@@ -2,73 +2,54 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { exchangeGoogle, landing, person1Error } from "../../../lib/person1Api";
+import { signOut } from "../../../lib/authSession";
+import { exchangeGoogle, landing, loginRoute, person1Error } from "../../../lib/person1Api";
 export default function GoogleCallback() {
   const router = useRouter();
-  const code = useRef("");
-  const read = useRef(false);
-  const [ready, setReady] = useState(false);
+  const started = useRef(false);
   const [role, setRole] = useState<"CANDIDATE" | "RECRUITER">("CANDIDATE");
-  const [pending, setPending] = useState(false);
+  const [pending, setPending] = useState(true);
   const [error, setError] = useState("");
   useEffect(() => {
-    if (read.current) return;
-    read.current = true;
-    code.current =
-      new URLSearchParams(location.hash.slice(1)).get("code") ?? "";
+    // StrictMode runs effects twice; consume the one-time exchange only once.
+    if (started.current) return;
+    started.current = true;
+    const fragment = new URLSearchParams(location.hash.slice(1));
+    const code = fragment.get("code");
+    const portal = fragment.get("role");
     history.replaceState(null, "", location.pathname);
-    setReady(!!code.current);
-    if (!code.current)
-      setError("Đăng nhập Google chưa hoàn tất. Hãy bắt đầu lại.");
-  }, []);
-  async function exchange() {
-    if (pending || !code.current) return;
-    setPending(true);
-    setError("");
-    try {
-      const account = await exchangeGoogle(code.current, role);
-      code.current = "";
-      router.replace(landing(account.role));
-    } catch (e) {
-      code.current = "";
-      setReady(false);
-      setError(person1Error(e));
-    } finally {
+    if (!code || (portal !== "CANDIDATE" && portal !== "RECRUITER")) {
       setPending(false);
+      setError("Đăng nhập Google chưa hoàn tất. Hãy bắt đầu lại từ trang đăng nhập.");
+      return;
     }
-  }
+    setRole(portal);
+    void (async () => {
+      try {
+        const account = await exchangeGoogle(code, portal);
+        if (account.role !== portal) {
+          await signOut().catch(() => undefined);
+          setError("Tài khoản này thuộc vai trò khác. Hãy dùng đúng trang đăng nhập.");
+          return;
+        }
+        router.replace(landing(account.role));
+      } catch (reason) {
+        setError(person1Error(reason));
+      } finally {
+        setPending(false);
+      }
+    })();
+  }, [router]);
   return (
     <section className="card form-stack">
-      <h1>Hoàn tất đăng nhập Google</h1>
-      <p>
-        Chọn vai trò nếu bạn tạo tài khoản lần đầu. Tài khoản đã có giữ nguyên
-        vai trò.
-      </p>
-      <label className="field">
-        Vai trò
-        <select
-          className="select"
-          value={role}
-          disabled={pending}
-          onChange={(e) => setRole(e.target.value as typeof role)}
-        >
-          <option value="CANDIDATE">Ứng viên</option>
-          <option value="RECRUITER">Nhà tuyển dụng</option>
-        </select>
-      </label>
-      <button
-        className="btn btn-primary"
-        disabled={!ready || pending}
-        onClick={() => void exchange()}
-      >
-        {pending ? "Đang xác minh…" : "Tiếp tục"}
-      </button>
+      <h1>Đăng nhập Google</h1>
+      {pending ? <p role="status">Đang hoàn tất đăng nhập…</p> : null}
       {error ? (
         <p className="notice notice-danger" role="alert">
           {error}
         </p>
       ) : null}
-      <Link href="/login">Quay lại đăng nhập</Link>
+      {error ? <Link href={loginRoute(role)}>Quay lại đăng nhập</Link> : null}
     </section>
   );
 }
