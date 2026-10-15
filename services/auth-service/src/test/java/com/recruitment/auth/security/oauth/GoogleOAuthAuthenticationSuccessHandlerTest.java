@@ -5,12 +5,15 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import com.recruitment.auth.config.properties.GoogleOAuthProperties;
+import com.recruitment.auth.dto.oauth.GoogleOAuthRole;
 import com.recruitment.auth.repository.redis.oauth.GoogleOAuthExchangeStore;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -23,22 +26,24 @@ class GoogleOAuthAuthenticationSuccessHandlerTest {
   private static final String CODE = "A".repeat(43);
   private static final String BINDER = "B".repeat(43);
 
-  @Test
-  void redirectsWithOneTimeCodeInFragmentAndHttpOnlyBinderCookie() throws Exception {
+  @ParameterizedTest
+  @EnumSource(GoogleOAuthRole.class)
+  void redirectsWithOneTimeCodeInFragmentAndHttpOnlyBinderCookie(GoogleOAuthRole role) throws Exception {
     GoogleOAuthExchangeStore store = mock(GoogleOAuthExchangeStore.class);
-    when(store.create("google-subject", "candidate@example.com")).thenReturn(
+    when(store.create("google-subject", "candidate@example.com", role)).thenReturn(
         new GoogleOAuthExchangeStore.PendingExchange(
             CODE, BINDER, Duration.ofMinutes(2)));
     GoogleOAuthAuthenticationSuccessHandler handler =
         new GoogleOAuthAuthenticationSuccessHandler(store, properties());
     MockHttpServletResponse response = new MockHttpServletResponse();
 
-    handler.onAuthenticationSuccess(
-        new MockHttpServletRequest(), response, authentication(true));
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setAttribute(GooglePkceAuthorizationRequestResolver.PORTAL_ROLE_ATTRIBUTE, role.name());
+    handler.onAuthenticationSuccess(request, response, authentication(true));
 
     assertThat(response.getStatus()).isEqualTo(302);
     assertThat(response.getHeader(HttpHeaders.LOCATION))
-        .isEqualTo("https://app.example.com/oauth/callback?source=google#code=" + CODE)
+        .isEqualTo("https://app.example.com/oauth/callback?source=google#code=" + CODE + "&role=" + role.name())
         .doesNotContain("access_token", "refresh_token", BINDER);
     assertThat(response.getHeader(HttpHeaders.SET_COOKIE))
         .contains(

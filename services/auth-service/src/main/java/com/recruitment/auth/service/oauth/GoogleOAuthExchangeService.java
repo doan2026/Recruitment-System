@@ -1,9 +1,9 @@
 package com.recruitment.auth.service.oauth;
 
 import com.recruitment.auth.dto.oauth.GoogleOAuthExchangeRequest;
+import com.recruitment.auth.dto.oauth.GoogleOAuthRole;
 import com.recruitment.auth.dto.token.AuthTokenResponse;
 import com.recruitment.auth.exception.AuthBusinessException;
-import com.recruitment.auth.model.oauth.GoogleOAuthIdentity;
 import com.recruitment.auth.repository.redis.oauth.GoogleOAuthExchangeStore;
 import com.recruitment.auth.service.token.TokenSessionService;
 import java.util.Objects;
@@ -31,17 +31,22 @@ public class GoogleOAuthExchangeService {
 
   public AuthTokenResponse exchange(GoogleOAuthExchangeRequest request, String binder) {
     GoogleOAuthExchangeRequest safeRequest = Objects.requireNonNull(request, "request is required");
-    GoogleOAuthIdentity identity;
+    GoogleOAuthExchangeStore.VerifiedExchange verified;
     try {
-      identity = exchanges.consume(safeRequest.code(), binder)
+      verified = exchanges.consume(safeRequest.code(), binder)
           .orElseThrow(GoogleOAuthExchangeService::invalidExchange);
     } catch (DataAccessException unavailable) {
       throw unavailable();
     }
 
+    GoogleOAuthRole role = verified.role() == null ? safeRequest.role() : verified.role();
+    if (verified.role() != null && safeRequest.role() != null && safeRequest.role() != verified.role()) {
+      throw new AuthBusinessException("GOOGLE_ROLE_MISMATCH", "Restart Google sign-in from the correct portal", HttpStatus.FORBIDDEN);
+    }
+
     UUID userId;
     try {
-      userId = accounts.resolveOrCreate(identity, safeRequest.role());
+      userId = accounts.resolveOrCreate(verified.identity(), role);
     } catch (AuthBusinessException expected) {
       throw expected;
     } catch (DataIntegrityViolationException | ConcurrencyFailureException collision) {

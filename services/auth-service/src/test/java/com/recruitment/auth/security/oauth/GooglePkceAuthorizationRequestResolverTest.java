@@ -1,6 +1,7 @@
 package com.recruitment.auth.security.oauth;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -8,6 +9,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.registration.InMemoryClientRegistrationRepository;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
 import org.springframework.security.oauth2.core.endpoint.PkceParameterNames;
@@ -26,6 +28,8 @@ class GooglePkceAuthorizationRequestResolverTest {
 
     assertThat(authorization).isNotNull();
     assertThat(authorization.getState()).isNotBlank();
+    assertThat(authorization.<String>getAttribute(GooglePkceAuthorizationRequestResolver.PORTAL_ROLE_ATTRIBUTE))
+        .isEqualTo("CANDIDATE");
     assertThat(authorization.<String>getAttribute(OidcParameterNames.NONCE)).isNotBlank();
     assertThat(authorization.getAdditionalParameters())
         .containsKeys(
@@ -45,6 +49,7 @@ class GooglePkceAuthorizationRequestResolverTest {
     MockHttpServletRequest request = new MockHttpServletRequest(
         "GET", GoogleOAuthSecurityConfigurer.GOOGLE_AUTHORIZATION_URI);
     request.setServletPath(GoogleOAuthSecurityConfigurer.GOOGLE_AUTHORIZATION_URI);
+    request.setParameter("role", "RECRUITER");
     OAuth2AuthorizationRequest original = resolver().resolve(request);
     ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
 
@@ -60,6 +65,9 @@ class GooglePkceAuthorizationRequestResolverTest {
         .isEqualTo(original.getAttribute(OidcParameterNames.NONCE));
     assertThat(restored.<String>getAttribute(PkceParameterNames.CODE_VERIFIER))
         .isEqualTo(original.getAttribute(PkceParameterNames.CODE_VERIFIER));
+    assertThat(restored.<String>getAttribute(GooglePkceAuthorizationRequestResolver.PORTAL_ROLE_ATTRIBUTE))
+        .isEqualTo("RECRUITER");
+    assertThat(restored.getAuthorizationRequestUri()).doesNotContain("role=");
     assertThat(restored.getAdditionalParameters())
         .containsEntry(
             OidcParameterNames.NONCE,
@@ -68,6 +76,16 @@ class GooglePkceAuthorizationRequestResolverTest {
             PkceParameterNames.CODE_CHALLENGE,
             original.getAdditionalParameters().get(PkceParameterNames.CODE_CHALLENGE));
     assertThat(json).doesNotContain("java.util", "@class");
+  }
+
+  @Test
+  void refusesAdminOrUnknownPortalBeforeStartingGoogle() {
+    for (String role : List.of("ADMIN", "unknown", "")) {
+      MockHttpServletRequest request = new MockHttpServletRequest("GET", GoogleOAuthSecurityConfigurer.GOOGLE_AUTHORIZATION_URI);
+      request.setServletPath(GoogleOAuthSecurityConfigurer.GOOGLE_AUTHORIZATION_URI);
+      request.setParameter("role", role);
+      assertThatThrownBy(() -> resolver().resolve(request)).isInstanceOf(OAuth2AuthenticationException.class);
+    }
   }
 
   private static GooglePkceAuthorizationRequestResolver resolver() {

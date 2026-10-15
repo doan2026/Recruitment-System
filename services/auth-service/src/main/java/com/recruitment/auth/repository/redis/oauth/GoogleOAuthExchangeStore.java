@@ -3,6 +3,7 @@ package com.recruitment.auth.repository.redis.oauth;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.recruitment.auth.config.properties.GoogleOAuthProperties;
+import com.recruitment.auth.dto.oauth.GoogleOAuthRole;
 import com.recruitment.auth.model.oauth.GoogleOAuthIdentity;
 import com.recruitment.auth.security.oauth.GoogleOAuthTokenCodec;
 import java.time.Duration;
@@ -54,6 +55,10 @@ public final class GoogleOAuthExchangeStore {
   }
 
   public PendingExchange create(String subject, String normalizedEmail) {
+    return create(subject, normalizedEmail, null);
+  }
+
+  public PendingExchange create(String subject, String normalizedEmail, GoogleOAuthRole role) {
     String safeSubject = GoogleOAuthIdentity.requireSubject(subject);
     String safeEmail = GoogleOAuthIdentity.requireEmail(normalizedEmail);
     Duration ttl = properties.exchangeTtl();
@@ -61,7 +66,7 @@ public final class GoogleOAuthExchangeStore {
       String code = tokenCodec.generate();
       String binder = tokenCodec.generate();
       StoredExchange value = new StoredExchange(
-          tokenCodec.digest(binder), safeSubject, safeEmail);
+          tokenCodec.digest(binder), safeSubject, safeEmail, role);
       Boolean installed = redis.opsForValue().setIfAbsent(
           key(code), serialize(value), ttl);
       if (Boolean.TRUE.equals(installed)) {
@@ -71,7 +76,7 @@ public final class GoogleOAuthExchangeStore {
     throw new IllegalStateException("could not reserve a Google exchange code");
   }
 
-  public Optional<GoogleOAuthIdentity> consume(String code, String binder) {
+  public Optional<VerifiedExchange> consume(String code, String binder) {
     final String codeKey;
     final String binderDigest;
     try {
@@ -88,7 +93,8 @@ public final class GoogleOAuthExchangeStore {
     if (stored == null) {
       return Optional.empty();
     }
-    return Optional.of(new GoogleOAuthIdentity(stored.subject(), stored.normalizedEmail()));
+    return Optional.of(new VerifiedExchange(
+        new GoogleOAuthIdentity(stored.subject(), stored.normalizedEmail()), stored.role()));
   }
 
   private String key(String code) {
@@ -121,5 +127,13 @@ public final class GoogleOAuthExchangeStore {
   private record StoredExchange(
       String binderDigest,
       String subject,
-      String normalizedEmail) {}
+      String normalizedEmail,
+      GoogleOAuthRole role) {}
+
+  public record VerifiedExchange(GoogleOAuthIdentity identity, GoogleOAuthRole role) {
+    @Override
+    public String toString() {
+      return "VerifiedExchange[identity=<redacted>, role=" + role + "]";
+    }
+  }
 }

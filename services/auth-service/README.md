@@ -229,13 +229,13 @@ Previously issued stateless access JWTs used by other services can remain valid 
 
 ## Google OIDC login
 
-1. Navigate the browser to `GET /auth/google`.
-2. The service creates state, nonce and PKCE S256 verifier material, stores the serialized authorization request in Redis, and redirects to Google.
+1. Candidate pages use `GET /auth/google` (defaults to Candidate) or `?role=CANDIDATE`; Recruiter pages use `?role=RECRUITER`. ADMIN/unknown values are rejected.
+2. The service creates state, nonce and PKCE S256 verifier material, stores the serialized authorization request and portal role in Redis, and redirects to Google. The portal is an internal attribute, not a Google claim.
 3. Spring Security validates the callback and OIDC ID token. Provider access/refresh tokens are never persisted or returned.
-4. The success redirect contains only `#code=<one-time-code>` and sets a short-lived HttpOnly binder cookie.
-5. The frontend calls `POST /auth/google/exchange` with `{ "code": "...", "role": "CANDIDATE" }` and `credentials: "include"`. `role` is optional and is used only when creating a new account; allowed values are `CANDIDATE` and `RECRUITER`.
+4. The success redirect contains `#code=<one-time-code>&role=<portal-role>` and sets a short-lived HttpOnly binder cookie. Only role metadata from the state-validated authorization request is copied to the exchange state.
+5. The frontend clears the fragment and automatically calls `POST /auth/google/exchange` with `{ "code": "...", "role": "CANDIDATE" }` and `credentials: "include"`, exactly once. No role selector or Continue step is displayed. The exchange role is optional; for new flows the server uses the role bound to the one-time code and rejects a conflicting client value with `403 GOOGLE_ROLE_MISMATCH`.
 
-The Redis exchange consumes the code and matching binder exactly once. Google `sub` is the durable provider identity. An already linked subject signs in to its linked user; a new subject with a new verified email creates an OAuth-only user. An existing but unlinked email returns `409 ACCOUNT_LINK_REQUIRED` instead of being auto-linked by email. A future account-link flow must require fresh authentication to the existing account.
+The Redis exchange consumes the code and matching binder exactly once. Google `sub` is the durable provider identity. An already linked subject signs in only when the stored account role matches the requested portal; a mismatch returns `403 GOOGLE_ROLE_MISMATCH` without changing the account or issuing local tokens. A new subject with a new verified email creates an OAuth-only user in the selected portal role. An existing but unlinked email returns `409 ACCOUNT_LINK_REQUIRED` instead of being auto-linked by email. A future account-link flow must require fresh authentication to the existing account. Pending exchange entries from the previous deployment remain readable during their short TTL; new entries always carry the portal role.
 
 The binder cookie is `SameSite=Lax`; therefore production frontend and Auth URLs must be HTTPS and on the same schemeful site (for example `app.example.com` and `auth.example.com`). The frontend origin must also be listed exactly in `CORS_ORIGINS`.
 

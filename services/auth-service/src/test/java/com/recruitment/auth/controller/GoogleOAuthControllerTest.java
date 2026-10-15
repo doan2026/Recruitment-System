@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import com.recruitment.auth.config.properties.GoogleOAuthProperties;
 import com.recruitment.auth.dto.oauth.GoogleOAuthExchangeRequest;
+import com.recruitment.auth.dto.oauth.GoogleOAuthRole;
 import com.recruitment.auth.dto.token.AuthTokenResponse;
 import com.recruitment.auth.exception.AuthBusinessException;
 import com.recruitment.auth.model.UserRole;
@@ -27,12 +28,14 @@ class GoogleOAuthControllerTest {
     GoogleOAuthController controller =
         new GoogleOAuthController(properties(true), mock(GoogleOAuthExchangeService.class));
 
-    ResponseEntity<Void> response = controller.start();
+    ResponseEntity<Void> response = controller.start(GoogleOAuthRole.CANDIDATE);
 
     assertThat(response.getStatusCode().value()).isEqualTo(302);
     assertThat(response.getHeaders().getLocation()).hasToString(
-        GoogleOAuthSecurityConfigurer.GOOGLE_AUTHORIZATION_URI);
+        GoogleOAuthSecurityConfigurer.GOOGLE_AUTHORIZATION_URI + "?role=CANDIDATE");
     assertThat(response.getHeaders().getCacheControl()).contains("no-store");
+    assertThat(controller.start(GoogleOAuthRole.RECRUITER).getHeaders().getLocation())
+        .hasToString(GoogleOAuthSecurityConfigurer.GOOGLE_AUTHORIZATION_URI + "?role=RECRUITER");
   }
 
   @Test
@@ -63,7 +66,7 @@ class GoogleOAuthControllerTest {
     GoogleOAuthController controller =
         new GoogleOAuthController(properties(false), mock(GoogleOAuthExchangeService.class));
 
-    assertThatThrownBy(controller::start)
+    assertThatThrownBy(() -> controller.start(GoogleOAuthRole.CANDIDATE))
         .isInstanceOfSatisfying(AuthBusinessException.class,
             error -> assertThat(error.code()).isEqualTo("GOOGLE_OAUTH_DISABLED"));
   }

@@ -93,6 +93,24 @@
   ],
   "item": [
     {
+      "name": "Google start — Candidate portal",
+      "request": {
+        "method": "GET",
+        "auth": { "type": "noauth" },
+        "url": "{{baseUrl}}/auth/google?role=CANDIDATE",
+        "description": "Open the corresponding frontend URL in a browser for the complete OAuth flow. Auth binds CANDIDATE to state and the exchange code; the callback exchanges automatically without a role selector."
+      }
+    },
+    {
+      "name": "Google start — Recruiter portal",
+      "request": {
+        "method": "GET",
+        "auth": { "type": "noauth" },
+        "url": "{{baseUrl}}/auth/google?role=RECRUITER",
+        "description": "Open the corresponding frontend URL in a browser for the complete OAuth flow. Auth binds RECRUITER to state and the exchange code. An existing linked account with a different role receives GOOGLE_ROLE_MISMATCH without changing its role."
+      }
+    },
+    {
       "name": "Register Candidate",
       "request": {
         "method": "POST",

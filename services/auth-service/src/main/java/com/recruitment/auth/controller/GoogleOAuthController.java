@@ -3,6 +3,7 @@ package com.recruitment.auth.controller;
 import com.recruitment.auth.config.properties.GoogleOAuthProperties;
 import com.recruitment.auth.dto.common.ApiResponse;
 import com.recruitment.auth.dto.oauth.GoogleOAuthExchangeRequest;
+import com.recruitment.auth.dto.oauth.GoogleOAuthRole;
 import com.recruitment.auth.dto.token.AuthTokenResponse;
 import com.recruitment.auth.exception.AuthBusinessException;
 import com.recruitment.auth.security.oauth.GoogleOAuthAuthenticationSuccessHandler;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -39,10 +41,11 @@ public class GoogleOAuthController {
   }
 
   @GetMapping
-  public ResponseEntity<Void> start() {
+  public ResponseEntity<Void> start(
+      @RequestParam(defaultValue = "CANDIDATE") GoogleOAuthRole role) {
     requireEnabled();
     return ResponseEntity.status(HttpStatus.FOUND)
-        .location(URI.create(GoogleOAuthSecurityConfigurer.GOOGLE_AUTHORIZATION_URI))
+        .location(URI.create(GoogleOAuthSecurityConfigurer.GOOGLE_AUTHORIZATION_URI + "?role=" + role.name()))
         .cacheControl(CacheControl.noStore())
         .header(HttpHeaders.PRAGMA, "no-cache")
         .build();

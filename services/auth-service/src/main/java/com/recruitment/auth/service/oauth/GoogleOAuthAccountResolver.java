@@ -36,14 +36,18 @@ class GoogleOAuthAccountResolver {
     GoogleOAuthIdentity safeIdentity = Objects.requireNonNull(identity, "identity is required");
     return accounts.findByProviderAndProviderSubjectForUpdate(
             OAuthProvider.GOOGLE, safeIdentity.subject())
-        .map(account -> requireLinkedUser(account.getUserId()))
+        .map(account -> requireLinkedUser(account.getUserId(), requestedRole))
         .orElseGet(() -> createOAuthOnlyUser(safeIdentity, requestedRole));
   }
 
-  private UUID requireLinkedUser(UUID userId) {
-    return users.findByIdForUpdate(userId)
-        .orElseThrow(() -> new IllegalStateException("linked Google user no longer exists"))
-        .getId();
+  private UUID requireLinkedUser(UUID userId, GoogleOAuthRole requestedRole) {
+    AuthUser user = users.findByIdForUpdate(userId)
+        .orElseThrow(() -> new IllegalStateException("linked Google user no longer exists"));
+    if (requestedRole != null && user.getRole() != requestedRole.toUserRole()) {
+      throw new AuthBusinessException("GOOGLE_ROLE_MISMATCH",
+          "This account belongs to a different sign-in portal", HttpStatus.FORBIDDEN);
+    }
+    return user.getId();
   }
 
   private UUID createOAuthOnlyUser(

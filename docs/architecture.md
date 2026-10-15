@@ -30,6 +30,11 @@ current durable role/verification/lock checks apply. These fields are not JWT cl
 Candidate career profile data remains exclusively in Profile. Recruiter onboarding
 must use Auth contact APIs rather than Candidate Profile APIs.
 
+Google sign-in binds the Candidate/Recruiter portal to the Redis OAuth state and
+one-time exchange code. The callback completes automatically without selecting a
+role. Existing linked users must match that portal; OAuth never changes a stored
+account role or auto-links a matching email.
+
 The internal `/auth/users` directory uses a typed DTO and follows
 `AdminUserDirectoryController → AdminUserDirectoryService → AdminUserDirectoryRepository`.
 The service rechecks durable admin role and bounds pagination; the repository

@@ -1,6 +1,7 @@
 package com.recruitment.auth.security.oauth;
 
 import com.recruitment.auth.config.properties.GoogleOAuthProperties;
+import com.recruitment.auth.dto.oauth.GoogleOAuthRole;
 import com.recruitment.auth.model.oauth.GoogleOAuthIdentity;
 import com.recruitment.auth.repository.redis.oauth.GoogleOAuthExchangeStore;
 import jakarta.servlet.ServletException;
@@ -58,14 +59,16 @@ public final class GoogleOAuthAuthenticationSuccessHandler
       }
       GoogleOAuthIdentity identity = new GoogleOAuthIdentity(
           idToken.getSubject(), idToken.getClaimAsString(StandardClaimNames.EMAIL));
+      String storedRole = (String) request.getAttribute(GooglePkceAuthorizationRequestResolver.PORTAL_ROLE_ATTRIBUTE);
+      GoogleOAuthRole role = storedRole == null ? GoogleOAuthRole.CANDIDATE : GoogleOAuthRole.valueOf(storedRole);
       GoogleOAuthExchangeStore.PendingExchange pending =
-          exchanges.create(identity.subject(), identity.normalizedEmail());
+          exchanges.create(identity.subject(), identity.normalizedEmail(), role);
       response.addHeader(HttpHeaders.SET_COOKIE, exchangeCookie(pending).toString());
       setNoStore(response);
       response.setStatus(HttpStatus.FOUND.value());
       response.setHeader(
           HttpHeaders.LOCATION,
-          properties.validatedFrontendRedirectUri() + "#code=" + pending.code());
+          properties.validatedFrontendRedirectUri() + "#code=" + pending.code() + "&role=" + role.name());
     } catch (RuntimeException invalidOrUnavailable) {
       redirectFailure(response);
     }

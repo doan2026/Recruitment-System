@@ -113,7 +113,12 @@ public final class RedisOAuth2AuthorizationRequestRepository
     if (serialized != null) {
       response.addHeader(HttpHeaders.SET_COOKIE, expiredAuthorizationCookie().toString());
     }
-    return deserialize(serialized);
+    OAuth2AuthorizationRequest restored = deserialize(serialized);
+    if (restored != null) {
+      request.setAttribute(GooglePkceAuthorizationRequestResolver.PORTAL_ROLE_ATTRIBUTE,
+          restored.getAttribute(GooglePkceAuthorizationRequestResolver.PORTAL_ROLE_ATTRIBUTE));
+    }
+    return restored;
   }
 
   void delete(HttpServletRequest request, HttpServletResponse response) {

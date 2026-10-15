@@ -3,6 +3,7 @@ package com.recruitment.auth.service.oauth;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import com.recruitment.auth.dto.oauth.GoogleOAuthExchangeRequest;
 import com.recruitment.auth.dto.oauth.GoogleOAuthRole;
@@ -51,7 +52,7 @@ class GoogleOAuthExchangeServiceTest {
     GoogleOAuthIdentity identity =
         new GoogleOAuthIdentity("google-subject", "candidate@example.com");
     AuthTokenResponse tokens = tokens();
-    when(exchanges.consume(CODE, BINDER)).thenReturn(Optional.of(identity));
+    when(exchanges.consume(CODE, BINDER)).thenReturn(Optional.of(new GoogleOAuthExchangeStore.VerifiedExchange(identity, null)));
     when(accounts.resolveOrCreate(identity, GoogleOAuthRole.RECRUITER)).thenReturn(USER_ID);
     when(sessions.issueForVerifiedUser(USER_ID)).thenReturn(tokens);
 
@@ -75,7 +76,7 @@ class GoogleOAuthExchangeServiceTest {
   void mapsFirstLoginUniqueCollisionToStableRestartError() {
     GoogleOAuthIdentity identity =
         new GoogleOAuthIdentity("google-subject", "candidate@example.com");
-    when(exchanges.consume(CODE, BINDER)).thenReturn(Optional.of(identity));
+    when(exchanges.consume(CODE, BINDER)).thenReturn(Optional.of(new GoogleOAuthExchangeStore.VerifiedExchange(identity, null)));
     when(accounts.resolveOrCreate(identity, null))
         .thenThrow(new DataIntegrityViolationException("unique constraint"));
 
@@ -102,7 +103,7 @@ class GoogleOAuthExchangeServiceTest {
   void mapsAccountDatabaseOutageWithoutLeakingInfrastructureDetails() {
     GoogleOAuthIdentity identity =
         new GoogleOAuthIdentity("google-subject", "candidate@example.com");
-    when(exchanges.consume(CODE, BINDER)).thenReturn(Optional.of(identity));
+    when(exchanges.consume(CODE, BINDER)).thenReturn(Optional.of(new GoogleOAuthExchangeStore.VerifiedExchange(identity, null)));
     when(accounts.resolveOrCreate(identity, null))
         .thenThrow(new DataAccessResourceFailureException("database host secret"));
 
@@ -112,6 +113,33 @@ class GoogleOAuthExchangeServiceTest {
           assertThat(error.code()).isEqualTo("GOOGLE_LOGIN_UNAVAILABLE");
           assertThat(error.getMessage()).doesNotContain("database host secret");
         });
+  }
+
+  @Test
+  void boundPortalRoleIsUsedEvenWhenTheClientOmitsRole() {
+    GoogleOAuthIdentity identity = new GoogleOAuthIdentity("google-subject", "recruiter@example.com");
+    when(exchanges.consume(CODE, BINDER)).thenReturn(Optional.of(
+        new GoogleOAuthExchangeStore.VerifiedExchange(identity, GoogleOAuthRole.RECRUITER)));
+    when(accounts.resolveOrCreate(identity, GoogleOAuthRole.RECRUITER)).thenReturn(USER_ID);
+    when(sessions.issueForVerifiedUser(USER_ID)).thenReturn(tokens());
+
+    service.exchange(new GoogleOAuthExchangeRequest(CODE, null), BINDER);
+
+    verify(accounts).resolveOrCreate(identity, GoogleOAuthRole.RECRUITER);
+    verify(sessions).issueForVerifiedUser(USER_ID);
+  }
+
+  @Test
+  void aClientCannotChangeThePortalBoundToTheExchangeCode() {
+    when(exchanges.consume(CODE, BINDER)).thenReturn(Optional.of(
+        new GoogleOAuthExchangeStore.VerifiedExchange(
+            new GoogleOAuthIdentity("google-subject", "candidate@example.com"), GoogleOAuthRole.CANDIDATE)));
+
+    assertThatThrownBy(() -> service.exchange(
+        new GoogleOAuthExchangeRequest(CODE, GoogleOAuthRole.RECRUITER), BINDER))
+        .isInstanceOfSatisfying(AuthBusinessException.class,
+            error -> assertThat(error.code()).isEqualTo("GOOGLE_ROLE_MISMATCH"));
+    verifyNoInteractions(accounts, sessions);
   }
 
   private static AuthTokenResponse tokens() {

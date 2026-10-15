@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 import com.recruitment.auth.dto.oauth.GoogleOAuthRole;
 import com.recruitment.auth.exception.AuthBusinessException;
@@ -54,7 +55,22 @@ class GoogleOAuthAccountResolverTest {
 
     assertThat(resolver.resolveOrCreate(
         new GoogleOAuthIdentity("google-subject", "new@example.com"),
-        GoogleOAuthRole.RECRUITER)).isEqualTo(linkedUser.getId());
+        GoogleOAuthRole.CANDIDATE)).isEqualTo(linkedUser.getId());
+  }
+
+  @Test
+  void linkedAccountCannotSwitchRoleByEnteringAnotherPortal() {
+    AuthUser candidate = AuthUser.registerOAuth("existing@example.com", NOW);
+    when(accounts.findByProviderAndProviderSubjectForUpdate(OAuthProvider.GOOGLE, "google-subject"))
+        .thenReturn(Optional.of(OAuthAccount.linkGoogle(candidate.getId(), "google-subject", "existing@example.com", true)));
+    when(users.findByIdForUpdate(candidate.getId())).thenReturn(Optional.of(candidate));
+
+    assertThatThrownBy(() -> resolver.resolveOrCreate(
+        new GoogleOAuthIdentity("google-subject", "existing@example.com"), GoogleOAuthRole.RECRUITER))
+        .isInstanceOfSatisfying(AuthBusinessException.class,
+            error -> assertThat(error.code()).isEqualTo("GOOGLE_ROLE_MISMATCH"));
+    assertThat(candidate.getRole()).isEqualTo(UserRole.CANDIDATE);
+    verify(users, never()).saveAndFlush(any());
   }
 
   @Test

@@ -3,6 +3,7 @@ package com.recruitment.auth.security.oauth;
 import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.recruitment.auth.config.properties.GoogleOAuthProperties;
+import com.recruitment.auth.dto.oauth.GoogleOAuthRole;
 import com.recruitment.auth.model.oauth.GoogleOAuthIdentity;
 import com.recruitment.auth.repository.redis.oauth.GoogleOAuthExchangeStore;
 import jakarta.servlet.http.Cookie;
@@ -73,7 +74,7 @@ class GoogleOAuthRedisIT {
         redis, new ObjectMapper().findAndRegisterModules(), tokenCodec, properties);
 
     GoogleOAuthExchangeStore.PendingExchange pending =
-        store.create("google-subject", "candidate@example.com");
+        store.create("google-subject", "candidate@example.com", GoogleOAuthRole.RECRUITER);
 
     Set<String> keys = redis.keys("auth:google:exchange:v1:*");
     assertThat(keys).hasSize(1).allSatisfy(key -> assertThat(key)
@@ -85,7 +86,8 @@ class GoogleOAuthRedisIT {
 
     assertThat(store.consume(pending.code(), "W".repeat(43))).isEmpty();
     assertThat(store.consume(pending.code(), pending.binder()))
-        .contains(new GoogleOAuthIdentity("google-subject", "candidate@example.com"));
+        .contains(new GoogleOAuthExchangeStore.VerifiedExchange(
+            new GoogleOAuthIdentity("google-subject", "candidate@example.com"), GoogleOAuthRole.RECRUITER));
     assertThat(store.consume(pending.code(), pending.binder())).isEmpty();
   }
 
@@ -111,13 +113,17 @@ class GoogleOAuthRedisIT {
         callback(handle, "wrong-state"), attackerResponse)).isNull();
     assertThat(attackerResponse.getHeader("Set-Cookie")).isNull();
 
+    MockHttpServletRequest validCallback = callback(handle, "valid-state");
+    validCallback.setParameter("role", "CANDIDATE");
     OAuth2AuthorizationRequest restored = repository.removeAuthorizationRequest(
-        callback(handle, "valid-state"), new MockHttpServletResponse());
+        validCallback, new MockHttpServletResponse());
     assertThat(restored).isNotNull();
     assertThat(restored.<String>getAttribute(OidcParameterNames.NONCE))
         .isEqualTo("raw-nonce");
     assertThat(restored.<String>getAttribute(PkceParameterNames.CODE_VERIFIER))
         .isEqualTo("code-verifier");
+    assertThat(validCallback.getAttribute(GooglePkceAuthorizationRequestResolver.PORTAL_ROLE_ATTRIBUTE))
+        .isEqualTo("RECRUITER");
     assertThat(repository.removeAuthorizationRequest(
         callback(handle, "valid-state"), new MockHttpServletResponse())).isNull();
   }
@@ -143,6 +149,7 @@ class GoogleOAuthRedisIT {
             PkceParameterNames.CODE_CHALLENGE_METHOD, "S256"))
         .attributes(Map.of(
             "registration_id", "google",
+            GooglePkceAuthorizationRequestResolver.PORTAL_ROLE_ATTRIBUTE, "RECRUITER",
             OidcParameterNames.NONCE, "raw-nonce",
             PkceParameterNames.CODE_VERIFIER, "code-verifier"))
         .authorizationRequestUri(

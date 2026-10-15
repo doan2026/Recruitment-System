@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.recruitment.auth.config.properties.GoogleOAuthProperties;
+import com.recruitment.auth.dto.oauth.GoogleOAuthRole;
 import com.recruitment.auth.model.oauth.GoogleOAuthIdentity;
 import com.recruitment.auth.security.oauth.GoogleOAuthTokenCodec;
 import java.time.Duration;
@@ -59,7 +60,7 @@ class GoogleOAuthExchangeStoreTest {
         eq(Duration.ofMinutes(2)))).thenReturn(true);
 
     GoogleOAuthExchangeStore.PendingExchange pending =
-        store.create("google-subject", "candidate@example.com");
+        store.create("google-subject", "candidate@example.com", GoogleOAuthRole.RECRUITER);
 
     assertThat(pending.code()).isEqualTo(CODE);
     assertThat(pending.binder()).isEqualTo(BINDER);
@@ -70,7 +71,7 @@ class GoogleOAuthExchangeStoreTest {
         serialized.capture(),
         eq(Duration.ofMinutes(2)));
     assertThat(serialized.getValue())
-        .contains(BINDER_DIGEST, "google-subject", "candidate@example.com")
+        .contains(BINDER_DIGEST, "google-subject", "candidate@example.com", "RECRUITER")
         .doesNotContain(CODE, BINDER);
   }
 
@@ -81,17 +82,18 @@ class GoogleOAuthExchangeStoreTest {
     when(tokenCodec.digest(BINDER)).thenReturn(BINDER_DIGEST);
     String serialized = """
         {"binderDigest":"%s","subject":"google-subject",\
-        "normalizedEmail":"candidate@example.com"}
+        "normalizedEmail":"candidate@example.com","role":"RECRUITER"}
         """.formatted(BINDER_DIGEST).replace("\\\n", "");
     when(redis.execute(
         any(RedisScript.class),
         eq(List.of("auth:google:exchange:v1:" + CODE_DIGEST)),
         eq(BINDER_DIGEST))).thenReturn(serialized);
 
-    Optional<GoogleOAuthIdentity> identity = store.consume(CODE, BINDER);
+    Optional<GoogleOAuthExchangeStore.VerifiedExchange> identity = store.consume(CODE, BINDER);
 
     assertThat(identity).contains(
-        new GoogleOAuthIdentity("google-subject", "candidate@example.com"));
+        new GoogleOAuthExchangeStore.VerifiedExchange(
+            new GoogleOAuthIdentity("google-subject", "candidate@example.com"), GoogleOAuthRole.RECRUITER));
   }
 
   @Test
