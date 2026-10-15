@@ -1,25 +1,52 @@
 name: recruitment-system
 
+# Keep four Spring Boot services within Docker Desktop's local memory budget.
+x-java-environment: &java-environment
+  JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--Xms64m -Xmx256m -XX:MaxMetaspaceSize=192m}
+
+x-java-healthcheck: &java-healthcheck
+  test: [ "CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/actuator/health" ]
+  interval: 15s
+  timeout: 5s
+  retries: 12
+  start_period: 60s
+
 services:
   api-gateway:
     image: nginx:1.30.4-alpine
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
     volumes:
       - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      - auth-service
-      - profile-service
-      - company-service
-      - job-search-service
-      - application-service
-      - interview-service
-      - notification-service
-      - media-service
-      - admin-service
-      - chat-service
-      - ai-service
+      auth-service:
+        condition: service_healthy
+      profile-service:
+        condition: service_healthy
+      company-service:
+        condition: service_healthy
+      job-search-service:
+        condition: service_healthy
+      application-service:
+        condition: service_healthy
+      interview-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+      media-service:
+        condition: service_healthy
+      admin-service:
+        condition: service_healthy
+      chat-service:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/auth/health" ]
+      interval: 15s
+      timeout: 5s
+      retries: 6
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -29,7 +56,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "${POSTGRES_HOST_PORT:-5433}:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/init-schemas.sql:/docker-entrypoint-initdb.d/01-init-schemas.sql:ro
@@ -46,9 +73,14 @@ services:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
     ports:
-      - "27017:27017"
+      - "127.0.0.1:27017:27017"
     volumes:
       - mongo-data:/data/db
+    healthcheck:
+      test: [ "CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)" ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   redis:
     image: redis:7-alpine
@@ -57,7 +89,7 @@ services:
     environment:
       REDISCLI_AUTH: ${REDIS_PASSWORD}
     ports:
-      - "6379:6379"
+      - "127.0.0.1:${REDIS_HOST_PORT:-6380}:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -85,8 +117,9 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx384m
     ports:
-      - "9094:9094"
+      - "127.0.0.1:9094:9094"
     volumes:
       - kafka-data-apache:/var/lib/kafka/data
     healthcheck:
@@ -118,14 +151,23 @@ services:
       xpack.security.enabled: "false"
       ES_JAVA_OPTS: -Xms512m -Xmx512m
     ports:
-      - "9200:9200"
+      - "127.0.0.1:9200:9200"
     volumes:
       - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS 'http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=5s' > /dev/null" ]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
 
   auth-service:
     build: ./services/auth-service
     env_file:
       - ./services/auth-service/.env
+    environment:
+      <<: *java-environment
+    healthcheck: *java-healthcheck
     secrets:
       - source: jwt-private-key
         target: jwt-private.pem
@@ -145,10 +187,12 @@ services:
     env_file:
       - ./services/application-service/.env
     environment:
+      <<: *java-environment
       PROFILE_INTERNAL_API_KEY: ${PROFILE_INTERNAL_API_KEY_APPLICATION:?PROFILE_INTERNAL_API_KEY_APPLICATION is required}
       INTERNAL_API_KEY_PROFILE: ${APPLICATION_INTERNAL_API_KEY_PROFILE:?APPLICATION_INTERNAL_API_KEY_PROFILE is required}
       INTERNAL_API_KEY_INTERVIEW: ${APPLICATION_INTERNAL_API_KEY_INTERVIEW:?APPLICATION_INTERNAL_API_KEY_INTERVIEW is required}
       INTERNAL_API_KEY_METRICS: ${APPLICATION_INTERNAL_API_KEY_METRICS:?APPLICATION_INTERNAL_API_KEY_METRICS is required}
+    healthcheck: *java-healthcheck
     secrets:
       - source: jwt-public-key
         target: jwt-public.pem
@@ -156,6 +200,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     expose:
       - "8080"
 
@@ -164,6 +210,7 @@ services:
     env_file:
       - ./services/interview-service/.env
     environment:
+      <<: *java-environment
       APPLICATION_SERVICE_URL: http://application-service:8080
       APPLICATION_SERVICE_ALLOWED_HOSTS: application-service
       APPLICATION_REQUEST_TIMEOUT_MS: ${INTERVIEW_APPLICATION_REQUEST_TIMEOUT_MS:-2000}
@@ -178,6 +225,7 @@ services:
       KAFKA_BROKERS: kafka:9092
       KAFKA_INTERVIEW_TOPIC: ${KAFKA_INTERVIEW_TOPIC:-interview-events}
       INTERVIEW_EVENT_PUBLISHER_ENABLED: ${INTERVIEW_EVENT_PUBLISHER_ENABLED:-true}
+    healthcheck: *java-healthcheck
     secrets:
       - source: jwt-public-key
         target: jwt-public.pem
@@ -186,9 +234,9 @@ services:
       postgres:
         condition: service_healthy
       application-service:
-        condition: service_started
+        condition: service_healthy
       company-service:
-        condition: service_started
+        condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
     expose:
@@ -199,6 +247,7 @@ services:
     env_file:
       - ./services/admin-service/.env
     environment:
+      <<: *java-environment
       JWT_ISSUER: ${JWT_ISSUER:?JWT_ISSUER is required}
       JWT_AUDIENCE: ${JWT_AUDIENCE:?JWT_AUDIENCE is required}
       JWT_JWKS_URI: http://auth-service:8080/auth/.well-known/jwks.json
@@ -206,15 +255,22 @@ services:
       AUTH_SERVICE_URL: http://auth-service:8080
       COMPANY_SERVICE_URL: http://company-service:3000
       JOB_SERVICE_URL: http://job-search-service:3000
+    healthcheck: *java-healthcheck
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     expose:
       - "8080"
 
   profile-migrate:
-    build: ./services/profile-service
+    build:
+      context: ./services/profile-service
+      target: build
     env_file:
       - ./services/profile-service/.env
     restart: "no"
@@ -259,7 +315,7 @@ services:
       kafka-init:
         condition: service_completed_successfully
       auth-service:
-        condition: service_started
+        condition: service_healthy
       media-service:
         condition: service_healthy
     expose:
@@ -310,8 +366,21 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     expose:
       - "3000"
+    healthcheck:
+      # Job has no /health route; its generated OpenAPI confirms HTTP startup.
+      test: [ "CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/docs-json" ]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   notification-migrate:
     build:
@@ -362,7 +431,7 @@ services:
       kafka-init:
         condition: service_completed_successfully
       auth-service:
-        condition: service_started
+        condition: service_healthy
     expose:
       - "3000"
     healthcheck:
@@ -430,7 +499,7 @@ services:
       media-migrate:
         condition: service_completed_successfully
       auth-service:
-        condition: service_started
+        condition: service_healthy
     expose:
       - "3000"
 
@@ -438,16 +507,26 @@ services:
     build: ./services/chat-service
     env_file:
       - ./services/chat-service/.env
+    environment:
+      PORT: "3001"
     secrets:
       - source: jwt-public-key
         target: jwt-public.pem
     restart: unless-stopped
     depends_on:
-      - mongo
-      - redis
-      - kafka
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     expose:
       - "3001"
+    healthcheck:
+      test: [ "CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))" ]
+      interval: 15s
+      timeout: 5s
+      retries: 6
 
   # Run migrations once; API replicas and workers never start before success.
   ai-migrate:
@@ -500,6 +579,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     volumes:
       - ai-model-cache:/models
 
@@ -545,9 +626,16 @@ services:
       API_INTERNAL_BASE_URL: http://api-gateway
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
-      - api-gateway
+      api-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))" ]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
 
 volumes:
   ai-model-cache:
