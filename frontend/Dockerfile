@@ -1,4 +1,4 @@
-FROM node:20-alpine AS build
+FROM node:20-bookworm-slim AS build
 WORKDIR /app
 ARG NEXT_PUBLIC_API_BASE_URL=/api
 ARG NEXT_PUBLIC_API_MODE=gateway
@@ -17,14 +17,14 @@ COPY public public
 COPY next.config.mjs tsconfig.json next-env.d.ts ./
 RUN npm run build
 
-FROM node:20-alpine
+FROM node:20-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production \
+    HOSTNAME=0.0.0.0 \
+    PORT=3000 \
     API_INTERNAL_BASE_URL=http://api-gateway
-COPY package*.json ./
-RUN npm ci --omit=dev
-COPY --from=build /app/.next .next
+COPY --from=build /app/.next/standalone ./
+COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
-COPY --from=build /app/next.config.mjs ./
 EXPOSE 3000
-CMD ["npm", "run", "start"]
+CMD ["node", "server.js"]
