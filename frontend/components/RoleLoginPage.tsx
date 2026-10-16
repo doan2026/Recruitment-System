@@ -35,6 +35,9 @@ export default function RoleLoginPage({ portal }: { portal: Portal }) {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("logout") === "unconfirmed") {
+      setError("Đã xóa phiên trên trình duyệt; máy chủ chưa xác nhận thu hồi phiên cũ. Bạn có thể đăng nhập lại.");
+    }
     try {
       const saved = window.localStorage.getItem(`careerhub.remembered-login-email:${portal.toLowerCase()}`);
       setEmail(saved ?? "");

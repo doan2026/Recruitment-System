@@ -1,5 +1,7 @@
 "use client";
 import { useEffect, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { signOut } from "../lib/authSession";
 import { requestApi } from "../lib/apiClient";
 import { person1Error, saveBlob } from "../lib/person1Api";
 import { ConfirmationDialog } from "./ConfirmationDialog";
@@ -31,6 +33,7 @@ const navIcons: Record<Tab, string> = {
 };
 const today = () => new Date().toISOString().slice(0, 10);
 export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>(initialTab);
   const [rows, setRows] = useState<Row[]>([]);
   const [overview, setOverview] = useState<{
@@ -58,6 +61,16 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
   const [reload, setReload] = useState(0);
   const [command, setCommand] = useState<Command | null>(null);
   const [detail, setDetail] = useState<Row | null>(null);
+  async function logout() {
+    if (pending) return;
+    setPending(true);
+    try {
+      await signOut();
+      router.replace("/admin/login");
+    } catch {
+      router.replace("/admin/login?logout=unconfirmed");
+    }
+  }
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
@@ -211,6 +224,7 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
             <span>{labels[key]}</span>
           </button>
         ))}
+        <button className="btn" type="button" disabled={pending} onClick={() => void logout()}>Đăng xuất</button>
       </nav>
       {tab === "stats" ? (
         <section className="card form-stack">

@@ -78,3 +78,16 @@ test("AI practice clearly states availability and offers the actual interview ca
   await expect(page.getByRole("link", { name: "Xem lịch phỏng vấn" })).toHaveAttribute("href", "/candidate/interviews");
   await expect(page.getByRole("button", { name: "Gửi trả lời" })).toHaveCount(0);
 });
+
+for (const status of [204, 502]) {
+  test(`Admin can leave the workspace; logout HTTP ${status} reports revocation accurately`, async ({ page }) => {
+    await page.route(api + "/admin/users**", r => reply(r, []));
+    await page.route(api + "/auth-cookie/logout", r => status === 204
+      ? r.fulfill({ status }) : reply(r, { code: "AUTH_LOGOUT_FAILED" }, status));
+    await login(page, "ADMIN", "/admin/users");
+    await page.getByRole("button", { name: "Đăng xuất", exact: true }).click();
+    await expect(page).toHaveURL(status === 204 ? /\/admin\/login$/ : /\/admin\/login\?logout=unconfirmed$/);
+    await expect(page.getByRole("heading", { name: "Đăng nhập quản trị" })).toBeVisible();
+    if (status !== 204) await expect(page.locator("p[role=alert]")).toContainText("máy chủ chưa xác nhận thu hồi");
+  });
+}
