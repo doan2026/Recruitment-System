@@ -71,7 +71,7 @@ func (s *VideoService) JoinCall(ctx context.Context, callID, userID uuid.UUID, u
 		return nil, err
 	}
 
-	if call.Status == "ended" {
+	if call.Status != "waiting" && call.Status != "active" {
 		return nil, fmt.Errorf("this video call has ended")
 	}
 
@@ -113,13 +113,13 @@ func (s *VideoService) EndCall(ctx context.Context, callID, userID uuid.UUID) er
 	return nil
 }
 
-func (s *VideoService) RejectCall(ctx context.Context, callID uuid.UUID) error {
+func (s *VideoService) RejectCall(ctx context.Context, callID, userID uuid.UUID) error {
 	call, err := s.repo.FindByID(ctx, callID)
 	if err != nil {
 		return err
 	}
 
-	if err := s.repo.RejectCall(ctx, callID); err != nil {
+	if err := s.repo.RejectCall(ctx, callID, userID); err != nil {
 		return err
 	}
 

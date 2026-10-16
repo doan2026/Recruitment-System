@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"video-service/internal/middleware"
@@ -75,7 +76,9 @@ func (h *VideoHandler) JoinCall(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.videoService.JoinCall(r.Context(), callID, userID, userName)
 	if err != nil {
-		if err == repository.ErrCallNotFound {
+		if errors.Is(err, repository.ErrNotInvited) {
+			sendError(w, "user is not invited to this call", http.StatusForbidden)
+		} else if err == repository.ErrCallNotFound {
 			sendError(w, err.Error(), http.StatusNotFound)
 		} else {
 			sendError(w, err.Error(), http.StatusBadRequest)
@@ -117,7 +120,7 @@ func (h *VideoHandler) EndCall(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *VideoHandler) RejectCall(w http.ResponseWriter, r *http.Request) {
-	_, ok := middleware.GetUserID(r.Context())
+	userID, ok := middleware.GetUserID(r.Context())
 	if !ok {
 		sendError(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -130,7 +133,7 @@ func (h *VideoHandler) RejectCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.videoService.RejectCall(r.Context(), callID); err != nil {
+	if err := h.videoService.RejectCall(r.Context(), callID, userID); err != nil {
 		if err == repository.ErrCallNotFound {
 			sendError(w, err.Error(), http.StatusNotFound)
 		} else {

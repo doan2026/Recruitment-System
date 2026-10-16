@@ -12,6 +12,7 @@ import (
 )
 
 var ErrCallNotFound = errors.New("video call not found")
+var ErrNotInvited = errors.New("user is not invited to this call")
 
 type VideoRepository struct {
 	db *sql.DB
@@ -40,7 +41,7 @@ func (r *VideoRepository) CreateCall(ctx context.Context, call *model.VideoCall,
 	call.CreatedAt = now
 
 	// Ensure conversation_id is valid UUID before insert, or use NULL. Here we assume it's valid string or we can store it as string if the DB is UUID
-	// Wait, the DB column `conversation_id` is UUID. 
+	// Wait, the DB column `conversation_id` is UUID.
 	convUUID, err := uuid.Parse(call.ConversationID)
 	var convIDArg interface{}
 	if err != nil {
@@ -98,7 +99,7 @@ func (r *VideoRepository) ListActiveCalls(ctx context.Context, userID uuid.UUID)
 		SELECT c.id, c.room_name, c.host_id, c.title, c.status, c.started_at, c.ended_at, c.created_at, COALESCE(c.conversation_id, '00000000-0000-0000-0000-000000000000') as conversation_id
 		FROM video_calls c
 		JOIN video_call_participants p ON c.id = p.call_id
-		WHERE c.status != 'ended' AND p.user_id = $1
+		WHERE c.status IN ('waiting', 'active') AND p.user_id = $1
 		ORDER BY c.started_at DESC
 		LIMIT 50
 	`
@@ -140,13 +141,14 @@ func (r *VideoRepository) EndCall(ctx context.Context, callID uuid.UUID) error {
 	return nil
 }
 
-func (r *VideoRepository) RejectCall(ctx context.Context, callID uuid.UUID) error {
+func (r *VideoRepository) RejectCall(ctx context.Context, callID, userID uuid.UUID) error {
 	query := `
 		UPDATE video_calls
 		SET status = 'rejected', ended_at = $1
 		WHERE id = $2 AND status = 'waiting'
+		AND EXISTS (SELECT 1 FROM video_call_participants p WHERE p.call_id = $2 AND p.user_id = $3)
 	`
-	res, err := r.db.ExecContext(ctx, query, time.Now(), callID)
+	res, err := r.db.ExecContext(ctx, query, time.Now(), callID, userID)
 	if err != nil {
 		return err
 	}
@@ -175,7 +177,7 @@ func (r *VideoRepository) AddParticipant(ctx context.Context, callID, userID uui
 		return err
 	}
 	if rowsAffected == 0 {
-		return errors.New("user is not invited to this call")
+		return ErrNotInvited
 	}
 
 	// Update call status to active if it was waiting

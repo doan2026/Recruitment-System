@@ -92,6 +92,36 @@ func TestVideoServiceIntegration(t *testing.T) {
 	videoSvc := service.NewVideoService(videoRepo, tokenIssuer, producer)
 
 	// 6. Execute Test Cases
+	t.Run("Only invited users reject calls and rejected rooms stay closed", func(t *testing.T) {
+		host, invited, outsider := uuid.New(), uuid.New(), uuid.New()
+		call, err := videoSvc.CreateCall(ctx, host, "Private rejected call", []uuid.UUID{invited}, uuid.NewString())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := videoSvc.RejectCall(ctx, call.ID, outsider); err != repository.ErrCallNotFound {
+			t.Fatalf("uninvited rejection must be denied: %v", err)
+		}
+		stored, err := videoRepo.FindByID(ctx, call.ID)
+		if err != nil || stored.Status != "waiting" {
+			t.Fatal("uninvited rejection changed the call")
+		}
+		if err := videoSvc.RejectCall(ctx, call.ID, invited); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := videoSvc.JoinCall(ctx, call.ID, host, "Host"); err == nil {
+			t.Fatal("rejected room issued a join token")
+		}
+		calls, err := videoSvc.ListCalls(ctx, invited)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, active := range calls {
+			if active.ID == call.ID {
+				t.Fatal("rejected call is still active")
+			}
+		}
+	})
+
 	t.Run("Create and Join Call", func(t *testing.T) {
 		callerID := uuid.New()
 		participantID := uuid.New()
