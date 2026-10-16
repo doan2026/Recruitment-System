@@ -1,5 +1,6 @@
 import { ApiClientError, requestApi, toUserMessage } from "./apiClient";
 import {
+  awaitSessionHydration,
   establishSession,
   type CurrentAccount,
   type LoginResponse,
@@ -81,6 +82,7 @@ export async function verifyRegistration(
   registrationId: string,
   otp: string,
 ) {
+  await awaitSessionHydration();
   const result = await requestApi<LoginResponse>("/auth-cookie/verify", {
     ...publicAuth,
     method: "POST",
@@ -92,6 +94,7 @@ export async function exchangeGoogle(
   code: string,
   role: "CANDIDATE" | "RECRUITER",
 ) {
+  await awaitSessionHydration();
   const result = await requestApi<LoginResponse>("/auth/google/exchange", {
     ...publicAuth,
     // The HttpOnly binder is scoped to this canonical path, not /api/auth/...

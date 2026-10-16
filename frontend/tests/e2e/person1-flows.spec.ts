@@ -71,6 +71,35 @@ async function login(
   await page.getByRole("button", { name: "Đăng nhập", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(path.replaceAll("/", "\\/") + "$"));
 }
+test("password login waits for slow anonymous hydration instead of cancelling the new session", async ({ page }) => {
+  await base(page);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let hydrationStarted = false;
+  let logins = 0;
+  await page.route(api + "/auth-cookie/refresh", async route => {
+    hydrationStarted = true;
+    await held;
+    await reply(route, { code: "AUTH_INVALID" }, 401);
+  });
+  await page.route(api + "/auth-cookie/login", route => {
+    logins++;
+    return reply(route, { user: tokens().user });
+  });
+  await page.goto("/login");
+  await expect.poll(() => hydrationStarted).toBe(true);
+  await page.getByLabel("Email", { exact: true }).fill("candidate@example.com");
+  await page.getByLabel("Mật khẩu", { exact: true }).fill("Password123");
+  try {
+    await page.getByRole("button", { name: "Đăng nhập", exact: true }).click();
+    await expect(page.locator("form button[type=submit]")).toBeDisabled();
+    expect(logins).toBe(0);
+  } finally { release(); }
+  await expect(page).toHaveURL(/\/candidate\/profile$/);
+  expect(logins).toBe(1);
+  await expect(page.getByText("Yêu cầu đã được hủy.", { exact: true })).toHaveCount(0);
+});
+
 test("registration keeps flow identity and OTP signs in without persisting tokens", async ({
   page,
 }) => {
@@ -316,12 +345,12 @@ test("CV delete carries version and explains deferred deletion", async ({
   page,
 }) => {
   await base(page);
-  let reads = 0;
+  let deleted = false;
   let sent: unknown;
   await page.route(api + "/profile/cvs", (route) =>
     reply(
       route,
-      reads++
+      deleted
         ? []
         : [
             {
@@ -337,6 +366,8 @@ test("CV delete carries version and explains deferred deletion", async ({
     ),
   );
   await page.route(api + "/profile/cvs/" + cvId, (route) => {
+    expect(route.request().method()).toBe("DELETE");
+    deleted = true;
     sent = route.request().postDataJSON();
     return reply(route, { deletionMode: "PENDING" }, 202);
   });

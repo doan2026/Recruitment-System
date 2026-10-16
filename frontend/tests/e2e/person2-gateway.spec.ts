@@ -1,6 +1,9 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
+  await page.route("http://127.0.0.1:4173/api/auth-cookie/refresh", route => route.fulfill({
+    status: 401, contentType: "application/json", body: JSON.stringify({ code: "AUTH_INVALID" }),
+  }));
   await page.route("http://127.0.0.1:4173/api/notifications**", (route) => route.fulfill({
     status: 200, contentType: "application/json", body: JSON.stringify({ data: route.request().url().includes("unread-count") ? { unread_count: 0 } : [], meta: null }),
   }));

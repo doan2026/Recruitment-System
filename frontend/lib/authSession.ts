@@ -96,9 +96,16 @@ async function hydrateSession(): Promise<void> {
 }
 
 configureApiSessionRefresh(refreshAuthSession);
-void hydrateSession();
+const initialHydration = hydrateSession();
+
+export async function awaitSessionHydration(): Promise<void> {
+  await initialHydration;
+}
 
 export async function signIn(email: string, password: string): Promise<CurrentAccount> {
+  // A late anonymous hydration clears the session revision. Finish it before
+  // starting a credential mutation, so it cannot cancel a new login response.
+  await awaitSessionHydration();
   const response = await requestApi<LoginResponse>("/auth-cookie/login", {
     method: "POST", body: { email: email.trim(), password }, privateData: true,
     authRecovery: false, attachAccessToken: false, maxRetries: 0,

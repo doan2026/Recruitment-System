@@ -2,6 +2,9 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 const gateway = "http://127.0.0.1:4173/api";
 test.beforeEach(async ({ page }) => {
+  await page.route("http://127.0.0.1:4173/api/auth-cookie/refresh", route => route.fulfill({
+    status: 401, contentType: "application/json", body: JSON.stringify({ code: "AUTH_INVALID" }),
+  }));
   await page.route("http://127.0.0.1:4173/api/notifications**", (route) => route.fulfill({
     status: 200, contentType: "application/json", body: JSON.stringify({ data: route.request().url().includes("unread-count") ? { unread_count: 0 } : [], meta: null }),
   }));
@@ -179,7 +182,7 @@ test("bookmark save and both detail/list removals handle empty 204 responses", a
   expect(removals).toEqual(["DELETE", "DELETE"]);
 });
 
-test("a late anonymous hydration response cannot clear a newer login", async ({ page }) => {
+test("slow anonymous identity hydration settles before credentials establish the new session", async ({ page }) => {
   let release!: () => void;
   const delayed = new Promise<void>((resolve) => { release = resolve; });
   let hydrationStarted = false;
@@ -188,17 +191,25 @@ test("a late anonymous hydration response cannot clear a newer login", async ({ 
     await delayed;
     await reply(route, { code: "AUTH_INVALID" }, 401);
   });
-  await mockLogin(page);
+  let logins = 0;
+  await page.route(`${gateway}/auth-cookie/refresh`, route => reply(route, { code: "AUTH_INVALID" }, 401));
+  await page.route(`${gateway}/auth-cookie/login`, route => {
+    logins++;
+    return reply(route, { user: { id: accountId, role: "CANDIDATE", email: "fixture@example.com" } });
+  });
   await mockJobDetail(page);
   await page.route(`${gateway}/applications/bookmarks`, (route) => reply(route, []));
   await page.route(`${gateway}/profile/cvs`, (route) => reply(route, []));
   await page.goto(`/login?returnTo=${encodeURIComponent(`/candidate/jobs/${jobId}`)}`);
   await expect.poll(() => hydrationStarted).toBe(true);
-  await submitLogin(page);
-  await expect(page.getByRole("button", { name: "Đăng xuất", exact: true })).toBeVisible();
   const response = page.waitForResponse(`${gateway}/auth/me`);
-  release();
+  try {
+    await submitLogin(page);
+    await expect(page.locator("form button[type=submit]")).toBeDisabled();
+    expect(logins).toBe(0);
+  } finally { release(); }
   await response;
   await expect(page).toHaveURL(`http://127.0.0.1:4173/candidate/jobs/${jobId}`);
   await expect(page.getByRole("button", { name: "Đăng xuất", exact: true })).toBeVisible();
+  expect(logins).toBe(1);
 });
