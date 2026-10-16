@@ -18,11 +18,14 @@ const integrationDescribe =
   process.env.JOB_INTEGRATION_TEST === '1' ? describe : describe.skip;
 const RECRUITER_ID = '11111111-1111-4111-8111-111111111111';
 const COMPANY_ID = '22222222-2222-4222-8222-222222222222';
+// Compose retains the Kafka test container between runs. A new consumer group
+// with fromBeginning must not read events belonging to an earlier test batch.
+const TEST_TOPIC = `${process.env.KAFKA_JOB_TOPIC ?? 'job-events'}-outbox-it-${process.pid}-${Date.now()}`;
 
 function config(): ConfigService {
   const values: Record<string, string> = {
     KAFKA_BROKERS: process.env.KAFKA_BROKERS ?? 'kafka-test:9092',
-    KAFKA_JOB_TOPIC: process.env.KAFKA_JOB_TOPIC ?? 'job-events',
+    KAFKA_JOB_TOPIC: TEST_TOPIC,
     JOB_EVENT_OUTBOX_BATCH_SIZE: '20',
     JOB_EVENT_OUTBOX_POLL_INTERVAL_MS: '60000',
     JOB_EVENT_OUTBOX_LEASE_MS: '30000',
@@ -71,7 +74,7 @@ integrationDescribe('Job transactional event outbox', () => {
       await admin.createTopics({
         waitForLeaders: true,
         topics: [{
-          topic: process.env.KAFKA_JOB_TOPIC ?? 'job-events',
+          topic: TEST_TOPIC,
           numPartitions: 3,
           replicationFactor: 1,
         }],
@@ -90,7 +93,7 @@ integrationDescribe('Job transactional event outbox', () => {
 
   afterEach(async () => {
     await consumer?.disconnect().catch(() => undefined);
-  });
+  }, 15_000);
 
   afterAll(async () => {
     await publisher.onModuleDestroy();
@@ -229,10 +232,11 @@ integrationDescribe('Job transactional event outbox', () => {
     });
     consumer = kafka.consumer({
       groupId: 'job-outbox-integration-' + Date.now(),
+      maxWaitTimeInMs: 500,
     });
     await consumer.connect();
     await consumer.subscribe({
-      topic: process.env.KAFKA_JOB_TOPIC ?? 'job-events',
+      topic: TEST_TOPIC,
       fromBeginning: true,
     });
     const groupJoined = new Promise<void>((resolve) => {

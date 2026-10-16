@@ -11,6 +11,7 @@ COPY src src
 RUN npm run build
 
 FROM build AS test
+COPY test test
 CMD ["npm", "test"]
 
 FROM node:20-alpine

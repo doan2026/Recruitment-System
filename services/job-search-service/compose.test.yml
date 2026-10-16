@@ -92,4 +92,4 @@ services:
     command:
       - /bin/sh
       - -c
-      - npx prisma migrate deploy && npm run test:integration
+      - npx prisma migrate deploy && npm test

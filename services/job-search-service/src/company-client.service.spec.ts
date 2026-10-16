@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import { CompanyClientService } from './company-client.service';
+import { CompanyClientService, CompanyIndexingLookupError } from './company-client.service';
 import { JobService } from './job.service';
 import { PrismaService } from './prisma.service';
 import { JobIndexingService } from './job-indexing.service';
@@ -50,6 +50,15 @@ describe('Company authorization for Job CRUD', () => {
 });
 
 describe('Company name lookup for indexing', () => {
+  it('keeps HTTP failures identifiable for durable indexing replay', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(response({ code: 'DOWNSTREAM_PRIVATE' }, 503));
+    const indexing = new CompanyClientService(new ConfigService({
+      COMPANY_SERVICE_URL: 'http://company-service:3000',
+      COMPANY_INTERNAL_API_KEY: 'job-search-to-company-indexing-key-0001',
+    }));
+    await expect(indexing.getCompanyNameForIndexing(COMPANY))
+      .rejects.toBeInstanceOf(CompanyIndexingLookupError);
+  });
   const KEY = 'job-search-to-company-indexing-key-0001';
   const indexingClient = (key: string | undefined) => new CompanyClientService(new ConfigService({
     COMPANY_SERVICE_URL: 'http://company-service:3000',

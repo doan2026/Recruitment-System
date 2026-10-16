@@ -9,7 +9,7 @@ import { Client } from '@elastic/elasticsearch';
 import { Job, JobIndexSync, JobStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { Job as QueueJob, Queue, Worker } from 'bullmq';
-import { CompanyClientService } from './company-client.service';
+import { CompanyClientService, CompanyIndexingLookupError } from './company-client.service';
 import { PrismaService } from './prisma.service';
 
 interface JobIndexTask {
@@ -1228,6 +1228,7 @@ function redisRetryDelay(attempt: number): number {
 }
 
 function failureCode(error: unknown): string {
+  if (error instanceof CompanyIndexingLookupError) return 'COMPANY_LOOKUP_FAILED';
   if (error instanceof Error) {
     if (error.name === 'ELASTICSEARCH_INDEX_INCOMPATIBLE') {
       return error.name;

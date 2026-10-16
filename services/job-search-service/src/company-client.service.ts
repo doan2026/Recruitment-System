@@ -27,6 +27,8 @@ export interface RecruiterCompany {
 
 const COMPANY_NAME_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
 
+export class CompanyIndexingLookupError extends Error {}
+
 function isCanonicalCompanyName(name: unknown): name is string {
   return typeof name === 'string' &&
     [...name].length >= 2 &&
@@ -156,7 +158,7 @@ export class CompanyClientService {
   async getCompanyNameForIndexing(companyId: string): Promise<string> {
     const apiKey = this.indexingApiKey();
     if (!apiKey) {
-      throw new Error('COMPANY_INTERNAL_API_KEY is not configured');
+      throw new CompanyIndexingLookupError('COMPANY_INTERNAL_API_KEY is not configured');
     }
     const { baseUrl, timeoutMs } = this.recommendationConfig();
     let response: Response;
@@ -172,11 +174,11 @@ export class CompanyClientService {
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {
-      throw new Error('Company Service is unavailable while indexing');
+      throw new CompanyIndexingLookupError('Company Service is unavailable while indexing');
     }
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined);
-      throw new Error(
+      throw new CompanyIndexingLookupError(
         `Cannot resolve company ${companyId} for indexing (HTTP ${response.status})`,
       );
     }
@@ -184,7 +186,7 @@ export class CompanyClientService {
     try {
       body = await readBoundedJson(response);
     } catch {
-      throw new Error('Company Service returned an unreadable indexing response');
+      throw new CompanyIndexingLookupError('Company Service returned an unreadable indexing response');
     }
     if (
       !isPlainObject(body) ||
@@ -192,7 +194,7 @@ export class CompanyClientService {
       body.data.id !== companyId ||
       !isCanonicalCompanyName(body.data.name)
     ) {
-      throw new Error('Company Service returned an invalid indexing response');
+      throw new CompanyIndexingLookupError('Company Service returned an invalid indexing response');
     }
     return body.data.name;
   }
