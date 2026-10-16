@@ -5,7 +5,7 @@ COPY go.mod ./
 COPY . .
 RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o server ./cmd/server
 
-FROM alpine:3.20
+FROM alpine:3.20 AS runtime
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /app/server /server
 EXPOSE 8080

@@ -42,6 +42,8 @@ services:
         condition: service_healthy
       ai-service:
         condition: service_healthy
+      video-service:
+        condition: service_healthy
     healthcheck:
       test: [ "CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/auth/health" ]
       interval: 15s
@@ -403,7 +405,7 @@ services:
       context: ./services/notification-service
       target: runtime
     ports:
-      - "127.0.0.1:${NOTIFICATION_HOST_PORT:-8089}:3000"
+      - "127.0.0.1:${NOTIFICATION_HOST_PORT:-8089}:8080"
     env_file:
       - ./services/notification-service/.env
     environment:
@@ -500,26 +502,35 @@ services:
   chat-service:
     build: ./services/chat-service
     ports:
-      - "127.0.0.1:${CHAT_HOST_PORT:-8090}:3001"
+      - "127.0.0.1:${CHAT_HOST_PORT:-8090}:8080"
     env_file:
       - ./services/chat-service/.env
     environment:
-      PORT: "3001"
+      PORT: "8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      JWT_JWKS_URI: http://auth-service:8080/auth/.well-known/jwks.json
+      JWT_ISSUER: ${JWT_ISSUER:-https://auth.recruitment.local}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-recruitment-api}
+      JWT_ALLOW_INSECURE_JWKS: "true"
+      ALLOWED_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     secrets:
       - source: jwt-public-key
         target: jwt-public.pem
     restart: unless-stopped
     depends_on:
-      mongo:
+      postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
     expose:
-      - "3001"
+      - "8080"
     healthcheck:
-      test: [ "CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))" ]
+      test: [ "CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health/ready" ]
       interval: 15s
       timeout: 5s
       retries: 6
@@ -571,6 +582,8 @@ services:
       target: worker
     env_file:
       - ./services/ai-service/.env
+    environment:
+      EMBEDDING_MODEL_LOCAL_FILES_ONLY: ${EMBEDDING_MODEL_LOCAL_FILES_ONLY:-false}
     restart: unless-stopped
     depends_on:
       ai-service:
@@ -589,6 +602,7 @@ services:
     env_file:
       - ./services/ai-service/.env
     environment:
+      EMBEDDING_MODEL_LOCAL_FILES_ONLY: ${EMBEDDING_MODEL_LOCAL_FILES_ONLY:-false}
       MEDIA_SERVICE_URL: http://media-service:3000
       MEDIA_INTERNAL_API_KEY: ${MEDIA_INTERNAL_API_KEY_AI:?MEDIA_INTERNAL_API_KEY_AI is required}
       KAFKA_CV_TOPIC: ${KAFKA_CV_TOPIC:-cv-events}
@@ -608,6 +622,8 @@ services:
 
   video-service:
     build: ./services/video-service
+    ports:
+      - "127.0.0.1:${VIDEO_HOST_PORT:-8092}:8080"
     env_file:
       - ./services/video-service/.env
     environment:
@@ -620,6 +636,8 @@ services:
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-secret}
       LIVEKIT_URL: ${LIVEKIT_URL:-http://localhost:7880}
       KAFKA_BROKERS: kafka:9092
+      ALLOWED_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      PORT: "8080"
     secrets:
       - source: jwt-public-key
         target: jwt-public.pem
@@ -631,6 +649,13 @@ services:
         condition: service_started
     expose:
       - "8080"
+
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health/ready" ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
 
   frontend:
     build:
