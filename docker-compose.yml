@@ -12,12 +12,6 @@ x-java-healthcheck: &java-healthcheck
   start_period: 60s
 
 services:
-  mailhog:
-    image: mailhog/mailhog
-    ports:
-      - "1025:1025"
-      - "8025:8025"
-    restart: unless-stopped
   api-gateway:
     image: nginx:1.30.4-alpine
     restart: unless-stopped
