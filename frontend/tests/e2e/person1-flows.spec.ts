@@ -1,6 +1,6 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-const api = "http://127.0.0.1:4174";
+const api = "http://127.0.0.1:4173/api";
 const userId = "4795c0de-7908-4ab5-9bed-4c4f1cf9c213";
 const cvId = "7795c0de-7908-4ab5-9bed-4c4f1cf9c216";
 const fileId = "8795c0de-7908-4ab5-9bed-4c4f1cf9c217";
@@ -52,6 +52,10 @@ async function base(page: Page) {
   await page.route(api + "/profile/" + userId, (route) =>
     reply(route, profile),
   );
+  await page.route(api + "/auth/me", route => reply(route, { code: "AUTH_INVALID" }, 401));
+  await page.route(api + "/auth-cookie/refresh", route => reply(route, { code: "AUTH_INVALID" }, 401));
+  await page.route(api + "/notifications**", route => reply(route,
+    route.request().url().includes("unread-count") ? { unread_count: 0 } : []));
 }
 async function login(
   page: Page,
@@ -59,7 +63,7 @@ async function login(
   path = "/candidate/profile",
   returnTo = path,
 ) {
-  await page.route(api + "/auth/login", (route) => reply(route, tokens(role)));
+  await page.route(api + "/auth-cookie/login", (route) => reply(route, { user: tokens(role).user }));
   const portal = role === "ADMIN" ? "/admin/login" : role === "RECRUITER" ? "/recruiter/login" : "/login";
   await page.goto(portal + "?returnTo=" + encodeURIComponent(returnTo));
   await page.getByLabel(role === "ADMIN" ? "Email quản trị" : role === "RECRUITER" ? "Email công việc" : "Email", { exact: true }).fill("candidate@example.com");
@@ -76,7 +80,7 @@ test("registration keeps flow identity and OTP signs in without persisting token
   await page.route(api + "/auth/register", (route) =>
     reply(route, { registrationId: flow, expiresInSeconds: 300 }, 202),
   );
-  await page.route(api + "/auth/otp/verify", (route) => {
+  await page.route(api + "/auth-cookie/verify", (route) => {
     verified = route.request().postDataJSON();
     return reply(route, tokens());
   });
@@ -432,8 +436,8 @@ test("Google registration links use the selected portal when enabled", async ({ 
 test("candidate portal rejects a recruiter session and logs it out", async ({ page }) => {
   await base(page);
   let logouts = 0;
-  await page.route(api + "/auth/login", route => reply(route, tokens("RECRUITER")));
-  await page.route(api + "/auth/logout", route => { logouts++; return reply(route, {}); });
+  await page.route(api + "/auth-cookie/login", route => reply(route, { user: tokens("RECRUITER").user }));
+  await page.route(api + "/auth-cookie/logout", route => { logouts++; return reply(route, {}); });
   await page.goto("/login");
   await page.getByLabel("Email", { exact: true }).fill("recruiter@example.com");
   await page.getByLabel("Mật khẩu", { exact: true }).fill("Password123");
@@ -452,7 +456,7 @@ test("recruiter registration saves contact in Auth and can retry after a tempora
     expect(route.request().postDataJSON().role).toBe("RECRUITER");
     return reply(route, { registrationId: userId }, 202);
   });
-  await page.route(api + "/auth/otp/verify", route => reply(route, tokens("RECRUITER")));
+  await page.route(api + "/auth-cookie/verify", route => reply(route, tokens("RECRUITER")));
   await page.route(api + "/auth/me/recruiter-contact", route => {
     expect(route.request().postDataJSON()).toEqual({ fullName: "Nguyễn Recruiter", phone: "0901234567" });
     contacts++;

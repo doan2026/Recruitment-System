@@ -36,8 +36,8 @@ async function reply(route: Route, data: unknown, status = 200) {
 async function authenticate(page: Page, role: "CANDIDATE" | "RECRUITER", destination: string) {
   await page.route(`${gateway}/auth-cookie/login`, (route) => reply(route, { user: { id: accountId, role, email: "fixture@example.com" },
   }));
-  await page.goto(`/login?returnTo=${encodeURIComponent(destination)}`);
-  await page.getByLabel("Email", { exact: true }).fill("fixture@example.com");
+  await page.goto(`${role === "RECRUITER" ? "/recruiter/login" : "/login"}?returnTo=${encodeURIComponent(destination)}`);
+  await page.getByLabel(role === "RECRUITER" ? "Email công việc" : "Email", { exact: true }).fill("fixture@example.com");
   await page.getByLabel("Mật khẩu", { exact: true }).fill("fixture-password");
   await page.getByRole("button", { name: "Đăng nhập", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(destination.replace(/[.*+?^$()|[\]\\]/g, "\\$&")));

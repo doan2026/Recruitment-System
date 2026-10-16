@@ -80,6 +80,8 @@ test("private applications stay gated anonymously and a failed refresh settles w
   await page.goto("/candidate/applications");
   await expect(page.getByRole("heading", { name: "Đăng nhập để tiếp tục", exact: true })).toBeVisible();
   expect(privateReads).toBe(0);
+  // Anonymous hydration may try the HttpOnly refresh cookie once on reload.
+  refreshRequests.length = 0;
   await page.locator(".empty-state").getByRole("link", { name: "Đăng nhập", exact: true }).click();
   await submitLogin(page);
   await expect.poll(() => refreshRequests.length).toBe(1);
@@ -168,7 +170,7 @@ test("bookmark save and both detail/list removals handle empty 204 responses", a
   await page.getByRole("button", { name: "Lưu việc làm", exact: true }).click();
   await expect(page.getByRole("button", { name: "Bỏ lưu việc làm", exact: true })).toBeVisible();
   // Next Link navigation intentionally retains the in-memory account session.
-  await page.getByRole("navigation", { name: "Điều hướng chính" }).getByRole("link", { name: "Đã lưu", exact: true }).click();
+  await page.getByRole("navigation", { name: "Khu vực ứng viên" }).getByRole("link", { name: "Việc làm đã lưu", exact: true }).click();
   await expect(page.getByRole("heading", { name: job.title, exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Bỏ lưu", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Chưa lưu việc làm", exact: true })).toBeVisible();

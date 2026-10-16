@@ -4,7 +4,11 @@ const refreshPath = "/api/auth-cookie";
 const legacyRefreshPath = "/api/auth-cookie/refresh";
 const noStore = { "Cache-Control": "no-store", Pragma: "no-cache" };
 
-type Action = "login" | "refresh" | "logout";
+type Action = "login" | "verify" | "google" | "refresh" | "logout";
+const endpoints: Record<Action, string> = {
+  login: "/auth/login", verify: "/auth/otp/verify", google: "/auth/google/exchange",
+  refresh: "/auth/refresh", logout: "/auth/logout",
+};
 
 function cookieOptions(req: Request, path: string, maxAge: number) {
   return { httpOnly: true, sameSite: "lax" as const, secure: (req.headers.get("x-forwarded-proto") === "https" || new URL(req.url).protocol === "https:"), path, maxAge };
@@ -25,19 +29,26 @@ export async function proxyAuthCookie(req: Request, action: Action): Promise<Nex
   const json = (body: unknown, status: number) => NextResponse.json(body, { status, headers: noStore });
   // Cookie credentials must only be usable by the frontend's own origin.
   const origin = req.headers.get("origin");
-  if (origin && new URL(origin).host !== req.headers.get("host")) return json({ code: "FORBIDDEN" }, 403);
+  if (origin) {
+    try { if (new URL(origin).host !== req.headers.get("host")) return json({ code: "FORBIDDEN" }, 403); }
+    catch { return json({ code: "FORBIDDEN" }, 403); }
+  }
 
   let response: NextResponse;
   try {
-    const refreshToken = action === "login" ? undefined : new NextRequest(req.url, { headers: req.headers }).cookies.get("careerhub_refresh")?.value;
-    if (action !== "login" && !refreshToken) {
+    const cookies = new NextRequest(req.url, { headers: req.headers }).cookies;
+    const needsRefresh = action === "refresh" || action === "logout";
+    const refreshToken = needsRefresh ? cookies.get("careerhub_refresh")?.value : undefined;
+    if (needsRefresh && !refreshToken) {
       response = action === "logout" ? new NextResponse(null, { status: 204, headers: noStore }) : json({ code: "AUTH_INVALID" }, 401);
       clearCookies(response, req);
     } else {
-      const body = action === "login" ? await req.json() : { refreshToken };
+      const body = needsRefresh ? { refreshToken } : await req.json();
+      const binder = action === "google" ? cookies.get("oauth2_exchange_binder")?.value : undefined;
       const gateway = (process.env.API_INTERNAL_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
-      const upstream = await fetch(`${gateway}/auth/${action}`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+      const upstream = await fetch(`${gateway}${endpoints[action]}`, {
+        method: "POST", headers: { "Content-Type": "application/json",
+          ...(binder ? { Cookie: `oauth2_exchange_binder=${binder}` } : {}) },
         body: JSON.stringify(body), cache: "no-store", redirect: "error", signal: AbortSignal.timeout(10_000),
       });
       if (action === "logout") {
@@ -64,5 +75,7 @@ export async function proxyAuthCookie(req: Request, action: Action): Promise<Nex
     if (action === "logout") clearCookies(response, req);
   }
   if (response.cookies.has("careerhub_refresh")) clearLegacyCookie(response);
+  if (action === "google") response.cookies.set("oauth2_exchange_binder", "",
+    cookieOptions(req, "/auth/google/exchange", 0));
   return response;
 }

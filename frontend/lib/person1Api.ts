@@ -2,7 +2,7 @@ import { ApiClientError, requestApi, toUserMessage } from "./apiClient";
 import {
   establishSession,
   type CurrentAccount,
-  type TokenResponse,
+  type LoginResponse,
 } from "./authSession";
 export const publicAuth = {
   privateData: true,
@@ -81,7 +81,7 @@ export async function verifyRegistration(
   registrationId: string,
   otp: string,
 ) {
-  const result = await requestApi<TokenResponse>("/auth/otp/verify", {
+  const result = await requestApi<LoginResponse>("/auth-cookie/verify", {
     ...publicAuth,
     method: "POST",
     body: { email, registrationId, otp },
@@ -92,7 +92,7 @@ export async function exchangeGoogle(
   code: string,
   role: "CANDIDATE" | "RECRUITER",
 ) {
-  const result = await requestApi<TokenResponse>("/auth/google/exchange", {
+  const result = await requestApi<LoginResponse>("/auth/google/exchange", {
     ...publicAuth,
     // The HttpOnly binder is scoped to this canonical path, not /api/auth/...
     fetcher: (_url, options) => fetch("/auth/google/exchange", options),

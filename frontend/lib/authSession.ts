@@ -1,6 +1,7 @@
 import {
   ApiClientError, clearApiSession, configureApiSessionRefresh,
-  getApiSessionAccountId, requestApi, setApiSession, subscribeToApiSession,
+  getApiSessionAccountId, getApiSessionRevision, requestApi,
+  setApiSession, subscribeToApiSession,
 } from "./apiClientCore";
 
 export interface CurrentAccount {
@@ -16,9 +17,11 @@ export interface TokenResponse {
   user: CurrentAccount;
 }
 
+export interface LoginResponse { user: CurrentAccount }
 let account: CurrentAccount | null = null;
-let initialized = false;
-let hydrating = typeof window !== "undefined";
+// A one-time Google exchange starts immediately on this page. Anonymous cookie
+// hydration must not invalidate its in-flight request before the code is used.
+let hydrating = typeof window !== "undefined" && window.location.pathname !== "/auth/callback";
 
 export function getCurrentAccount(): CurrentAccount | null | undefined {
   if (hydrating) return undefined;
@@ -26,9 +29,7 @@ export function getCurrentAccount(): CurrentAccount | null | undefined {
 }
 
 subscribeToApiSession(() => {
-  if (!getApiSessionAccountId()) {
-    account = null;
-  }
+  if (!getApiSessionAccountId()) account = null;
 });
 
 function validateLoginResponse(value: LoginResponse): void {
@@ -41,65 +42,74 @@ function validateLoginResponse(value: LoginResponse): void {
 export async function refreshAuthSession() {
   const current = getCurrentAccount();
   if (!current) return null;
-  
-  // We don't have the refresh token on client, the proxy route will read it from cookies
-  const result = await requestApi<LoginResponse>("/auth-cookie/refresh", {
-    method: "POST", body: {}, privateData: true,
+  const revision = getApiSessionRevision();
+  const options = {
+    method: "POST" as const, privateData: true,
     authRecovery: false, attachAccessToken: false, maxRetries: 0,
-  });
-  validateTokens(response.data);
-  return establishSession(response.data);
+  };
+  const result = await requestApi<LoginResponse>("/auth-cookie/refresh", { ...options, body: {} });
+  validateLoginResponse(result.data);
+  if (getApiSessionRevision() !== revision || result.data.user.id !== current.id) {
+    throw new ApiClientError({ code: "REQUEST_CANCELLED" });
+  }
+  return { token: null, accountId: current.id };
 }
 
-export function establishSession(tokens: TokenResponse): CurrentAccount {
-  validateTokens(tokens);
-  account = tokens.user;
-  refreshToken = tokens.refreshToken;
-  setApiSession({ token: tokens.accessToken, accountId: account.id });
-  configureApiSessionRefresh(async () => {
-    const current = getCurrentAccount();
-    const presented = refreshToken;
-    if (!current || !presented) return null;
-    const result = await requestApi<TokenResponse>("/auth/refresh", {
-      method: "POST", body: { refreshToken: presented }, privateData: true,
-      authRecovery: false, attachAccessToken: false, maxRetries: 0,
-    });
-    
-    if (result.data?.id) {
-      validateLoginResponse({ user: result.data });
-      account = result.data;
-      hydrating = false;
-      setApiSession({ token: null, accountId: account.id });
-    } else {
-      hydrating = false;
-      clearApiSession();
+export function establishSession(response: LoginResponse): CurrentAccount {
+  validateLoginResponse(response);
+  account = response.user;
+  hydrating = false;
+  configureApiSessionRefresh(refreshAuthSession);
+  setApiSession({ token: null, accountId: account.id });
+  return account;
+}
+
+async function hydrateSession(): Promise<void> {
+  if (typeof window === "undefined" || !hydrating) return;
+  const revision = getApiSessionRevision();
+  try {
+    let user: CurrentAccount;
+    try {
+      const result = await requestApi<CurrentAccount>("/auth/me", {
+        privateData: true, authRecovery: false, maxRetries: 0,
+      });
+      user = result.data;
+    } catch (error) {
+      if (!(error instanceof ApiClientError) || error.status !== 401) throw error;
+      const refreshed = await requestApi<LoginResponse>("/auth-cookie/refresh", {
+        method: "POST", body: {}, privateData: true,
+        authRecovery: false, attachAccessToken: false, maxRetries: 0,
+      });
+      user = refreshed.data.user;
     }
-  } catch (error) {
+    validateLoginResponse({ user });
+    if (getApiSessionRevision() !== revision) return;
+    account = user;
     hydrating = false;
-    // A newer login owns the session when the hydration request was cancelled.
+    setApiSession({ token: null, accountId: user.id });
+  } catch (error) {
+    if (getApiSessionRevision() !== revision) return;
+    hydrating = false;
     if (error instanceof ApiClientError && error.code === "REQUEST_CANCELLED") return;
     clearApiSession();
   }
 }
 
-// Call hydration on load
-hydrateSession();
+configureApiSessionRefresh(refreshAuthSession);
+void hydrateSession();
 
 export async function signIn(email: string, password: string): Promise<CurrentAccount> {
   const response = await requestApi<LoginResponse>("/auth-cookie/login", {
     method: "POST", body: { email: email.trim(), password }, privateData: true,
     authRecovery: false, attachAccessToken: false, maxRetries: 0,
   });
-  validateLoginResponse(response.data);
-  hydrating = false;
-  account = response.data.user;
-  setApiSession({ token: null, accountId: account.id });
-  return account;
+  return establishSession(response.data);
 }
 
 export async function signOut(): Promise<void> {
   clearApiSession();
   await requestApi<void>("/auth-cookie/logout", {
-    method: "POST", body: {}, privateData: true, authRecovery: false, attachAccessToken: false, maxRetries: 0,
+    method: "POST", body: {},
+    privateData: true, authRecovery: false, attachAccessToken: false, maxRetries: 0,
   });
 }

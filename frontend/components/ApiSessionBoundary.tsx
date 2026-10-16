@@ -18,8 +18,9 @@ export function ApiSessionBoundary({ children }: { children: ReactNode }) {
   // Private screens reset on an identity change. Public auth forms must keep
   // their state long enough to finish OTP onboarding or show a role mismatch.
   const authFlow = ["/login", "/register", "/recruiter/login", "/recruiter/register", "/admin/login", "/auth/callback", "/forgot-password", "/reset-password"].includes(pathname);
+  const publicCompanyPage = pathname === "/" || pathname === "/companies" || pathname.startsWith("/companies/");
   return (
-    <Fragment key={authFlow ? "authentication-flow" : revision}>
+    <Fragment key={authFlow || publicCompanyPage ? "public-flow" : revision}>
       {children}
     </Fragment>
   );

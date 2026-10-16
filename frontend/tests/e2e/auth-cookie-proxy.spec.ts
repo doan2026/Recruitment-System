@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 
 const account = { id: "4795c0de-7908-4ab5-9bed-4c4f1cf9c213", email: "cookie@example.test", role: "CANDIDATE" };
 let server: Server;
-let calls: { path: string; body: Record<string, unknown>; authorization?: string }[];
+let calls: { path: string; body: Record<string, unknown>; authorization?: string; cookie?: string }[];
 let failLogout = false;
 let activeRefresh = "refresh-one";
 
@@ -12,7 +12,8 @@ test.beforeAll(async () => {
     let text = "";
     for await (const chunk of req) text += chunk;
     const body = text ? JSON.parse(text) : {};
-    calls.push({ path: req.url!, body, authorization: req.headers.authorization });
+    calls.push({ path: req.url!, body, authorization: req.headers.authorization,
+      ...(req.headers.cookie ? { cookie: req.headers.cookie } : {}) });
     res.setHeader("Content-Type", "application/json");
     if (req.url === "/auth/logout") {
       if (failLogout) { res.writeHead(503).end(); return; }
@@ -20,7 +21,11 @@ test.beforeAll(async () => {
       activeRefresh = "revoked";
       res.writeHead(204).end(); return;
     }
-    if (req.url === "/auth/login" || req.url === "/auth/refresh") {
+    if (req.url === "/auth/login" || req.url === "/auth/refresh"
+      || req.url === "/auth/otp/verify" || req.url === "/auth/google/exchange") {
+      if (req.url === "/auth/google/exchange" && req.headers.cookie !== "oauth2_exchange_binder=binder-fixture") {
+        res.writeHead(401).end(JSON.stringify({ code: "INVALID_EXCHANGE" })); return;
+      }
       if (req.url === "/auth/refresh") {
         if (body.refreshToken !== activeRefresh) { res.writeHead(401).end(); return; }
         activeRefresh = "refresh-two";
@@ -84,4 +89,34 @@ test("cross-origin cookie mutation is rejected before calling Auth", async ({ pa
   const response = await page.request.post("/api/auth-cookie/login", { headers: { Origin: "https://untrusted.test" }, data: { email: account.email, password: "fixture" } });
   expect(response.status()).toBe(403);
   expect(calls).toHaveLength(0);
+});
+
+test("OTP verification establishes the same HttpOnly session without exposing tokens", async ({ page, context }) => {
+  const response = await page.request.post("/api/auth-cookie/verify", {
+    data: { email: account.email, registrationId: account.id, otp: "123456" },
+  });
+  expect(response.status()).toBe(200);
+  expect(await response.json()).toEqual({ data: { user: account }, meta: null });
+  expect(calls.find(c => c.path === "/auth/otp/verify")?.body).toEqual({ email: account.email, registrationId: account.id, otp: "123456" });
+  expect((await context.cookies()).find(c => c.name === "careerhub_token")).toMatchObject({ httpOnly: true, value: "access-fixture" });
+});
+
+test("canonical Google exchange forwards only its binder and establishes HttpOnly cookies", async ({ page, context }) => {
+  await context.addCookies([
+    { name: "oauth2_exchange_binder", value: "binder-fixture", domain: "127.0.0.1", path: "/auth/google/exchange", httpOnly: true },
+    { name: "unrelated", value: "private-fixture", domain: "127.0.0.1", path: "/" },
+  ]);
+  const response = await page.request.post("/auth/google/exchange", { data: { code: "one-time-code", role: "CANDIDATE" } });
+  expect(response.status()).toBe(200);
+  expect(await response.json()).toEqual({ data: { user: account }, meta: null });
+  expect(calls.find(c => c.path === "/auth/google/exchange")).toMatchObject({ cookie: "oauth2_exchange_binder=binder-fixture" });
+  const cookies = await context.cookies();
+  expect(cookies.some(c => c.name === "oauth2_exchange_binder")).toBe(false);
+  expect(cookies.find(c => c.name === "careerhub_refresh")).toMatchObject({ httpOnly: true, path: "/api/auth-cookie" });
+});
+
+test("Google exchange cannot skip the one-time binder", async ({ page }) => {
+  const response = await page.request.post("/auth/google/exchange", { data: { code: "one-time-code", role: "CANDIDATE" } });
+  expect(response.status()).toBe(401);
+  expect((await response.json()).code).toBe("INVALID_EXCHANGE");
 });

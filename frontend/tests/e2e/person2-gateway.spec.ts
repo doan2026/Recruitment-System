@@ -29,8 +29,8 @@ async function login(page: Page, role: "CANDIDATE" | "RECRUITER", returnTo: stri
       user: { id: "5795c0de-7908-4ab5-9bed-4c4f1cf9c214", email: "test@example.test", role },
     }, meta: null,
   }));
-  await page.goto(`/login?returnTo=${encodeURIComponent(returnTo)}`);
-  await page.getByLabel("Email", { exact: true }).fill("test@example.test");
+  await page.goto(`${role === "RECRUITER" ? "/recruiter/login" : "/login"}?returnTo=${encodeURIComponent(returnTo)}`);
+  await page.getByLabel(role === "RECRUITER" ? "Email công việc" : "Email", { exact: true }).fill("test@example.test");
   await page.getByLabel("Mật khẩu", { exact: true }).fill("fixture-password");
   await page.getByRole("button", { name: "Đăng nhập", exact: true }).click();
   await expect(page).toHaveURL(new URL(returnTo, appOrigin).toString());

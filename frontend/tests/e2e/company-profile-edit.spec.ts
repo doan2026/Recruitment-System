@@ -62,8 +62,8 @@ async function openCompany(page: Page, options: { verified?: boolean; conflictFi
   });
   await page.route(`${gateway}/auth-cookie/login`, (route) => reply(route, { user: { id: accountId, role: "RECRUITER", email: "fixture@example.com" },
   }));
-  await page.goto("/login?returnTo=%2Frecruiter%2Fcompany");
-  await page.getByLabel("Email", { exact: true }).fill("fixture@example.com");
+  await page.goto("/recruiter/login?returnTo=%2Frecruiter%2Fcompany");
+  await page.getByLabel("Email công việc", { exact: true }).fill("fixture@example.com");
   await page.getByLabel("Mật khẩu", { exact: true }).fill("fixture-password");
   await page.getByRole("button", { name: "Đăng nhập", exact: true }).click();
   await expect(page.getByRole("button", { name: "Chỉnh sửa hồ sơ", exact: true })).toBeVisible();
