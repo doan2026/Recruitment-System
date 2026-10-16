@@ -1,5 +1,6 @@
 package com.recruitment.interview.scheduling;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.recruitment.interview.domain.InterviewMode;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -13,7 +14,9 @@ public record CreateInterviewRequest(
     @NotNull UUID applicationId,
     @NotNull UUID requestId,
     @Min(1) @Max(20) int roundNumber,
-    @NotNull OffsetDateTime scheduledStart,
+    @NotNull
+    @JsonFormat(without = JsonFormat.Feature.ADJUST_DATES_TO_CONTEXT_TIME_ZONE)
+    OffsetDateTime scheduledStart,
     @NotBlank @Size(max = 100) String timeZone,
     @Min(30) @Max(60) int durationMinutes,
     @NotNull InterviewMode mode,

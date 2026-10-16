@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -56,6 +57,18 @@ class InterviewSchedulingControllerTest {
 
   @MockBean
   private JwtDecoder jwtDecoder;
+
+  @Test
+  void preservesSubmittedOffsetBeforeSchedulingValidation() throws Exception {
+    when(scheduling.schedule(eq(RECRUITER_ID), eq("signed-access-token"), any()))
+        .thenReturn(new ScheduleInterviewResult(response(), false));
+    mvc.perform(post("/interviews").with(recruiter())
+            .contentType(MediaType.APPLICATION_JSON).content(validBody()))
+        .andExpect(status().isCreated());
+    verify(scheduling).schedule(eq(RECRUITER_ID), eq("signed-access-token"),
+        argThat(request -> request.scheduledStart().getOffset().getTotalSeconds() == 7 * 3600
+            && request.scheduledStart().getHour() == 9));
+  }
 
   @Test
   void recruiterSchedulesInterviewAndReceivesNoStoreCreatedResponse()
