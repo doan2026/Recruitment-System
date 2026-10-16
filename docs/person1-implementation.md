@@ -7,7 +7,7 @@ Nguồn yêu cầu: phần III/A1–A4 trong tài liệu phân công đính kèm
 | Luồng | Triển khai |
 |---|---|
 | Đăng ký Candidate/Recruiter, OTP, gửi lại | /register cho Candidate, /recruiter/register cho Recruiter; giữ registrationId cho đúng lần đăng ký; OTP thành công thiết lập phiên; liên hệ Recruiter lưu qua /auth/me/recruiter-contact |
-| Đăng nhập, refresh, logout | Tái sử dụng phiên trong bộ nhớ; refresh rotation; điều hướng đúng Candidate/Recruiter/Admin |
+| Đăng nhập, refresh, logout | Access/refresh nằm trong HttpOnly cookie; bộ nhớ chỉ giữ thông tin user; refresh rotation; điều hướng đúng Candidate/Recruiter/Admin |
 | Google | Cổng Candidate/Recruiter gửi role ngay từ /auth/google; Auth giữ role theo state và exchange code trong Redis. /auth/callback xóa fragment và tự exchange một lần, không có bước chọn vai trò; tài khoản khác role nhận lỗi và không bị đổi quyền |
 | Quên/đặt lại mật khẩu | /forgot-password, /reset-password; thông báo quên mật khẩu chung; token không lưu trên thiết bị |
 | Hồ sơ | /candidate/profile: thông tin chung, liên kết, avatar, CRUD học vấn/kinh nghiệm/kỹ năng/chứng chỉ/dự án, % hoàn thiện |
@@ -32,13 +32,13 @@ Backend Auth/Profile/Media đã có nhiều nghiệp vụ và kiểm thử trư�
 
 ## Giới hạn tích hợp còn lại
 
-- Cập nhật 16/10/2026 (GMT+7): Gmail SMTP đã kiểm thử thật qua đăng ký Candidate/Recruiter và đặt lại mật khẩu. Cloudinary đã có đủ sáu signed preset; CV và avatar đã qua upload/confirm/lưu/đọc/xóa với provider thật trên Docker localhost. Xem [báo cáo Cloudinary](person1-cloudinary-2026-10-16.md). Google đã cấu hình và kiểm tra chuyển hướng, chưa nghiệm thu thao tác đăng nhập tương tác với Google; các giới hạn khác ở [báo cáo hồi quy](person1-regression-2026-10-15.md) vẫn áp dụng.
+- Cập nhật 16/10/2026 (GMT+7): Gmail SMTP đã kiểm thử thật qua đăng ký Candidate/Recruiter và đặt lại mật khẩu. Cloudinary đã có đủ sáu signed preset; CV và avatar đã qua upload/confirm/lưu/đọc/xóa với provider thật trên Docker localhost. Xem [báo cáo Cloudinary](person1-cloudinary-2026-10-16.md). Chủ dự án đã trực tiếp xác nhận đăng nhập Google thành công và vào đúng vai trò; state/binder/cookie của hai cổng được kiểm thử tự động. Kết quả mở rộng ở [báo cáo toàn hệ thống](system-regression-2026-10-16.md).
 - Job/Company chưa có API Admin gỡ đối tượng đã công khai. Báo cáo các loại này được tiếp nhận nhưng không giả lập RESOLVED; cần hợp đồng từ Người 2.
 - UNKNOWN/PROCESSING sau remote timeout cần đối soát vận hành; chưa có tự động phục hồi tác vụ quản trị xuyên service.
 - PostgreSQL Compose hiện tách schema trong một cluster, chưa chuyển thành database/container/credential độc lập như kiến trúc đích.
 - Mô hình Auth hiện cho access token cũ tồn tại tối đa TTL 15 phút sau khóa. Admin kiểm tra trạng thái bền vững qua /auth/me trước thao tác; các service khác giữ hợp đồng stateless hiện có.
 - Không có API tự đăng ký/provisioning Admin. Trong lần kiểm thử 15/10/2026, đã tạo Admin thử riêng tại Docker local theo xác nhận của chủ dự án; không đổi role tài khoản hiện hữu. Credential thử nằm trong `.cache` được Git bỏ qua.
-- Chưa xác nhận toàn bộ 11 service và ba luồng E2E liên người 1/2/3 trên môi trường thật.
+- Kiểm thử mở rộng 12 API service và các luồng liên service trên Docker local ngày 16/10/2026 được ghi riêng tại [báo cáo toàn hệ thống](system-regression-2026-10-16.md); xem giới hạn phỏng vấn ONLINE, AI Assistant và gỡ nội dung tại đó.
 - Chưa thay đổi phương thức quản lý key rotation/production secrets hay cơ chế phân quyền recruiter của Profile vốn do hợp đồng liên service hiện tại quyết định.
 
 ## Chạy

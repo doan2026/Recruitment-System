@@ -10,8 +10,9 @@
 | Job & Search | NestJS | `job` + Elasticsearch | `/jobs` |
 | Application | Spring Boot | `application` | `/applications` |
 | Interview | Spring Boot | `interview` | `/interviews` |
-| Chat | Node + Socket.IO | MongoDB | `/chat` |
-| Notification | NestJS | `notification` | `/notifications` |
+| Chat | Go + WebSocket | PostgreSQL `public` (owned chat tables) | `/chat` |
+| Notification | Go + SSE | PostgreSQL `public` (owned notification tables) | `/notifications` |
+| Video | Go + LiveKit | PostgreSQL `public` (owned video tables) | `/calls` |
 | Media | NestJS | `media` + Cloudinary | `/files` |
 | Admin | Spring Boot | `admin` | `/admin` |
 | AI | FastAPI | `ai` + pgvector | `/ai` |
@@ -34,6 +35,30 @@ Google sign-in binds the Candidate/Recruiter portal to the Redis OAuth state and
 one-time exchange code. The callback completes automatically without selecting a
 role. Existing linked users must match that portal; OAuth never changes a stored
 account role or auto-links a matching email.
+
+The Next.js cookie proxy establishes HttpOnly access/refresh cookies for password,
+OTP verification and Google exchange alike. Browser JSON contains only `user`;
+the refresh credential stays under `/api/auth-cookie`. Google exchange preserves
+the canonical `/auth/google/exchange` path so the one-time HttpOnly binder reaches
+Auth. Session hydration cannot invalidate an in-flight Google exchange or replace
+a newer login with an earlier response.
+
+The gateway serves both `/applications` and `/applications/` directly. This avoids
+an nginx slash redirect cycling with Next.js trailing-slash canonicalization.
+
+## Interview and video scope
+
+Interview currently implements offline scheduling and scoped query/calendar APIs.
+An incoming timestamp retains its supplied offset during Jackson deserialization;
+the domain checks that offset against the IANA zone, including GMT+7. The frontend
+uses `Asia/Ho_Chi_Minh`, displays GMT+7 and reuses the same request ID for a manual
+retry of the same scheduling submission.
+
+Video owns separate call IDs and LiveKit room credentials for chat calls. Only
+invited participants can join or reject; rejected/ended calls cannot issue new join
+tokens and do not appear in active-call lists. There is no implemented binding
+between an Interview ID and a Video call ID. Scheduled ONLINE interviews remain
+unavailable rather than returning a fabricated room URL.
 
 The internal `/auth/users` directory uses a typed DTO and follows
 `AdminUserDirectoryController → AdminUserDirectoryService → AdminUserDirectoryRepository`.
@@ -105,10 +130,13 @@ is not implemented yet.
 | Topic | Producer | Consumer | Contract status |
 | --- | --- | --- | --- |
 | `job-events` | Job & Search | AI, Admin | Exact 16-field snake_case v1; transactional outbox |
-| `cv-events` | Profile | AI | Pending |
+| `cv-events` | Profile | AI | Profile private v1; transactional outbox, no signed download URL in events |
 | `application-events` | Application | Notification, Admin | Topic-specific contract; verify before new consumers |
-| `interview-events` | Interview | Notification | Pending |
-| `chat-events` | Chat | Notification | Pending |
+| `interview-events` | Interview | Notification | Exact 15-field SCHEDULED v1; transactional outbox; see Interview README |
+| `chat-events` | Chat | Notification | Implemented Go producer/consumer contract; verified with browser SSE |
 
-Kafka is the only asynchronous cross-service transport. Redis is reserved for
-cache, OTP/refresh-session data, BullMQ, and Socket.IO scaling.
+Kafka is the asynchronous cross-service transport. Chat delivers browser messages
+over WebSocket and Notification pushes inbox updates over SSE. Redis supports Auth
+OTP/OAuth/session data and the services' configured cache/queue mechanisms; Go Chat
+does not use the former Socket.IO runtime. MongoDB remains in local Compose for
+compatibility and is not the current Go Chat data store.
