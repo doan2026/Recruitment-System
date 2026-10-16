@@ -9,11 +9,11 @@ import { signOut } from "../lib/authSession";
 import type { CandidateProfile } from "../lib/person1Api";
 
 const links = [
-  { label: "Dashboard", href: "/candidate/profile", icon: "▦" },
+  { label: "Dashboard", href: "/candidate/dashboard", icon: "▦" },
   { label: "Tìm việc", href: "/candidate/jobs", icon: "⌕" },
   { label: "Việc làm đã lưu", href: "/candidate/bookmarks", icon: "♡" },
   { label: "Đơn ứng tuyển", href: "/candidate/applications", icon: "▤" },
-  { label: "Lịch phỏng vấn", href: "/candidate/applications", icon: "▣" },
+  { label: "Lịch phỏng vấn", href: "/candidate/interviews", icon: "▣" },
   { label: "Hồ sơ cá nhân", href: "/candidate/profile", icon: "♙" },
   { label: "CV Online", href: "/candidate/profile/cvs/builder", icon: "▧" },
   { label: "AI Assistant", href: "/ai", icon: "✧" },
@@ -63,7 +63,7 @@ export function CandidateWorkspace({ children }: { children: ReactNode }) {
     <div className="candidate-workspace-main">
       <header className="candidate-topbar">
         <nav aria-label="Điều hướng CareerHub"><Link href="/">Trang chủ</Link><Link href="/candidate/jobs">Việc làm</Link><Link href="/candidate/profile/cvs/builder">CV Online</Link><Link href="/companies">Công ty</Link></nav>
-        <div className="candidate-top-actions"><Link className="candidate-icon-link" href="/ai" aria-label="Tin nhắn và trợ lý">▤</Link>{account ? <><span className="candidate-top-name">{displayName}</span><button className="candidate-signout" type="button" disabled={logoutBusy} onClick={() => void logout()}>{logoutBusy ? "Đang thoát…" : "Đăng xuất"}</button></> : <Link className="candidate-signout" href="/login">Đăng nhập</Link>}</div>
+        <div className="candidate-top-actions"><Link className="candidate-icon-link" href="/messages" aria-label="Tin nhắn">▤</Link>{account ? <><span className="candidate-top-name">{displayName}</span><button className="candidate-signout" type="button" disabled={logoutBusy} onClick={() => void logout()}>{logoutBusy ? "Đang thoát…" : "Đăng xuất"}</button></> : <Link className="candidate-signout" href="/login">Đăng nhập</Link>}</div>
       </header>
       {logoutError ? <p className="notice notice-warning" role="alert">{logoutError}</p> : null}
       <div className="candidate-content">{children}</div>

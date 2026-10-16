@@ -25,7 +25,7 @@ const DEFAULT_FILTERS: RecruiterApplicationFilterDraft = {
   size: 20,
 };
 
-export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
+export function RecruiterApplicationPipeline({ jobId }: { jobId?: string }) {
   const [applications, setApplications] = useState<CandidateApplication[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -335,6 +335,8 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId: string }) {
                 </div>
               ) : null}
               <div className="btn-group">
+                <Link className="btn" href={`/recruiter/applications/${application.id}`}>Chi tiết hồ sơ</Link>
+                {["REVIEWING", "INTERVIEW"].includes(application.status) && <Link className="btn" href={`/recruiter/applications/${application.id}/interview`}>Đặt lịch phỏng vấn</Link>}
                 <button className="btn" type="button" disabled={pendingApplicationId !== null || matchState?.polling} aria-busy={pending && !matchState} onClick={() => { void refreshMatch(application); }}>
                   {pending && !matchState ? "Đang tính điểm…" : matchState?.polling ? "Đang chờ AI…" : "Làm mới match score"}
                 </button>

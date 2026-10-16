@@ -20,6 +20,7 @@ export function RecruiterShell({ children }: { children: ReactNode }) {
           <nav className="stack" style={{ gap: '8px' }}>
             <Link href="/recruiter/dashboard" className="sidebar-link">Dashboard</Link>
             <Link href="/recruiter/jobs" className="sidebar-link">Quản lý tin tuyển dụng</Link>
+            <Link href="/recruiter/applications" className="sidebar-link">Hồ sơ ứng tuyển</Link>
             <Link href="/recruiter/candidate-recommendations" className="sidebar-link">Tìm kiếm ứng viên</Link>
             <Link href="/recruiter/company" className="sidebar-link">Hồ sơ công ty</Link>
             <Link href="/messages" className="sidebar-link">Tin nhắn</Link>

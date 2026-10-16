@@ -11,6 +11,7 @@
   "include": [
     "types/pdfmake.d.ts",
     "lib/person1Flow.test.ts",
+    "lib/interviewApi.test.ts",
     "lib/apiClientCore.ts",
     "lib/applicationApiRoutes.ts",
     "lib/aiChatSession.ts",
