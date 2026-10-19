@@ -592,8 +592,6 @@ services:
     image: ${IMAGE_PREFIX}-ai-worker:${TAG}
     env_file:
       - ./env/ai-service.env
-    environment:
-      EMBEDDING_MODEL_LOCAL_FILES_ONLY: ${EMBEDDING_MODEL_LOCAL_FILES_ONLY:-false}
     logging: *logging
     restart: unless-stopped
     depends_on:
@@ -611,7 +609,6 @@ services:
     env_file:
       - ./env/ai-service.env
     environment:
-      EMBEDDING_MODEL_LOCAL_FILES_ONLY: ${EMBEDDING_MODEL_LOCAL_FILES_ONLY:-false}
       MEDIA_SERVICE_URL: http://media-service:3000
       MEDIA_INTERNAL_API_KEY: ${MEDIA_INTERNAL_API_KEY_AI:?MEDIA_INTERNAL_API_KEY_AI is required}
       KAFKA_CV_TOPIC: ${KAFKA_CV_TOPIC:-cv-events}
