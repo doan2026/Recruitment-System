@@ -25,3 +25,4 @@ service-account*.json
 .vscode/
 .cache/
 **/.gocache/
+.env-prod
