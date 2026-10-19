@@ -1,5 +1,7 @@
 "use client";
 
+import { applicationStatusLabel } from "@/lib/recruitmentLabels";
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
@@ -33,7 +35,7 @@ export default function CandidateApplicationDetailPage({ params }: { params: { a
     <main>
       <PageHeader title={application.jobTitle} description="Theo dõi tiến trình và phản hồi từ nhà tuyển dụng." action={<Link className="btn" href="/candidate/applications">Về hồ sơ ứng tuyển</Link>} />
       <section className="panel">
-        <div className="section-head"><h2>Thông tin ứng tuyển</h2><StatusBadge tone={application.status === "HIRED" ? "success" : "info"}>{application.status}</StatusBadge></div>
+        <div className="section-head"><h2>Thông tin ứng tuyển</h2><StatusBadge tone={application.status === "HIRED" ? "success" : "info"}>{applicationStatusLabel(application.status)}</StatusBadge></div>
         <p>Nộp ngày <time dateTime={application.createdAt}>{new Date(application.createdAt).toLocaleString("vi-VN")}</time></p>
         {application.coverLetter ? <div><h3>Thư ứng tuyển</h3><p style={{ whiteSpace: "pre-wrap" }}>{application.coverLetter}</p></div> : null}
         <div className="btn-group">
@@ -48,7 +50,7 @@ export default function CandidateApplicationDetailPage({ params }: { params: { a
           <ol className="stack">
             {application.timeline.map((entry, index) => (
               <li key={`${entry.changedAt}-${index}`}>
-                <strong>{entry.fromStatus ? `${entry.fromStatus} → ` : ""}{entry.toStatus}</strong>
+                <strong>{entry.fromStatus ? `${applicationStatusLabel(entry.fromStatus)} → ` : ""}{applicationStatusLabel(entry.toStatus)}</strong>
                 <p className="help"><time dateTime={entry.changedAt}>{new Date(entry.changedAt).toLocaleString("vi-VN")}</time></p>
                 {entry.note ? <p style={{ whiteSpace: "pre-wrap" }}>{entry.note}</p> : null}
               </li>

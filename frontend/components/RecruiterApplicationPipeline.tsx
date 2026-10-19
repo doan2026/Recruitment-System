@@ -1,5 +1,7 @@
 "use client";
 
+import { applicationStatusLabel } from "@/lib/recruitmentLabels";
+
 import Link from "next/link";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { ApiClientError, toUserMessage } from "../lib/apiClient";
@@ -166,7 +168,7 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId?: string }) {
       return;
     }
     if (application.version === null) {
-      setActionError("Response pipeline thiếu phiên bản Application. Hãy tải lại danh sách.");
+      setActionError("Chưa xác định được bản cập nhật mới nhất của hồ sơ. Hãy tải lại danh sách.");
       return;
     }
     setPendingApplicationId(application.id);
@@ -185,11 +187,11 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId?: string }) {
         version: response.data.version,
         notes: targetStatus === "REJECTED" ? reason?.trim() : item.notes,
       } : item));
-      setActionStatus(`Đã chuyển hồ sơ sang ${response.data.toStatus}.`);
+      setActionStatus(`Đã chuyển hồ sơ sang ${applicationStatusLabel(response.data.toStatus)}.`);
       setReloadKey((value) => value + 1);
     } catch (requestError: unknown) {
       const recovered = await openApplicationConflict(requestError, application, {
-        intent: `Chuyển hồ sơ sang ${targetStatus}`,
+        intent: `Chuyển hồ sơ sang ${applicationStatusLabel(targetStatus)}`,
         targetStatus,
         note: targetStatus === "REJECTED" ? reason?.trim() ?? "" : "",
         applicationVersion: application.version,
@@ -203,7 +205,7 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId?: string }) {
   async function refreshMatch(application: CandidateApplication, autoPollOnce = true) {
     if (pendingApplicationId) return;
     if (application.version === null) {
-      setActionError("Response pipeline thiếu phiên bản Application. Hãy tải lại danh sách.");
+      setActionError("Chưa xác định được bản cập nhật mới nhất của hồ sơ. Hãy tải lại danh sách.");
       return;
     }
     const scheduled = matchPollTimersRef.current.get(application.id);
@@ -224,7 +226,7 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId?: string }) {
         matchScore: response.data.matchScore,
         version: response.data.version,
       } : item));
-      setActionStatus(`Đã cập nhật match score cho ${application.candidateName || "ứng viên"}.`);
+      setActionStatus(`Đã cập nhật điểm phù hợp cho ${application.candidateName || "ứng viên"}.`);
     } catch (requestError: unknown) {
       const notReady = aiMatchNotReadyView(requestError);
       if (notReady) {
@@ -243,7 +245,7 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId?: string }) {
         }
       } else {
         const recovered = await openApplicationConflict(requestError, application, {
-          intent: "Làm mới match score",
+          intent: "Làm mới điểm phù hợp",
           targetStatus: application.status,
           note: "",
           applicationVersion: application.version,
@@ -272,15 +274,15 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId?: string }) {
   return (
     <section className="panel">
       <div className="section-head row-between">
-        <div><h2>Pipeline hồ sơ</h2><p className="help">Theo dõi hồ sơ, liên hệ ứng viên và chuyển sang bước tuyển dụng tiếp theo.</p></div>
+        <div><h2>Tiến trình hồ sơ</h2><p className="help">Theo dõi hồ sơ, liên hệ ứng viên và chuyển sang bước tuyển dụng tiếp theo.</p></div>
         {total ? <span className="badge">{total} hồ sơ</span> : null}
       </div>
       <form className="toolbar application-filter-toolbar" aria-label="Bộ lọc hồ sơ ứng tuyển" onSubmit={applyFilters} noValidate>
-        <div className="field"><label className="label" htmlFor="application-status-filter">Trạng thái</label><select id="application-status-filter" className="select" value={filterDraft.status} onChange={(event) => setFilterDraft((current) => ({ ...current, status: event.target.value as RecruiterApplicationFilterDraft["status"] }))}><option value="ALL">Tất cả</option><option value="APPLIED">APPLIED</option><option value="REVIEWING">REVIEWING</option><option value="INTERVIEW">INTERVIEW</option><option value="OFFER">OFFER</option><option value="HIRED">HIRED</option><option value="REJECTED">REJECTED</option><option value="WITHDRAWN">WITHDRAWN</option></select></div>
+        <div className="field"><label className="label" htmlFor="application-status-filter">Trạng thái</label><select id="application-status-filter" className="select" value={filterDraft.status} onChange={(event) => setFilterDraft((current) => ({ ...current, status: event.target.value as RecruiterApplicationFilterDraft["status"] }))}><option value="ALL">Tất cả</option><option value="APPLIED">{applicationStatusLabel("APPLIED")}</option><option value="REVIEWING">{applicationStatusLabel("REVIEWING")}</option><option value="INTERVIEW">{applicationStatusLabel("INTERVIEW")}</option><option value="OFFER">{applicationStatusLabel("OFFER")}</option><option value="HIRED">{applicationStatusLabel("HIRED")}</option><option value="REJECTED">{applicationStatusLabel("REJECTED")}</option><option value="WITHDRAWN">{applicationStatusLabel("WITHDRAWN")}</option></select></div>
         <div className="field"><label className="label" htmlFor="application-from">Nộp từ ngày</label><input id="application-from" className="input" type="date" value={filterDraft.appliedFrom} onChange={(event) => setFilterDraft((current) => ({ ...current, appliedFrom: event.target.value }))} /></div>
         <div className="field"><label className="label" htmlFor="application-to">Nộp đến ngày</label><input id="application-to" className="input" type="date" value={filterDraft.appliedTo} onChange={(event) => setFilterDraft((current) => ({ ...current, appliedTo: event.target.value }))} /></div>
         <div className="field"><label className="label" htmlFor="application-skills">Kỹ năng</label><input id="application-skills" className="input" value={filterDraft.skills} placeholder="React, Java" onChange={(event) => setFilterDraft((current) => ({ ...current, skills: event.target.value }))} /></div>
-        <div className="field"><label className="label" htmlFor="application-sort">Sắp xếp</label><select id="application-sort" className="select" value={filterDraft.sort} onChange={(event) => setFilterDraft((current) => ({ ...current, sort: event.target.value as RecruiterApplicationFilterDraft["sort"] }))}><option value="APPLIED_AT_DESC">Mới nộp trước</option><option value="APPLIED_AT_ASC">Cũ nộp trước</option><option value="MATCH_SCORE_DESC">Match score cao</option></select></div>
+        <div className="field"><label className="label" htmlFor="application-sort">Sắp xếp</label><select id="application-sort" className="select" value={filterDraft.sort} onChange={(event) => setFilterDraft((current) => ({ ...current, sort: event.target.value as RecruiterApplicationFilterDraft["sort"] }))}><option value="APPLIED_AT_DESC">Mới nộp trước</option><option value="APPLIED_AT_ASC">Cũ nộp trước</option><option value="MATCH_SCORE_DESC">Điểm phù hợp cao</option></select></div>
         <div className="field"><label className="label" htmlFor="application-size">Số dòng</label><select id="application-size" className="select" value={filterDraft.size} onChange={(event) => setFilterDraft((current) => ({ ...current, size: Number(event.target.value) }))}><option value="10">10</option><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></div>
         <div className="btn-group"><button className="btn btn-primary" type="submit" disabled={loading}>Áp dụng</button><button className="btn" type="button" disabled={loading} onClick={resetFilters}>Xóa lọc</button></div>
       </form>
@@ -293,19 +295,19 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId?: string }) {
           onKeepDraft={() => {
             if (conflict.localDraft.note) setRejectionReasons((current) => ({ ...current, [conflict.server.id]: conflict.localDraft.note }));
             setConflict(null);
-            setActionStatus("Đã giữ ý định trên bản Application mới nhất. Hãy kiểm tra trạng thái rồi chủ động chọn lại thao tác; CareerHub chưa tự gửi lại.");
+            setActionStatus("Đã giữ nội dung bạn nhập trên hồ sơ mới nhất. Hãy kiểm tra trạng thái rồi chọn lại thao tác; CareerHub chưa tự gửi lại.");
           }}
           onUseServer={() => {
             setRejectionReasons((current) => { const next = { ...current }; delete next[conflict.server.id]; return next; });
             setConflict(null);
-            setActionStatus("Đã dùng trạng thái Application mới nhất từ server.");
+            setActionStatus("Đã cập nhật hồ sơ theo trạng thái mới nhất.");
           }}
         />
       ) : null}
       {actionStatus ? <p className="notice notice-success" role="status">{actionStatus}</p> : null}
       {actionError ? <p className="notice notice-danger" role="alert"><strong>Chưa hoàn tất thao tác.</strong> {actionError}</p> : null}
       {loadError ? <ErrorState message={loadError} onRetry={() => setReloadKey((value) => value + 1)} /> : null}
-      {loading ? <LoadingState label="Đang tải pipeline hồ sơ" /> : null}
+      {loading ? <LoadingState label="Đang tải hồ sơ ứng tuyển" /> : null}
       {!loading && !loadError && applications.length === 0 ? <EmptyState title="Chưa có hồ sơ ứng tuyển" description="Hồ sơ mới sẽ xuất hiện tại đây sau khi ứng viên nộp thành công." /> : null}
       <div className="stack">
         {applications.map((application) => {
@@ -316,10 +318,10 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId?: string }) {
           return (
             <article className="card application-pipeline-card" key={application.id}>
               <div className="section-head row-between">
-                <div><strong>{application.candidateName || "Ứng viên"}</strong><p className="help">Nộp ngày {new Date(application.createdAt).toLocaleDateString("vi-VN")} · Version {application.version ?? "thiếu"}</p></div>
-                <StatusBadge tone={application.status === "HIRED" ? "success" : application.status === "REJECTED" || application.status === "WITHDRAWN" ? "danger" : "warning"}>{application.status}</StatusBadge>
+                <div><strong>{application.candidateName || "Ứng viên"}</strong><p className="help">Nộp ngày {new Date(application.createdAt).toLocaleDateString("vi-VN")}</p></div>
+                <StatusBadge tone={application.status === "HIRED" ? "success" : application.status === "REJECTED" || application.status === "WITHDRAWN" ? "danger" : "warning"}>{applicationStatusLabel(application.status)}</StatusBadge>
               </div>
-              <p className="help">Match score: {application.matchScore ?? "chưa sẵn sàng"}</p>
+              <p className="help">Điểm phù hợp: {application.matchScore ?? "chưa sẵn sàng"}</p>
               <RecruiterCvAccess applicationId={application.id} />
               <RecruiterEvaluation applicationId={application.id} />
               {matchState ? (
@@ -338,7 +340,7 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId?: string }) {
                 <Link className="btn" href={`/recruiter/applications/${application.id}`}>Chi tiết hồ sơ</Link>
                 {["REVIEWING", "INTERVIEW"].includes(application.status) && <Link className="btn" href={`/recruiter/applications/${application.id}/interview`}>Đặt lịch phỏng vấn</Link>}
                 <button className="btn" type="button" disabled={pendingApplicationId !== null || matchState?.polling} aria-busy={pending && !matchState} onClick={() => { void refreshMatch(application); }}>
-                  {pending && !matchState ? "Đang tính điểm…" : matchState?.polling ? "Đang chờ AI…" : "Làm mới match score"}
+                  {pending && !matchState ? "Đang tính điểm…" : matchState?.polling ? "Đang chờ AI…" : "Làm mới điểm phù hợp"}
                 </button>
                 {actions.map((action) => action.kind === "SEND_OFFER" ? (
                   <Link key={action.kind} className="btn btn-primary" href={`/recruiter/applications/${application.id}/offer`}>{action.label}</Link>
@@ -351,7 +353,7 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId?: string }) {
                   </button>
                 ) : null}
               </div>
-              {actions.length === 0 ? <p className="status-line">Không còn recruiter action hợp lệ ở trạng thái này.</p> : null}
+              {actions.length === 0 ? <p className="status-line">Hồ sơ đã kết thúc bước xét tuyển. Bạn vẫn có thể xem lại thông tin và trao đổi với ứng viên.</p> : null}
             </article>
           );
         })}

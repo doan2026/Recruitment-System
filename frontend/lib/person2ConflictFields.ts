@@ -1,3 +1,4 @@
+import { applicationStatusLabel } from "./recruitmentLabels";
 import type { ConflictFieldDefinition } from "./conflictRecovery";
 import type { Job, CandidateApplication } from "./demoData";
 import type { RecruiterJobFormValues } from "./jobForm";
@@ -28,7 +29,7 @@ export interface ApplicationConflictDraft {
 
 export const APPLICATION_CONFLICT_FIELDS: readonly ConflictFieldDefinition<ApplicationConflictDraft, CandidateApplication>[] = [
   { key: "intent", label: "Thao tác của bạn", localValue: (draft) => draft.intent, serverValue: () => "Chưa áp dụng" },
-  { key: "status", label: "Trạng thái", localValue: (draft) => draft.targetStatus, serverValue: (application) => application.status },
+  { key: "status", label: "Trạng thái", localValue: (draft) => applicationStatusLabel(draft.targetStatus), serverValue: (application) => applicationStatusLabel(application.status) },
   { key: "version", label: "Phiên bản", localValue: (draft) => draft.applicationVersion, serverValue: (application) => application.version },
   { key: "note", label: "Ghi chú", localValue: (draft) => draft.note, serverValue: (application) => application.notes },
 ];

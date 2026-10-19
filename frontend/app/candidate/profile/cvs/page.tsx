@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { EmptyState, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
 import { useEffect, useState, type FormEvent } from "react";
 import { requestApi } from "../../../../lib/apiClient";
 import {
@@ -124,29 +125,13 @@ export default function CvsPage() {
   }
   return (
     <main className="form-stack">
-      <div className="page-header">
-        <div>
-          <p className="eyebrow">HỒ SƠ · CV</p>
-          <h1>CV của tôi</h1>
-          <p>{cvs.length}/5 CV đang hoạt động</p>
-        </div>
-        <div className="btn-group">
-          <Link className="btn" href="/candidate/profile">
-            Hồ sơ
-          </Link>
-          <Link
-            className="btn btn-primary"
-            href="/candidate/profile/cvs/builder"
-          >
-            Tạo CV trực tuyến
-          </Link>
-        </div>
-      </div>
+      <PageHeader eyebrow="ỨNG VIÊN · CV" title="CV của tôi" description={`${cvs.length}/5 CV đang hoạt động. Chọn CV mặc định hoặc cập nhật nội dung cho từng vị trí.`}
+        action={<div className="btn-group"><Link className="btn" href="/candidate/profile">Hồ sơ</Link><Link className="btn btn-primary" href="/candidate/profile/cvs/builder">Tạo CV trực tuyến</Link></div>} />
       <form className="card form-stack" noValidate onSubmit={upload}>
-        <h2>Tải CV PDF</h2>
+        <div className="section-head"><div><h2>Tải CV PDF</h2><p className="help">Lưu bản PDF để sử dụng khi ứng tuyển.</p></div></div>
         <fieldset
           disabled={pending || loading || cvs.length >= 5}
-          className="form-stack person1-fieldset"
+          className="form-grid person1-fieldset"
         >
           <label className="field">
             Tên CV
@@ -170,9 +155,9 @@ export default function CvsPage() {
               }}
             />
           </label>
-          <button className="btn btn-primary" disabled={!file}>
+          <div className="btn-group span-2"><button className="btn btn-primary" disabled={!file}>
             {pending ? "Đang lưu…" : "Tải lên và lưu CV"}
-          </button>
+          </button></div>
         </fieldset>
         {cvs.length >= 5 ? (
           <p className="notice notice-warning">
@@ -181,17 +166,13 @@ export default function CvsPage() {
         ) : null}
       </form>
       {loading ? (
-        <p role="status">Đang tải CV…</p>
+        <LoadingState label="Đang tải CV…" />
       ) : cvs.length ? (
         <section className="person1-grid">
           {cvs.map((cv) => (
             <article className="card form-stack" key={cv.id}>
-              <h2>{cv.title}</h2>
-              <p>
-                {cv.type === "ONLINE" ? "CV trực tuyến" : "CV tải lên"}
-                {cv.isDefault ? " · Mặc định" : ""}
-              </p>
-              <p>{new Date(cv.createdAt).toLocaleDateString("vi-VN")}</p>
+              <div className="section-head"><h2>{cv.title}</h2>{cv.isDefault && <StatusBadge tone="success">Mặc định</StatusBadge>}</div>
+              <div className="chip-list"><StatusBadge tone="neutral">{cv.type === "ONLINE" ? "CV trực tuyến" : "CV tải lên"}</StatusBadge><span className="muted">Tạo ngày {new Date(cv.createdAt).toLocaleDateString("vi-VN")}</span></div>
               <div className="btn-group">
                 <button
                   className="btn"
@@ -239,10 +220,7 @@ export default function CvsPage() {
           ))}
         </section>
       ) : (
-        <section className="card">
-          <h2>Chưa có CV</h2>
-          <p>Tải PDF hoặc tạo CV trực tuyến để bắt đầu ứng tuyển.</p>
-        </section>
+        <section className="card"><EmptyState title="Chưa có CV" description="Tải PDF hoặc tạo CV trực tuyến để bắt đầu ứng tuyển." /></section>
       )}
       {rename ? (
         <form

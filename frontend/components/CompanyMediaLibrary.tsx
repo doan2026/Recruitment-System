@@ -64,14 +64,14 @@ export function CompanyMediaLibrary({ company, onCompanyChange }: {
   return (
     <section className="panel">
       <div className="section-head">
-        <div><h2>Thư viện công ty</h2><p className="help">Kéo thả hoặc dùng nút để đổi thứ tự. Lưu sẽ thay thế toàn bộ gallery.</p></div>
+        <div><h2>Thư viện công ty</h2><p className="help">Kéo thả hoặc dùng nút để đổi thứ tự, sau đó lưu thư viện để cập nhật hồ sơ.</p></div>
         <span className="help">{images}/10 ảnh · {videos}/1 video</span>
       </div>
       <div className="card media-library-logo">
         <div><strong>Logo chính</strong><p className="help">{company.media.logo?.fileId ?? "Chưa có logo"}</p></div>
         {company.media.logo ? <button className="btn btn-danger" type="button" disabled={pending} onClick={() => setRemoveLogo((value) => !value)}>{removeLogo ? "Giữ logo" : "Xóa logo khi lưu"}</button> : null}
       </div>
-      <div className="grid-3 media-library-grid" aria-label="Media có thể sắp xếp">
+      <div className="grid-3 media-library-grid" aria-label="Hình ảnh và video có thể sắp xếp">
         {items.map((item, index) => (
           <article
             className="card media-library-item"

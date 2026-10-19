@@ -34,7 +34,7 @@ export function CompanyMemberInvitation({ companyId }: { companyId: string }) {
       const response = await inviteCompanyMember(companyId, normalizedEmail);
       setInvitation(response.data);
       setEmail(response.data.email);
-      setStatus("Đã tạo lời mời. Hãy sao chép token trước khi rời trang.");
+      setStatus("Đã tạo lời mời. Hãy sao chép mã lời mời trước khi rời trang.");
       window.setTimeout(() => tokenRef.current?.focus(), 0);
     } catch (reason: unknown) {
       setRequestError(toUserMessage(reason));
@@ -49,16 +49,16 @@ export function CompanyMemberInvitation({ companyId }: { companyId: string }) {
     try {
       if (!navigator.clipboard) throw new Error("Clipboard unavailable");
       await navigator.clipboard.writeText(invitation.invitationToken);
-      setStatus("Đã sao chép token lời mời.");
+      setStatus("Đã sao chép mã lời mời.");
     } catch {
-      setStatus("Không thể tự sao chép. Token đã được chọn; hãy nhấn Ctrl+C hoặc Cmd+C.");
+      setStatus("Không thể tự sao chép. Mã lời mời đã được chọn; hãy nhấn Ctrl+C hoặc Cmd+C.");
     }
   }
 
   function dismissToken() {
     setInvitation(null);
     setEmail("");
-    setStatus("Đã đóng token. Hệ thống không thể hiển thị lại token này.");
+    setStatus("Đã đóng mã lời mời. Hệ thống không thể hiển thị lại mã này.");
     window.setTimeout(() => emailRef.current?.focus(), 0);
   }
 
@@ -66,9 +66,9 @@ export function CompanyMemberInvitation({ companyId }: { companyId: string }) {
     <section className="panel company-invitation" aria-labelledby="company-invitation-title">
       <div className="section-head">
         <div>
-          <p className="eyebrow">OWNER · THÀNH VIÊN</p>
+          <p className="eyebrow">MỜI THÀNH VIÊN</p>
           <h2 id="company-invitation-title">Mời nhà tuyển dụng</h2>
-          <p className="help">Backend không tự gửi email. OWNER cần sao chép token và gửi qua kênh tin cậy.</p>
+          <p className="help">Chủ sở hữu cần sao chép mã lời mời và gửi riêng cho người nhận. Hệ thống chưa tự gửi email.</p>
         </div>
         <span className="badge">Hiệu lực 7 ngày</span>
       </div>
@@ -79,11 +79,11 @@ export function CompanyMemberInvitation({ companyId }: { companyId: string }) {
       {invitation ? (
         <div className="invitation-token-panel" aria-live="polite">
           <div className="notice notice-warning">
-            <strong>Token chỉ hiển thị trong lần này</strong>
-            <p>Đóng hoặc tải lại trang sẽ không lấy lại được token. Mời lại cùng email sẽ vô hiệu token cũ.</p>
+            <strong>Mã lời mời chỉ hiển thị trong lần này</strong>
+            <p>Đóng hoặc tải lại trang sẽ không lấy lại được mã. Mời lại cùng email sẽ vô hiệu mã cũ.</p>
           </div>
           <div className="field">
-            <label className="label" htmlFor="invitation-token">Token dành cho {invitation.email}</label>
+            <label className="label" htmlFor="invitation-token">Mã lời mời dành cho {invitation.email}</label>
             <input
               ref={tokenRef}
               id="invitation-token"
@@ -97,8 +97,8 @@ export function CompanyMemberInvitation({ companyId }: { companyId: string }) {
             <span className="help">Hết hạn: {new Date(invitation.expiresAt).toLocaleString("vi-VN")}</span>
           </div>
           <div className="btn-group">
-            <button className="btn btn-primary" type="button" onClick={() => { void copyToken(); }}>Sao chép token</button>
-            <button className="btn" type="button" onClick={dismissToken}>Tôi đã lưu token</button>
+            <button className="btn btn-primary" type="button" onClick={() => { void copyToken(); }}>Sao chép mã lời mời</button>
+            <button className="btn" type="button" onClick={dismissToken}>Tôi đã lưu mã</button>
           </div>
         </div>
       ) : (
@@ -121,11 +121,11 @@ export function CompanyMemberInvitation({ companyId }: { companyId: string }) {
                 if (emailError) setEmailError(validateInvitationEmail(event.target.value) ?? "");
               }}
             />
-            {emailError ? <span id="member-email-error" className="form-error">{emailError}</span> : <span id="member-email-help" className="help">Nếu mời lại cùng email, token đang hoạt động sẽ bị thay thế.</span>}
+            {emailError ? <span id="member-email-error" className="form-error">{emailError}</span> : <span id="member-email-help" className="help">Nếu mời lại cùng email, mã lời mời đang hoạt động sẽ bị thay thế.</span>}
           </div>
           <div className="span-2">
             <button className="btn btn-primary" type="submit" disabled={submitting} aria-busy={submitting}>
-              {submitting ? "Đang tạo lời mời…" : "Tạo token lời mời"}
+              {submitting ? "Đang tạo lời mời…" : "Tạo mã lời mời"}
             </button>
           </div>
         </form>

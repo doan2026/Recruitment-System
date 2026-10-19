@@ -7,7 +7,7 @@ import { person1Error, person1FormError } from "../../lib/person1Api";
 import { CandidateShell } from "../../components/CandidateShell";
 import { RecruiterShell } from "../../components/RecruiterShell";
 import { PublicShell } from "../../components/PublicShell";
-import { LoadingState } from "../../components/ui";
+import { LoadingState, PageHeader } from "../../components/ui";
 
 export default function ReportPage() {
   const account = useCurrentAccount();
@@ -57,14 +57,14 @@ function ReportForm() {
   if (account === undefined) return <LoadingState label="Đang kiểm tra phiên đăng nhập" />;
   if (!account)
     return (
-      <section className="card">
-        <h1>Đăng nhập để báo cáo vi phạm</h1>
+      <section className="card stack">
+        <PageHeader title="Đăng nhập để báo cáo vi phạm" description="Đăng nhập để gửi nội dung cần quản trị viên kiểm tra." />
         <Link className="btn btn-primary" href={`/login?returnTo=${encodeURIComponent("/reports" + (typeof window !== "undefined" ? window.location.search : ""))}`}>Đăng nhập</Link>
       </section>
     );
   return (
-    <section className="form-stack">
-      <h1>Báo cáo vi phạm</h1>
+    <main className="form-stack">
+      <PageHeader eyebrow="HỖ TRỢ" title="Báo cáo vi phạm" description="Gửi thông tin cụ thể để quản trị viên kiểm tra và xử lý." />
       <form className="card form-stack" onSubmit={submit} noValidate>
         <fieldset className="person1-fieldset form-stack" disabled={pending}>
           <label className="field">
@@ -114,7 +114,7 @@ function ReportForm() {
           </button>
         </fieldset>
         {done ? (
-          <p role="status">
+          <p role="status" className="notice notice-success">
             Báo cáo đã được ghi nhận để quản trị viên xem xét.
           </p>
         ) : null}
@@ -124,6 +124,6 @@ function ReportForm() {
           </p>
         ) : null}
       </form>
-    </section>
+    </main>
   );
 }

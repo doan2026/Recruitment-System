@@ -1,5 +1,7 @@
 "use client";
 
+import { applicationStatusLabel } from "@/lib/recruitmentLabels";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -87,12 +89,12 @@ export default function CandidateApplicationsPage() {
 
   return (
     <main>
-      <PageHeader eyebrow="CANDIDATE · APPLICATIONS" title="Hồ sơ ứng tuyển của tôi" description="Theo dõi trạng thái và chỉ thực hiện những hành động hợp lệ ở bước hiện tại." />
+      <PageHeader eyebrow="HÀNH TRÌNH NGHỀ NGHIỆP" title="Hồ sơ ứng tuyển của tôi" description="Theo dõi tiến trình ứng tuyển và phản hồi mới nhất từ nhà tuyển dụng." action={<Link className="btn" href="/candidate/jobs">Tìm thêm việc</Link>} />
       {actionStatus ? <p className="notice notice-success" role="status">{actionStatus}</p> : null}
       {actionError ? <p className="notice notice-danger" role="alert"><strong>Chưa hoàn tất thao tác.</strong> {actionError}</p> : null}
       {loadError ? <ErrorState message={loadError} onRetry={() => setReloadKey((value) => value + 1)} /> : null}
       {loading ? <LoadingState label="Đang tải hồ sơ ứng tuyển" /> : null}
-      {!loading && !loadError && applications.length === 0 ? <EmptyState title="Chưa có hồ sơ ứng tuyển" description="Các công việc bạn đã ứng tuyển sẽ xuất hiện tại đây." /> : null}
+      {!loading && !loadError && applications.length === 0 ? <EmptyState title="Chưa có hồ sơ ứng tuyển" description="Các công việc bạn đã ứng tuyển sẽ xuất hiện tại đây." href="/candidate/jobs" action="Khám phá việc làm" /> : null}
       <section className="stack">
         {applications.map((application) => {
           const actions = candidateApplicationActions(application.status);
@@ -101,9 +103,9 @@ export default function CandidateApplicationsPage() {
             <article className="panel" key={application.id}>
               <div className="section-head row-between">
                 <div><strong>{application.jobTitle}</strong><p className="help">{application.companyName}</p></div>
-                <StatusBadge tone={application.status === "HIRED" ? "success" : application.status === "REJECTED" || application.status === "WITHDRAWN" ? "danger" : "warning"}>{application.status}</StatusBadge>
+                <StatusBadge tone={application.status === "HIRED" ? "success" : application.status === "REJECTED" || application.status === "WITHDRAWN" ? "danger" : "warning"}>{applicationStatusLabel(application.status)}</StatusBadge>
               </div>
-              <p className="help">Match {application.matchScore ?? "chưa có"}% · Nộp ngày {fmtDate(application.createdAt)} · Phiên bản {application.version ?? "tải khi thao tác"}</p>
+              <p className="help">Điểm phù hợp: {application.matchScore == null ? "Chưa có" : `${application.matchScore}%`} · Nộp ngày {fmtDate(application.createdAt)}</p>
               <div className="btn-group">
                 <Link className="btn" href={`/candidate/applications/${application.id}`}>Xem chi tiết và lịch sử</Link>
                 {actions.map((action) => (
@@ -112,7 +114,7 @@ export default function CandidateApplicationsPage() {
                   </button>
                 ))}
               </div>
-              {actions.length === 0 ? <p className="status-line">Hồ sơ ở trạng thái kết thúc, không còn hành động khả dụng.</p> : null}
+              {actions.length === 0 ? <p className="status-line">Quá trình xét tuyển của hồ sơ này đã kết thúc.</p> : null}
               {application.notes ? <p className="help">Ghi chú: {application.notes}</p> : null}
             </article>
           );

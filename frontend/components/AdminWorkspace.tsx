@@ -1,10 +1,10 @@
 "use client";
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { signOut } from "../lib/authSession";
 import { requestApi } from "../lib/apiClient";
 import { person1Error, saveBlob } from "../lib/person1Api";
 import { ConfirmationDialog } from "./ConfirmationDialog";
+import { EmptyState, LoadingState, Metric, PageHeader, StatusBadge } from "./ui";
 type Row = Record<string, unknown>;
 type Tab = "stats" | "companies" | "jobs" | "users" | "reports" | "audit";
 type Command = { path: string; body: unknown; label: string };
@@ -16,6 +16,14 @@ const labels: Record<Tab, string> = {
   reports: "Báo cáo vi phạm",
   audit: "Nhật ký",
 };
+const tabRoutes: Record<Tab, string> = {
+  stats: "/admin",
+  companies: "/admin/companies",
+  jobs: "/admin/jobs",
+  users: "/admin/users",
+  reports: "/admin/reports",
+  audit: "/admin?tab=audit",
+};
 const metricNames: Record<string, string> = {
   JOBS_PUBLISHED: "Tin đã đăng",
   APPLIED: "Đơn ứng tuyển",
@@ -23,18 +31,13 @@ const metricNames: Record<string, string> = {
   OFFER: "Đề nghị",
   HIRED: "Đã tuyển",
 };
-const navIcons: Record<Tab, string> = {
-  stats: "/figma/admin/375c7.svg",
-  users: "/figma/admin/af4a8.svg",
-  companies: "/figma/admin/fdcad.svg",
-  jobs: "/figma/admin/7e3f5.svg",
-  reports: "/figma/admin/55bb8.svg",
-  audit: "/figma/admin/2d2e0.svg",
-};
+const roleLabels: Record<string, string> = { CANDIDATE: "Ứng viên", RECRUITER: "Nhà tuyển dụng", ADMIN: "Quản trị viên" };
+const reportStatusLabels: Record<string, string> = { OPEN: "Mới gửi", PROCESSING: "Đang xử lý", RESOLVED: "Đã xử lý", DISMISSED: "Đã bỏ qua" };
+const targetLabels: Record<string, string> = { JOB: "Tin tuyển dụng", COMPANY: "Công ty", USER: "Tài khoản" };
 const today = () => new Date().toISOString().slice(0, 10);
 export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>(initialTab);
+  const tab = initialTab;
   const [rows, setRows] = useState<Row[]>([]);
   const [overview, setOverview] = useState<{
     daily: Row[];
@@ -61,16 +64,6 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
   const [reload, setReload] = useState(0);
   const [command, setCommand] = useState<Command | null>(null);
   const [detail, setDetail] = useState<Row | null>(null);
-  async function logout() {
-    if (pending) return;
-    setPending(true);
-    try {
-      await signOut();
-      router.replace("/admin/login");
-    } catch {
-      router.replace("/admin/login?logout=unconfirmed");
-    }
-  }
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
@@ -191,22 +184,10 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
   const maximum = Math.max(1, ...trend.map((r) => Number(r.value)));
   return (
     <main className="admin-workspace">
-      <div className="page-header">
-        <div>
-          <p className="eyebrow">QUẢN TRỊ</p>
-          <h1>{tab === "stats" ? "Tổng quan hệ thống" : labels[tab]}</h1>
-        </div>
-        <button
-          className="btn"
-          disabled={loading || pending}
-          onClick={() => setReload((n) => n + 1)}
-        >
-          Tải lại dữ liệu
-        </button>
-      </div>
-      <nav className="btn-group admin-sidebar" aria-label="Chức năng quản trị">
-        <a className="admin-brand" href="/" aria-label="CareerHub"><img src="/figma/admin/6aca2.png" alt="CareerHub" width="117" height="32" /></a>
-        <div className="admin-identity"><img src="/figma/admin/28322.png" alt="" /><span><strong>CareerHub Admin</strong><small>System Administrator</small></span></div>
+      <PageHeader eyebrow="QUẢN TRỊ" title={tab === "stats" ? "Tổng quan hệ thống" : labels[tab]}
+        description={tab === "stats" ? "Theo dõi số liệu tuyển dụng và tỷ lệ chuyển đổi trong khoảng thời gian bạn chọn." : "Xem thông tin, kiểm tra nội dung và xử lý yêu cầu trong hệ thống."}
+        action={<button className="btn" disabled={loading || pending} onClick={() => setReload((n) => n + 1)}>Tải lại dữ liệu</button>} />
+      <nav className="admin-workspace-tabs" aria-label="Chức năng quản trị">
         {(Object.keys(labels) as Tab[]).map((key) => (
           <button
             className={"btn" + (tab === key ? " btn-primary" : "")}
@@ -214,20 +195,19 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
             key={key}
             disabled={pending}
             onClick={() => {
-              setTab(key);
               setPage(1);
               setNotice("");
               setReason("");
+              router.push(tabRoutes[key]);
             }}
           >
-            <img className="admin-nav-icon" src={navIcons[key]} alt="" aria-hidden="true" />
             <span>{labels[key]}</span>
           </button>
         ))}
-        <button className="btn" type="button" disabled={pending} onClick={() => void logout()}>Đăng xuất</button>
       </nav>
       {tab === "stats" ? (
-        <section className="card form-stack">
+        <>
+        <section className="panel form-stack">
           <div className="btn-group">
             <label className="field">
               Từ ngày
@@ -267,19 +247,14 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
             Số liệu tổng hợp theo ngày UTC, cập nhật sau 00:15 hôm sau. Số người
             dùng mới và công ty mới chưa có nguồn dữ liệu.
           </p>
+        </section>
           {!loading && overview ? (
             <>
-              <div className="person1-grid">
-                {Object.entries(metricNames).map(([key, label]) => (
-                  <article className="card" key={key}>
-                    <h2>{label}</h2>
-                    <strong className="person1-number">
-                      {overview.totals[key] ?? 0}
-                    </strong>
-                  </article>
-                ))}
-              </div>
-              <h2>Đơn ứng tuyển theo ngày</h2>
+              <section className="metric-grid metric-grid-auto" aria-label="Thống kê tuyển dụng">
+                {Object.entries(metricNames).map(([key, label]) => <Metric key={key} label={label} value={String(overview.totals[key] ?? 0)} />)}
+              </section>
+              <section className="panel form-stack">
+              <div className="section-head"><h2>Đơn ứng tuyển theo ngày</h2></div>
               {trend.length ? (
                 <svg
                   viewBox="0 0 600 160"
@@ -289,7 +264,7 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
                 >
                   <polyline
                     fill="none"
-                    stroke="#006e2e"
+                    stroke="var(--primary)"
                     strokeWidth="3"
                     points={trend
                       .map(
@@ -304,7 +279,7 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
                       cx={20 + (i * 560) / Math.max(1, trend.length - 1)}
                       cy={140 - (Number(r.value) * 120) / maximum}
                       r={4}
-                      fill="#006e2e"
+                      fill="var(--primary)"
                     >
                       <title>
                         {String(r.stat_date)}: {String(r.value)}
@@ -313,9 +288,11 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
                   ))}
                 </svg>
               ) : (
-                <p>Chưa có số liệu tổng hợp trong khoảng này.</p>
+                <EmptyState title="Chưa có số liệu trong khoảng này" description="Chọn khoảng thời gian khác để xem số đơn ứng tuyển theo ngày." />
               )}
-              <h2>Tỷ lệ chuyển đổi</h2>
+              </section>
+              <section className="panel form-stack">
+              <div className="section-head"><h2>Tỷ lệ chuyển đổi</h2></div>
               <p className="help">
                 Theo nhóm ứng tuyển lần đầu trong khoảng ngày đã chọn; tính đến
                 hết ngày cuối.
@@ -356,9 +333,10 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
                   </table>
                 </div>
               </details>
+              </section>
             </>
           ) : null}
-        </section>
+        </>
       ) : null}
       {tab === "users" ? (
         <form
@@ -391,9 +369,9 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
               }}
             >
               <option value="">Tất cả</option>
-              <option>CANDIDATE</option>
-              <option>RECRUITER</option>
-              <option>ADMIN</option>
+              <option value="CANDIDATE">Ứng viên</option>
+              <option value="RECRUITER">Nhà tuyển dụng</option>
+              <option value="ADMIN">Quản trị viên</option>
             </select>
           </label>
           <label className="field">
@@ -428,7 +406,7 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
             >
               {["", "OPEN", "PROCESSING", "RESOLVED", "DISMISSED"].map((s) => (
                 <option key={s} value={s}>
-                  {s || "Tất cả"}
+                  {reportStatusLabels[s] || "Tất cả"}
                 </option>
               ))}
             </select>
@@ -445,7 +423,7 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
             >
               {["", "JOB", "COMPANY", "USER"].map((s) => (
                 <option key={s} value={s}>
-                  {s || "Tất cả"}
+                  {targetLabels[s] || "Tất cả"}
                 </option>
               ))}
             </select>
@@ -453,7 +431,7 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
         </div>
       ) : null}
       {["companies", "jobs", "users", "reports"].includes(tab) ? (
-        <label className="field">
+        <section className="card"><label className="field">
           Lý do / kết quả xử lý
           <textarea
             className="textarea resize-none"
@@ -463,10 +441,10 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
             onChange={(e) => setReason(e.target.value)}
             placeholder="Bắt buộc khi từ chối, khóa tài khoản hoặc xử lý báo cáo"
           />
-        </label>
+        </label></section>
       ) : null}
       {loading ? (
-        <p role="status">Đang tải dữ liệu…</p>
+        <LoadingState label="Đang tải dữ liệu…" />
       ) : tab !== "stats" ? (
         <section className="form-stack">
           {rows.length ? (
@@ -561,11 +539,11 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
                   ) : null}
                   {tab === "users" ? (
                     <>
-                      <p>
-                        {String(row.role)} ·{" "}
-                        {row.is_locked ? "Đã khóa" : "Đang mở"} ·{" "}
-                        {row.is_verified ? "Đã xác minh" : "Chưa xác minh"}
-                      </p>
+                      <div className="chip-list">
+                        <StatusBadge tone="neutral">{roleLabels[String(row.role)] ?? String(row.role)}</StatusBadge>
+                        <StatusBadge tone={row.is_locked ? "danger" : "success"}>{row.is_locked ? "Đã khóa" : "Đang mở"}</StatusBadge>
+                        <StatusBadge tone={row.is_verified ? "success" : "warning"}>{row.is_verified ? "Đã xác minh" : "Chưa xác minh"}</StatusBadge>
+                      </div>
                       <p>{String(row.locked_reason ?? "")}</p>
                       <button
                         className="btn"
@@ -589,10 +567,8 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
                   ) : null}
                   {tab === "reports" ? (
                     <>
-                      <p>
-                        {String(row.target_type)} · {String(row.target_id)} ·{" "}
-                        {String(row.status)}
-                      </p>
+                      <div className="chip-list"><StatusBadge tone="neutral">{targetLabels[String(row.target_type)] ?? String(row.target_type)}</StatusBadge><StatusBadge tone={row.status === "OPEN" ? "warning" : "neutral"}>{reportStatusLabels[String(row.status)] ?? String(row.status)}</StatusBadge></div>
+                      <p className="help">Mã đối tượng: {String(row.target_id)}</p>
                       <p>{String(row.description ?? "")}</p>
                       <p>{String(row.resolution ?? "")}</p>
                       {row.status === "OPEN" ? (
@@ -668,7 +644,7 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
               );
             })
           ) : (
-            <p className="card">Không có dữ liệu phù hợp.</p>
+            <section className="card"><EmptyState title="Không có dữ liệu phù hợp" description="Thử thay đổi bộ lọc hoặc tải lại để xem các cập nhật mới." /></section>
           )}
         </section>
       ) : null}

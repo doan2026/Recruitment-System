@@ -1,5 +1,7 @@
 "use client";
 
+import { companyMemberRoleLabel } from "@/lib/recruitmentLabels";
+
 import { useEffect, useState } from "react";
 import { ConfirmationDialog } from "./ConfirmationDialog";
 import { ErrorState, LoadingState, StatusBadge } from "./ui";
@@ -77,13 +79,13 @@ export function CompanyMemberManagement({ companyId, onRoleChange }: {
         setRole(safeRole);
         onRoleChange(safeRole);
         setMembers([]);
-        setStatus("Đã chuyển quyền sở hữu. Quyền OWNER của bạn đã được ẩn ngay.");
+        setStatus("Đã chuyển quyền sở hữu. Bạn hiện là thành viên của công ty.");
         try {
           const latest = await getCurrentCompanyMembership();
           setRole(latest.data.memberRole);
           onRoleChange(latest.data.memberRole);
         } catch {
-          setActionError("Đã chuyển quyền nhưng chưa tải lại được vai trò. Giao diện tiếp tục khóa quyền OWNER để an toàn.");
+          setActionError("Đã chuyển quyền nhưng chưa tải lại được vai trò. Các thao tác của chủ sở hữu hiện chưa khả dụng.");
         }
       }
       setPendingAction(null);
@@ -98,14 +100,14 @@ export function CompanyMemberManagement({ companyId, onRoleChange }: {
   return (
     <section className="panel company-members" aria-labelledby="company-members-title">
       <div className="section-head">
-        <div><p className="eyebrow">COMPANY · MEMBERSHIP</p><h2 id="company-members-title">Thành viên công ty</h2><p className="help">Vai trò lấy từ Company Service; nếu không xác minh được, action OWNER bị ẩn.</p></div>
-        {role ? <StatusBadge tone={role === "OWNER" ? "success" : "neutral"}>{role}</StatusBadge> : null}
+        <div><p className="eyebrow">ĐỘI NGŨ TUYỂN DỤNG</p><h2 id="company-members-title">Thành viên công ty</h2><p className="help">Chủ sở hữu có thể mời, xóa thành viên hoặc chuyển quyền quản lý công ty.</p></div>
+        {role ? <StatusBadge tone={role === "OWNER" ? "success" : "neutral"}>{companyMemberRoleLabel(role)}</StatusBadge> : null}
       </div>
       <ConfirmationDialog
         open={pendingAction !== null}
         title={pendingAction?.kind === "TRANSFER" ? "Chuyển quyền sở hữu?" : "Xóa thành viên?"}
-        description={pendingAction?.kind === "TRANSFER" ? "Sau xác nhận, bạn lập tức trở thành MEMBER và mất quyền OWNER." : "Thành viên sẽ mất quyền truy cập dữ liệu công ty."}
-        confirmLabel={pendingAction?.kind === "TRANSFER" ? "Chuyển quyền OWNER" : "Xóa thành viên"}
+        description={pendingAction?.kind === "TRANSFER" ? "Sau xác nhận, bạn sẽ trở thành thành viên và không còn quyền quản lý của chủ sở hữu." : "Thành viên sẽ mất quyền truy cập dữ liệu công ty."}
+        confirmLabel={pendingAction?.kind === "TRANSFER" ? "Chuyển quyền sở hữu" : "Xóa thành viên"}
         pending={pending}
         onConfirm={() => { void confirmAction(); }}
         onCancel={() => { if (!pending) setPendingAction(null); }}
@@ -114,20 +116,20 @@ export function CompanyMemberManagement({ companyId, onRoleChange }: {
       {actionError ? <p className="notice notice-danger" role="alert"><strong>Chưa hoàn tất thao tác.</strong> {actionError}</p> : null}
       {loading ? <LoadingState label="Đang tải vai trò và thành viên" /> : null}
       {loadError ? <ErrorState message={toUserMessage(loadError)} onRetry={() => setReloadKey((value) => value + 1)} /> : null}
-      {!loading && !loadError && !canManage ? <div className="notice"><strong>Chế độ MEMBER</strong><p>Bạn có thể xem hồ sơ nhưng action mời, xóa và chuyển OWNER đã bị ẩn.</p></div> : null}
+      {!loading && !loadError && !canManage ? <div className="notice"><strong>Vai trò thành viên</strong><p>Bạn có thể xem hồ sơ công ty. Việc mời, xóa thành viên và chuyển quyền quản lý dành cho chủ sở hữu.</p></div> : null}
       {!loading && !loadError && canManage ? (
         <div className="table-wrap">
-          <table>
+          <table className="data-table">
             <thead><tr><th>Người dùng</th><th>Vai trò</th><th>Tham gia</th><th>Thao tác</th></tr></thead>
             <tbody>{members.map((member) => (
               <tr key={member.userId}>
                 <td><code>{member.userId}</code></td>
-                <td><StatusBadge tone={member.role === "OWNER" ? "success" : "neutral"}>{member.role}</StatusBadge></td>
+                <td><StatusBadge tone={member.role === "OWNER" ? "success" : "neutral"}>{companyMemberRoleLabel(member.role)}</StatusBadge></td>
                 <td>{new Date(member.joinedAt).toLocaleDateString("vi-VN")}</td>
                 <td>{member.role === "MEMBER" ? <div className="btn-group">
-                  <button className="btn btn-secondary" type="button" onClick={() => setPendingAction({ kind: "TRANSFER", member })}>Chuyển OWNER</button>
+                  <button className="btn btn-secondary" type="button" onClick={() => setPendingAction({ kind: "TRANSFER", member })}>Chuyển quyền sở hữu</button>
                   <button className="btn btn-danger" type="button" onClick={() => setPendingAction({ kind: "REMOVE", member })}>Xóa</button>
-                </div> : <span className="help">OWNER hiện tại</span>}</td>
+                </div> : <span className="help">Chủ sở hữu hiện tại</span>}</td>
               </tr>
             ))}</tbody>
           </table>

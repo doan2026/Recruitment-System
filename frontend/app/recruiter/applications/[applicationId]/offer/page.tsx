@@ -1,5 +1,7 @@
 "use client";
 
+import { applicationStatusLabel } from "@/lib/recruitmentLabels";
+
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
@@ -63,7 +65,7 @@ export default function RecruiterSendOfferPage() {
     if (!application || submitting || submitted) return;
     const numericSalary = Number(salary);
     if (application.status !== "INTERVIEW") {
-      setFormError("Chỉ hồ sơ đang ở INTERVIEW mới có thể nhận Offer.");
+      setFormError("Chỉ hồ sơ đang ở bước phỏng vấn mới có thể nhận thư mời.");
       return;
     }
     if (application.version === null) {
@@ -120,15 +122,15 @@ export default function RecruiterSendOfferPage() {
   return (
     <main>
       <ConfirmationDialog open={confirmSend} title="Gửi Offer cho ứng viên?" description={`Thư mời cho vị trí “${position}” với mức lương ${salary} sẽ được gửi và hồ sơ chuyển sang bước chờ phản hồi.`} confirmLabel="Gửi Offer" pending={submitting} onConfirm={() => { void submit(undefined, true); }} onCancel={() => setConfirmSend(false)} />
-      <PageHeader eyebrow="RECRUITER · OFFER" title="Soạn Offer" description="Gửi thư mời sau vòng phỏng vấn và chờ ứng viên phản hồi." action={<Link className="btn" href={`/recruiter/jobs/${application.jobId}`}>Về pipeline</Link>} />
+      <PageHeader eyebrow="THƯ MỜI NHẬN VIỆC" title="Soạn Offer" description="Gửi thư mời sau vòng phỏng vấn và chờ ứng viên phản hồi." action={<Link className="btn" href={`/recruiter/jobs/${application.jobId}`}>Về hồ sơ theo tin</Link>} />
       {submitted ? (
         <section className="panel">
           <EmptyState title="Đã gửi Offer" description="Hồ sơ đã chuyển sang bước chờ ứng viên phản hồi thư mời." />
-          <div className="btn-group"><StatusBadge tone="success">Đang chờ phản hồi</StatusBadge><Link className="btn btn-primary" href={`/recruiter/jobs/${application.jobId}`}>Xem pipeline</Link></div>
+          <div className="btn-group"><StatusBadge tone="success">Đang chờ phản hồi</StatusBadge><Link className="btn btn-primary" href={`/recruiter/jobs/${application.jobId}`}>Xem hồ sơ theo tin</Link></div>
         </section>
       ) : (
         <form className="panel form-stack" onSubmit={submit} noValidate>
-          <div className="section-head row-between"><div><h2>{application.candidateName}</h2><p className="help">{application.jobTitle}</p></div><StatusBadge tone={application.status === "INTERVIEW" ? "success" : "warning"}>{application.status}</StatusBadge></div>
+          <div className="section-head row-between"><div><h2>{application.candidateName}</h2><p className="help">{application.jobTitle}</p></div><StatusBadge tone={application.status === "INTERVIEW" ? "success" : "warning"}>{applicationStatusLabel(application.status)}</StatusBadge></div>
           <div className="form-grid">
             <div className="field"><label className="label" htmlFor="offer-salary">Mức lương</label><input id="offer-salary" className="input" type="number" min="0.01" step="0.01" disabled={submitting} value={salary} onChange={(event) => setSalary(event.target.value)} /></div>
             <div className="field"><label className="label" htmlFor="offer-start-date">Ngày bắt đầu</label><input id="offer-start-date" className="input" type="date" disabled={submitting} value={startDate} onChange={(event) => setStartDate(event.target.value)} /></div>

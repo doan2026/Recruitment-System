@@ -48,7 +48,7 @@ export function RecruiterCvAccess({ applicationId }: { applicationId: string }) 
         <button className="btn" type="button" onClick={() => { void openCv(); }} disabled={pending} aria-busy={pending}>
           {pending ? "Đang xin link CV…" : "Xem CV"}
         </button>
-        {metadata ? <StatusBadge tone={metadata.isDeleted ? "warning" : "neutral"}>{metadata.type} · {metadata.isDeleted ? "Revision lịch sử" : "Đang hoạt động"}</StatusBadge> : null}
+        {metadata ? <StatusBadge tone={metadata.isDeleted ? "warning" : "neutral"}>{metadata.type === "UPLOAD" ? "CV tải lên" : metadata.type === "ONLINE" ? "CV trực tuyến" : "CV ứng tuyển"} · {metadata.isDeleted ? "Bản CV đã nộp" : "Đang hoạt động"}</StatusBadge> : null}
       </div>
       {metadata ? <p className="help"><strong>{metadata.title}</strong> · Tạo ngày {new Date(metadata.createdAt).toLocaleDateString("vi-VN")}</p> : null}
       {status ? <p className="status-line" role="status">{status}</p> : null}

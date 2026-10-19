@@ -275,7 +275,8 @@ test("Application tracking reloads authoritative version before withdraw", async
   });
 
   await login(page, "CANDIDATE", "/candidate/applications");
-  await expect(page.getByText("Phiên bản tải khi thao tác", { exact: false })).toBeVisible();
+  await expect(page.getByRole("article").getByText(application.jobTitle, { exact: true })).toBeVisible();
+  expect(detailReads).toBe(0);
   await page.getByRole("button", { name: "Rút hồ sơ", exact: true }).click();
   expect(withdrawBody).toBeNull();
   await page.getByRole("alertdialog").getByRole("button", { name: "Quay lại", exact: true }).click();
@@ -284,7 +285,7 @@ test("Application tracking reloads authoritative version before withdraw", async
   await page.getByRole("alertdialog").getByRole("button", { name: "Xác nhận rút hồ sơ", exact: true }).click();
 
   await expect(page.getByText("Đã rút hồ sơ ứng tuyển Backend Engineer.")).toBeVisible();
-  await expect(page.getByText("WITHDRAWN", { exact: true })).toBeVisible();
+  await expect(page.getByText("Đã rút hồ sơ", { exact: true })).toBeVisible();
   expect(detailReads).toBe(1);
   const sentWithdraw = withdrawBody as unknown as Record<string, unknown>;
   expect(Object.keys(sentWithdraw).sort()).toEqual(["expectedVersion", "note"]);
@@ -313,7 +314,7 @@ test("AI chat sends the exact private Gateway contract and renders the answer as
   });
 
   await login(page, "CANDIDATE", "/ai");
-  await expect(page.getByText("Session sẵn sàng")).toBeVisible();
+  await expect(page.getByText("Sẵn sàng trò chuyện")).toBeVisible();
   await page.getByLabel("Tin nhắn cho trợ lý nghề nghiệp").fill("Gợi ý việc phù hợp cho tôi");
   await page.getByRole("button", { name: "Gửi tin nhắn" }).click();
 
@@ -341,7 +342,7 @@ test("AI chat honors 429 Retry-After without replaying the message", async ({ pa
   });
 
   await login(page, "CANDIDATE", "/ai");
-  await expect(page.getByText("Session sẵn sàng")).toBeVisible();
+  await expect(page.getByText("Sẵn sàng trò chuyện")).toBeVisible();
   const composer = page.getByLabel("Tin nhắn cho trợ lý nghề nghiệp");
   await composer.fill("Gợi ý việc phù hợp cho tôi");
   await page.getByRole("button", { name: "Gửi tin nhắn" }).click();
@@ -350,4 +351,62 @@ test("AI chat honors 429 Retry-After without replaying the message", async ({ pa
   await expect(composer).toBeDisabled();
   await expect(page.getByRole("button", { name: /Chờ [12]s/ })).toBeDisabled();
   expect(attempts).toBe(1);
+});
+
+
+test("Recruiter job preview shows the selected saved job and provides working navigation without an inert submit", async ({ page }) => {
+  const jobId = "2795c0de-7908-4ab5-9bed-4c4f1cf9c211";
+  let jobReads = 0;
+  let jobMutations = 0;
+  const backendJob = {
+    id: jobId,
+    companyId: "3795c0de-7908-4ab5-9bed-4c4f1cf9c212",
+    companyName: "Công ty Sản phẩm Việt",
+    title: "Kỹ sư nền tảng dữ liệu",
+    description: "Xây dựng hệ thống dữ liệu tuyển dụng có thể mở rộng.",
+    requirements: "Có kinh nghiệm PostgreSQL\nCó kinh nghiệm xử lý sự kiện",
+    benefits: "Hỗ trợ học tập chuyên môn",
+    salaryMin: 25_000_000,
+    salaryMax: 40_000_000,
+    isNegotiable: false,
+    location: "Đà Nẵng",
+    jobType: "FULL_TIME",
+    currency: "VND",
+    aggregateVersion: 3,
+    experienceYears: 3,
+    quantity: 2,
+    skills: ["PostgreSQL", "Kafka"],
+    deadline: "2026-12-31T00:00:00.000Z",
+    status: "DRAFT",
+    createdAt: "2026-08-01T00:00:00.000Z",
+    updatedAt: "2026-08-20T00:00:00.000Z",
+  };
+  await page.route(`${gatewayOrigin}/jobs/**`, async (route) => {
+    if (route.request().method() !== "GET") jobMutations += 1;
+    await json(route, { data: backendJob, meta: null });
+  });
+  await page.route(`${gatewayOrigin}/jobs/mine`, async (route) => {
+    jobReads += 1;
+    await json(route, { data: [backendJob], meta: null });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page, "RECRUITER", `/recruiter/jobs/${jobId}/preview`);
+
+  await expect(page.getByRole("heading", { name: "Xem trước tin tuyển dụng", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: backendJob.title, exact: true })).toBeVisible();
+  await expect(page.getByText(backendJob.description, { exact: true })).toBeVisible();
+  await expect(page.getByText(backendJob.requirements.split("\n")[0], { exact: true })).toBeVisible();
+  await expect(page.getByText(backendJob.benefits, { exact: true })).toBeVisible();
+  await expect(page.getByText("Bản nháp", { exact: true })).toBeVisible();
+  await expect(page.getByText("Vị trí: Senior Frontend Engineer", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Gửi duyệt", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Quản lý tin", exact: true })).toHaveAttribute("href", "/recruiter/jobs");
+  expect(jobReads).toBeGreaterThanOrEqual(1);
+  expect(jobMutations).toBe(0);
+  await expectNoDocumentOverflow(page);
+
+  await page.getByRole("link", { name: "Quay lại sửa", exact: true }).click();
+  await expect(page).toHaveURL(new URL(`/recruiter/jobs/${jobId}/edit`, appOrigin).toString());
+  await expect(page.getByRole("textbox", { name: "Tên vị trí" })).toHaveValue(backendJob.title);
+  expect(jobMutations).toBe(0);
 });

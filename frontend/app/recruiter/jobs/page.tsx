@@ -1,5 +1,7 @@
 "use client";
 
+import { jobStatusLabel } from "@/lib/recruitmentLabels";
+
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { TransientRecoveryState } from "@/components/TransientRecoveryState";
@@ -107,7 +109,7 @@ export default function RecruiterJobsPage() {
 
   return (
     <main>
-      <PageHeader eyebrow="RECRUITER · JOBS" title="Quản lý tin tuyển dụng" description="Theo dõi vòng đời tin, quyền thành viên và pipeline ứng viên." action={<Link className="btn btn-primary" href="/recruiter/jobs/new">Tạo tin mới</Link>} />
+      <PageHeader eyebrow="TIN TUYỂN DỤNG" title="Quản lý tin tuyển dụng" description="Quản lý nội dung tin, theo dõi hồ sơ và tìm ứng viên phù hợp." action={<Link className="btn btn-primary" href="/recruiter/jobs/new">Tạo tin mới</Link>} />
       <section className="metric-grid">
         <Metric label="Tổng tin" value={String(jobs.length)} detail="Trong công ty" />
         <Metric label="Đang tuyển" value={String(jobs.filter((job) => job.status === "PUBLISHED").length)} detail="Công khai" />
@@ -161,7 +163,7 @@ export default function RecruiterJobsPage() {
       {actionError ? <p className="notice notice-danger" role="alert"><strong>Chưa đổi được trạng thái tin.</strong> {actionError}</p> : null}
 
       <section className="panel">
-        <div className="list-meta"><strong>{jobTable.filteredCount} / {jobs.length} tin phù hợp</strong><span className="help">Chỉ tải `/jobs/mine` một lần; lọc, sắp xếp và phân trang tại trình duyệt</span></div>
+        <div className="list-meta"><strong>{jobTable.filteredCount} / {jobs.length} tin phù hợp</strong><span className="help">Lọc theo từ khóa, trạng thái và thời gian để tìm nhanh tin cần quản lý.</span></div>
         {loadError ? (
           <TransientRecoveryState
             error={loadError}
@@ -188,11 +190,11 @@ export default function RecruiterJobsPage() {
                       </div>
                     ) : null}
                   </td>
-                  <td><StatusBadge tone={job.status === "PUBLISHED" ? "success" : job.status === "DRAFT" ? "neutral" : job.status === "EXPIRED" ? "danger" : "warning"}>{job.status}</StatusBadge></td>
+                  <td><StatusBadge tone={job.status === "PUBLISHED" ? "success" : job.status === "DRAFT" ? "neutral" : job.status === "EXPIRED" ? "danger" : "warning"}>{jobStatusLabel(job.status)}</StatusBadge></td>
                   <td>{new Date(job.deadline).toLocaleDateString("vi-VN")}</td>
                   <td>{job.ownerName}<div className="help">Người tạo tin</div></td>
                   <td><div className="btn-group">
-                    <Link className="btn btn-ghost" href={`/recruiter/jobs/${job.id}`}>Pipeline</Link>
+                    <Link className="btn btn-ghost" href={`/recruiter/jobs/${job.id}`}>Hồ sơ ứng tuyển</Link>
                     {["DRAFT", "PENDING_APPROVAL", "PUBLISHED"].includes(job.status) ? <Link className={isRejectedRecruiterJob(job.status, job.rejectionReason) ? "btn btn-warning" : "btn btn-ghost"} href={`/recruiter/jobs/${job.id}/edit`}>{job.status === "DRAFT" ? recruiterJobEditLabel(job.status, job.rejectionReason) : "Sửa tin"}</Link> : null}
                     {recruiterJobActions(job.status).map((action) => <button key={action} className={action === "CLOSE" ? "btn btn-warning" : "btn btn-secondary"} type="button" disabled={pendingJobId === job.id} aria-busy={pendingJobId === job.id} onClick={() => { void runJobAction(job, action); }}>{pendingJobId === job.id ? "Đang xử lý…" : recruiterJobActionLabel(action)}</button>)}
                   </div></td>

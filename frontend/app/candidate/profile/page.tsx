@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { LoadingState, PageHeader, StatusBadge } from "@/components/ui";
 import { useEffect, useState, type FormEvent } from "react";
 import { useCurrentAccount } from "../../../components/SessionGate";
 import { ConfirmationDialog } from "../../../components/ConfirmationDialog";
@@ -111,7 +112,7 @@ function Fields({
   return (
     <>
       {fields.map((f) => (
-        <label className="field" key={f.name}>
+        <label className={f.type === "checkbox" ? "row" : `field${f.type === "textarea" ? " span-2" : ""}`} key={f.name}>
           {f.label}
           {f.required ? " *" : ""}
           {f.type === "textarea" ? (
@@ -124,7 +125,7 @@ function Fields({
             />
           ) : (
             <input
-              className="input"
+              className={f.type === "checkbox" ? undefined : "input"}
               type={f.type ?? "text"}
               required={f.required}
               disabled={f.disabled}
@@ -216,7 +217,7 @@ function BlockEditor({
   }
   return (
     <section className="card form-stack">
-      <h2>{block.label}</h2>
+      <div className="section-head"><h2>{block.label}</h2><StatusBadge tone="neutral">{items.length} mục</StatusBadge></div>
       {items.length ? (
         <ul className="person1-items">
           {items.map((item) => (
@@ -396,20 +397,14 @@ export default function ProfilePage() {
   }
   return (
     <main className="form-stack candidate-profile-page">
-      <div className="page-header">
-        <div>
-          <p className="eyebrow">HỒ SƠ ỨNG VIÊN</p>
-          <h1>Hồ sơ cá nhân</h1>
-          <p className="muted">Quản lý thông tin cá nhân, kỹ năng, kinh nghiệm và hồ sơ nghề nghiệp của bạn.</p>
-        </div>
-        <Link className="btn btn-primary" href="/candidate/profile/cvs">Quản lý CV</Link>
-      </div>
-      {loading ? <p role="status">Đang tải hồ sơ…</p> : !profile && error ? null : <>
+      <PageHeader eyebrow="ỨNG VIÊN · HỒ SƠ" title="Hồ sơ cá nhân" description="Quản lý thông tin cá nhân, kỹ năng, kinh nghiệm và hồ sơ nghề nghiệp của bạn."
+        action={<Link className="btn btn-primary" href="/candidate/profile/cvs">Quản lý CV</Link>} />
+      {loading ? <LoadingState label="Đang tải hồ sơ…" /> : !profile && error ? null : <>
         <section className="candidate-profile-hero card">
           <div className="candidate-profile-banner" aria-hidden="true" />
           <div className="candidate-profile-hero-body">
             <div className="candidate-profile-avatar-wrap">
-              <img className="candidate-profile-avatar" src={profile?.avatarUrl || "/figma/profile/2013b.png"} alt="Ảnh đại diện" />
+              {profile?.avatarUrl ? <img className="candidate-profile-avatar" src={profile.avatarUrl} alt="Ảnh đại diện" /> : <span className="candidate-profile-avatar candidate-profile-initials" aria-label="Chưa có ảnh đại diện">{(profile?.fullName || account?.email || "UV").slice(0, 1).toUpperCase()}</span>}
               <label className="candidate-avatar-upload" title="Thay ảnh đại diện">
                 <span aria-hidden="true">▣</span><span className="sr-only">Thay ảnh đại diện</span>
                 <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={(e) => { void avatar(e.target.files?.[0]); e.currentTarget.value = ""; }} />
@@ -435,10 +430,10 @@ export default function ProfilePage() {
           <div className="candidate-profile-main-column">
             <section className="card candidate-profile-intro"><h2>Giới thiệu bản thân</h2><p>{profile?.summary || "Thêm phần giới thiệu ngắn để nhà tuyển dụng hiểu rõ hơn về kinh nghiệm và mục tiêu nghề nghiệp của bạn."}</p></section>
             <section className="card form-stack candidate-general-profile" id="profile-editor">
-              <div className="candidate-profile-section-heading"><h2>Thông tin cá nhân</h2><button type="button" className="btn" onClick={() => setEditingGeneral((value) => !value)}>{editingGeneral ? "Đóng chỉnh sửa" : "✎ Chỉnh sửa hồ sơ"}</button></div>
+              <div className="section-head"><h2>Thông tin cá nhân</h2><button type="button" className="btn" onClick={() => setEditingGeneral((value) => !value)}>{editingGeneral ? "Đóng chỉnh sửa" : "✎ Chỉnh sửa hồ sơ"}</button></div>
               {editingGeneral ? <form className="form-stack" noValidate onSubmit={save}>
-                <fieldset className="person1-fieldset person1-grid" disabled={busy}><Fields fields={general} value={draft} set={(name, value) => setDraft((d) => ({ ...d, [name]: value }))} /></fieldset>
-                <div className="row-wrap"><button className="btn btn-primary">{busy ? "Đang lưu…" : "Lưu thông tin chung"}</button><button className="btn" type="button" onClick={() => { setEditingGeneral(false); setDraft(profile ? { ...profile } : {}); }}>Hủy</button></div>
+                <fieldset className="person1-fieldset form-grid" disabled={busy}><Fields fields={general} value={draft} set={(name, value) => setDraft((d) => ({ ...d, [name]: value }))} /></fieldset>
+                <div className="btn-group"><button className="btn btn-primary">{busy ? "Đang lưu…" : "Lưu thông tin chung"}</button><button className="btn" type="button" onClick={() => { setEditingGeneral(false); setDraft(profile ? { ...profile } : {}); }}>Hủy</button></div>
               </form> : <div className="candidate-profile-facts">
                 <div><span>Họ và tên</span><strong>{profile?.fullName || "Chưa cập nhật"}</strong></div><div><span>Chức danh</span><strong>{profile?.headline || "Chưa cập nhật"}</strong></div><div><span>Số điện thoại</span><strong>{profile?.phone || "Chưa cập nhật"}</strong></div><div><span>Địa điểm</span><strong>{profile?.address || "Chưa cập nhật"}</strong></div>
               </div>}

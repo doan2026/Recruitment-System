@@ -1,5 +1,7 @@
 "use client";
 
+import { companyMemberRoleLabel } from "@/lib/recruitmentLabels";
+
 import { useEffect, useRef, useState } from "react";
 import { ConflictRecoveryPanel } from "@/components/ConflictRecoveryPanel";
 import { ConfirmationDialog } from "@/components/ConfirmationDialog";
@@ -239,7 +241,7 @@ export default function RecruiterCompanyPage() {
     return (
       <main>
         <PageHeader
-          eyebrow="RECRUITER · COMPANY"
+          eyebrow="DOANH NGHIỆP"
           title="Hồ sơ công ty"
           description="Tạo danh tính doanh nghiệp trước khi đăng tin và mời thành viên."
         />
@@ -267,7 +269,7 @@ export default function RecruiterCompanyPage() {
   return (
     <main>
       <PageHeader
-        eyebrow="RECRUITER · COMPANY"
+        eyebrow="DOANH NGHIỆP"
         title="Hồ sơ công ty"
         description="Quản lý danh tính doanh nghiệp, trạng thái xác minh và thư viện hình ảnh."
         action={memberRole === "OWNER" ? <button ref={editButtonRef} className="btn btn-primary" type="button" disabled={saving || resubmitting} onClick={toggleEditor}>{editing ? "Đóng chỉnh sửa" : "Chỉnh sửa hồ sơ"}</button> : undefined}
@@ -276,7 +278,7 @@ export default function RecruiterCompanyPage() {
       <ConfirmationDialog
         open={confirmationDraft !== null}
         title="Thay đổi này cần xác minh lại"
-        description="Bạn đang sửa tên hoặc mã số thuế của công ty đã được xác minh. Khi lưu, trạng thái công ty sẽ chuyển từ VERIFIED về PENDING để Admin xác minh lại và lý do từ chối cũ sẽ được xóa."
+        description="Bạn đang sửa tên hoặc mã số thuế của công ty đã được xác minh. Khi lưu, công ty sẽ chuyển về trạng thái chờ xác minh lại và lý do từ chối cũ sẽ được xóa."
         confirmLabel="Xác nhận và lưu"
         pending={saving}
         onConfirm={() => { void confirmVerifiedEdit(); }}
@@ -286,7 +288,7 @@ export default function RecruiterCompanyPage() {
       <ConfirmationDialog
         open={discarding}
         title="Bỏ các thay đổi chưa lưu?"
-        description="Các trường hồ sơ bạn vừa nhập chưa được lưu. Bỏ thay đổi để đóng form, hoặc quay lại tiếp tục chỉnh sửa."
+        description="Các trường hồ sơ bạn vừa nhập chưa được lưu. Bỏ thay đổi để đóng biểu mẫu, hoặc quay lại tiếp tục chỉnh sửa."
         confirmLabel="Bỏ thay đổi"
         onConfirm={closeEditor}
         onCancel={() => setDiscarding(false)}
@@ -297,10 +299,10 @@ export default function RecruiterCompanyPage() {
       {verificationError ? <p className="notice notice-danger" role="alert"><strong>Chưa gửi lại được hồ sơ.</strong> {verificationError}</p> : null}
 
       <section className="metric-grid" aria-label="Tóm tắt công ty">
-        <Metric label="Trạng thái" value={company.verificationStatus} detail="Xác minh doanh nghiệp" />
-        <Metric label="Phiên bản" value={`v${company.aggregateVersion}`} detail="Optimistic concurrency" />
-        <Metric label="Quyền công ty" value={memberRole ?? "Đang tải"} detail="Authoritative membership" />
-        <Metric label="Tin đang tuyển" value="—" detail="Chưa có dữ liệu thống kê" />
+        <Metric label="Trạng thái" value={verification.title} detail="Xác minh doanh nghiệp" />
+        <Metric label="Lĩnh vực" value={company.industry || "Chưa cập nhật"} detail="Thông tin doanh nghiệp" />
+        <Metric label="Vai trò của bạn" value={companyMemberRoleLabel(memberRole)} detail="Quyền quản lý công ty" />
+        <Metric label="Quy mô" value={company.size || "Chưa cập nhật"} detail="Quy mô nhân sự" />
       </section>
 
       <section className="grid-2">
@@ -310,7 +312,7 @@ export default function RecruiterCompanyPage() {
               <h2>{company.name}</h2>
               <p className="help">MST {company.taxCode} · Chủ sở hữu {company.ownerName}</p>
             </div>
-            <StatusBadge tone={verification.tone}>{company.verificationStatus}</StatusBadge>
+            <StatusBadge tone={verification.tone}>{verification.title}</StatusBadge>
           </div>
           <div className="notice">
             <strong>Hồ sơ pháp lý</strong>
@@ -412,13 +414,13 @@ export default function RecruiterCompanyPage() {
         </section>
 
         {memberRole === "OWNER" ? <aside className="panel">
-          <h2>Luồng tải media</h2>
-          <p className="help">Xin chữ ký → tải trực tiếp → xác nhận canonical → gắn fileId vào hồ sơ.</p>
+          <h2>Thêm hình ảnh và video</h2>
+          <p className="help">Chọn tệp, tải lên và xác nhận trước khi lưu vào hồ sơ công ty.</p>
           <CompanyMediaUploader
             company={company}
             onCompanyChange={receiveCompanyUpdate}
           />
-        </aside> : <aside className="panel"><h2>Quyền MEMBER</h2><p className="help">Thư viện media và thay đổi pháp lý chỉ dành cho OWNER.</p></aside>}
+        </aside> : <aside className="panel"><h2>Quyền thành viên</h2><p className="help">Chỉ chủ sở hữu có thể quản lý hình ảnh và thay đổi thông tin pháp lý.</p></aside>}
       </section>
 
       {memberRole === "OWNER" ? <CompanyMediaLibrary

@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { AuthFrame, GoogleAuthButton, PasswordToggle } from "./AuthFrame";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
 import { requestApi } from "../lib/apiClient";
@@ -12,6 +13,7 @@ export default function RecruiterRegisterPage() {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [accepted, setAccepted] = useState(false);
   const [registrationId, setRegistrationId] = useState("");
   const [otp, setOtp] = useState("");
@@ -85,34 +87,36 @@ export default function RecruiterRegisterPage() {
   }
 
   const otpStage = !!registrationId;
-  return <main className="auth-portal-page auth-recruiter-register">
-    <header className="auth-portal-header">
-      <div className="auth-recruiter-header-brand-group"><Link className="auth-portal-brand" href="/" aria-label="CareerHub - Trang chủ"><img src="/figma/register/7f320.png" alt="" width="146" height="40" /></Link><Link className="auth-recruiter-header-title" href="/">CareerHub</Link></div>
-      <nav aria-label="Điều hướng"><Link href="/">Trang chủ</Link><Link href="/candidate/jobs">Việc làm</Link><Link href="/companies">Công ty</Link><span>Bạn là nhà tuyển dụng?</span><Link className="auth-header-action" href={loginHref}>Đăng nhập</Link></nav>
-    </header>
-    <section className="auth-recruiter-register-main">
-      {verified ? <div className="auth-recruiter-register-card auth-recruiter-success"><h1>Tài khoản Recruiter đã xác minh</h1><p>{notice || "Tài khoản của bạn đã sẵn sàng."}</p>{notice ? <button className="auth-submit" type="button" onClick={() => void retryContact()} disabled={pending}>{pending ? "Đang lưu…" : "Lưu lại thông tin liên hệ"}</button> : null}{error ? <p role="alert" className="auth-error">{error}</p> : null}<Link className="auth-submit auth-submit-link" href={destination}>Tiếp tục đến khu vực tuyển dụng →</Link></div> :
-        <form className="auth-recruiter-register-card" noValidate onSubmit={submit}>
-          <header className="auth-recruiter-register-heading"><h1>{otpStage ? "Xác minh email Recruiter" : <>Đăng ký tài khoản<br />Recruiter</>}</h1><p>{otpStage ? `Nhập mã OTP 6 số đã gửi đến ${email}.` : "Tạo tài khoản để đăng tin tuyển dụng và tìm kiếm ứng viên phù hợp."}</p></header>
-          <div className="auth-recruiter-register-fields">
-          {!otpStage ? <>
-            <div className="auth-recruiter-register-field"><label htmlFor="recruiter-name">Họ và tên</label><input id="recruiter-name" autoComplete="name" maxLength={160} value={name} onChange={e => setName(e.target.value)} placeholder="Nhập họ và tên" disabled={pending} /></div>
-            <div className="auth-recruiter-register-field"><label htmlFor="recruiter-email">Email công việc</label><input id="recruiter-email" type="email" autoComplete="email" maxLength={320} value={email} onChange={e => setEmail(e.target.value)} placeholder="name@company.com" disabled={pending} /></div>
-            <div className="auth-recruiter-register-field"><label htmlFor="recruiter-phone">Số điện thoại</label><input id="recruiter-phone" type="tel" autoComplete="tel" maxLength={32} value={phone} onChange={e => setPhone(e.target.value)} placeholder="+84 90 123 4567" disabled={pending} /></div>
-            <div className="auth-recruiter-register-field"><label htmlFor="recruiter-password">Mật khẩu</label><input id="recruiter-password" type="password" autoComplete="new-password" maxLength={128} value={password} onChange={e => setPassword(e.target.value)} placeholder="Tạo mật khẩu" disabled={pending} /></div>
-            <div className="auth-recruiter-register-field"><label htmlFor="recruiter-confirm">Xác nhận mật khẩu</label><input id="recruiter-confirm" type="password" autoComplete="new-password" maxLength={128} value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="Nhập lại mật khẩu" disabled={pending} /></div>
-            <label className="auth-recruiter-terms"><input type="checkbox" checked={accepted} onChange={e => setAccepted(e.target.checked)} /><span>Tôi đồng ý với <Link href="/terms">Điều khoản dịch vụ</Link> và <Link href="/privacy">Chính sách bảo mật</Link> của CareerHub.</span></label>
-          </> : <div className="auth-recruiter-register-field"><label htmlFor="recruiter-otp">Mã xác minh OTP</label><input id="recruiter-otp" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, ""))} placeholder="Nhập mã 6 chữ số" disabled={pending} /></div>}
-          {error ? <p className="auth-error" role="alert">{error}</p> : null}{notice ? <p className="auth-message" role="status">{notice}</p> : null}
-          <button className="auth-submit" type="submit" disabled={pending} aria-busy={pending}>{pending ? "Đang xử lý…" : otpStage ? "Xác minh tài khoản" : "Đăng ký"}</button>
-          {otpStage ? <button className="auth-resend" type="button" onClick={resend} disabled={pending}>Gửi lại mã xác minh</button> : <>
-            <div className="auth-recruiter-register-divider"><span>Hoặc</span></div>
-            {process.env.NEXT_PUBLIC_GOOGLE_LOGIN_ENABLED === "true" ? <a className="auth-google" href="/auth/google?role=RECRUITER"><img src="/figma/login/bc562.svg" alt="" /><span>Đăng ký với Google</span></a> : <button className="auth-google" type="button" onClick={() => setError("Đăng ký Google chưa được cấu hình cho môi trường local.")}><img src="/figma/login/bc562.svg" alt="" /><span>Đăng ký với Google</span></button>}
-            <p className="auth-portal-signup">Đã có tài khoản? <Link href={loginHref}>Đăng nhập</Link></p>
-          </>}
-          </div>
-        </form>}
-    </section>
-    <footer className="auth-portal-footer auth-recruiter-register-footer"><div className="auth-recruiter-register-footer-brand"><Link href="/" className="auth-footer-wordmark">CareerHub</Link><span>© 2024 CareerHub. All rights reserved.</span></div><nav className="auth-recruiter-register-footer-links" aria-label="Liên kết chân trang"><Link href="/companies">Company</Link><Link href="/candidate/jobs">Candidates</Link><Link href="/recruiter/login">Recruiters</Link><a href="mailto:support@careerhub.local">Support</a><Link href="/privacy">Legal</Link></nav></footer>
-  </main>;
+  if (verified) return <AuthFrame portal="RECRUITER" title="Tài khoản Recruiter đã xác minh" description="Tài khoản của bạn đã sẵn sàng để quản lý hoạt động tuyển dụng.">
+    {notice ? <p className="auth-message" role="status">{notice}</p> : null}
+    {notice ? <button className="auth-submit" type="button" onClick={() => void retryContact()} disabled={pending}>{pending ? "Đang lưu…" : "Lưu lại thông tin liên hệ"}</button> : null}
+    {error ? <p role="alert" className="auth-error">{error}</p> : null}
+    <Link className="auth-submit" href={destination}>Tiếp tục đến khu vực tuyển dụng →</Link>
+  </AuthFrame>;
+
+  return <AuthFrame portal="RECRUITER" title={otpStage ? "Xác minh email Recruiter" : "Đăng ký tài khoản Recruiter"} description={otpStage ? `Nhập mã OTP 6 số đã gửi đến ${email}.` : "Tạo tài khoản để đăng tin tuyển dụng và tìm kiếm ứng viên phù hợp."}>
+    <form className="auth-form" noValidate onSubmit={submit}>
+      {!otpStage ? <>
+        <div className="auth-field"><label htmlFor="recruiter-name">Họ và tên</label><input id="recruiter-name" autoComplete="name" maxLength={160} value={name} onChange={event => setName(event.target.value)} placeholder="Nhập họ và tên" disabled={pending} /></div>
+        <div className="auth-field"><label htmlFor="recruiter-email">Email công việc</label><input id="recruiter-email" type="email" autoComplete="email" maxLength={320} value={email} onChange={event => setEmail(event.target.value)} placeholder="name@company.com" disabled={pending} /></div>
+        <div className="auth-field"><label htmlFor="recruiter-phone">Số điện thoại</label><input id="recruiter-phone" type="tel" autoComplete="tel" maxLength={32} value={phone} onChange={event => setPhone(event.target.value)} placeholder="Nhập số điện thoại liên hệ" disabled={pending} /></div>
+        <div className="auth-field"><label htmlFor="recruiter-password">Mật khẩu</label><div className="auth-input-wrap"><input id="recruiter-password" type={showPassword ? "text" : "password"} autoComplete="new-password" maxLength={128} value={password} onChange={event => setPassword(event.target.value)} placeholder="Tạo mật khẩu" disabled={pending} aria-describedby="recruiter-password-help" /><PasswordToggle visible={showPassword} disabled={pending} onToggle={() => setShowPassword(value => !value)} /></div></div>
+        <div className="auth-field"><label htmlFor="recruiter-confirm">Xác nhận mật khẩu</label><div className="auth-input-wrap"><input id="recruiter-confirm" type={showPassword ? "text" : "password"} autoComplete="new-password" maxLength={128} value={confirm} onChange={event => setConfirm(event.target.value)} placeholder="Nhập lại mật khẩu" disabled={pending} /><PasswordToggle visible={showPassword} disabled={pending} onToggle={() => setShowPassword(value => !value)} /></div></div>
+        <p id="recruiter-password-help" className="auth-help">Ít nhất 8 ký tự, có chữ và số, tối đa 72 byte.</p>
+        <label className="auth-terms"><input type="checkbox" checked={accepted} disabled={pending} onChange={event => setAccepted(event.target.checked)} /><span>Tôi đồng ý với <Link href="/terms">Điều khoản dịch vụ</Link> và <Link href="/privacy">Chính sách bảo mật</Link> của CareerHub.</span></label>
+      </> : <>
+        <div className="auth-field"><label htmlFor="recruiter-otp">Mã xác minh OTP</label><input className="auth-otp-input" id="recruiter-otp" inputMode="numeric" autoComplete="one-time-code" maxLength={6} autoFocus value={otp} onChange={event => setOtp(event.target.value.replace(/\D/g, ""))} placeholder="000000" disabled={pending} /></div>
+        <p className="auth-help">Mã xác minh có hiệu lực 5 phút kể từ khi gửi.</p>
+      </>}
+      {error ? <p className="auth-error" role="alert">{error}</p> : null}
+      {notice ? <p className="auth-message" role="status">{notice}</p> : null}
+      <button className="auth-submit" type="submit" disabled={pending} aria-busy={pending}>{pending ? "Đang xử lý…" : otpStage ? "Xác minh tài khoản" : "Đăng ký"}</button>
+      {otpStage ? <button className="auth-resend" type="button" onClick={() => void resend()} disabled={pending}>Gửi lại mã xác minh</button> : null}
+    </form>
+    {!otpStage ? <>
+      <div className="auth-divider"><span>Hoặc</span></div>
+      <GoogleAuthButton href="/auth/google?role=RECRUITER" label="Đăng ký với Google" disabled={pending} onUnavailable={() => setError("Đăng ký Google chưa được cấu hình cho môi trường này.")} />
+      <p className="auth-signup">Đã có tài khoản? <Link href={loginHref}>Đăng nhập</Link></p>
+    </> : null}
+  </AuthFrame>;
 }

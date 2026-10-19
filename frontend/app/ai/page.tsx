@@ -115,29 +115,29 @@ export default function AiAssistantPage() {
   }
 
   if (featureState === "hidden") {
-    return <main><PageHeader eyebrow="CANDIDATE · AI ASSISTANT" title="Trợ lý nghề nghiệp" /><EmptyState title="Tính năng chưa được mở" description="Chatbot chưa được cấu hình trong môi trường này nên khung trò chuyện đã được ẩn." /></main>;
+    return <main><PageHeader eyebrow="ĐỊNH HƯỚNG NGHỀ NGHIỆP" title="Trợ lý nghề nghiệp" /><EmptyState title="Tính năng chưa được mở" description="Trợ lý hiện chưa sẵn sàng. Bạn có thể tiếp tục tìm việc và xem gợi ý theo hồ sơ." href="/candidate/jobs" action="Khám phá việc làm" /></main>;
   }
 
   if (featureState === "forbidden") {
-    return <main><PageHeader eyebrow="CANDIDATE · AI ASSISTANT" title="Trợ lý nghề nghiệp" /><EmptyState title="Tài khoản không phù hợp" description="Chatbot chỉ dành cho vai trò CANDIDATE. Hãy chuyển sang tài khoản ứng viên để sử dụng." /></main>;
+    return <main><PageHeader eyebrow="ĐỊNH HƯỚNG NGHỀ NGHIỆP" title="Trợ lý nghề nghiệp" /><EmptyState title="Tài khoản không phù hợp" description="Trợ lý nghề nghiệp dành cho ứng viên. Hãy chuyển sang tài khoản ứng viên để sử dụng." href="/login?returnTo=%2Fai" action="Đăng nhập ứng viên" /></main>;
   }
 
   if (featureState === "reauthenticate") {
-    return <main><PageHeader eyebrow="CANDIDATE · AI ASSISTANT" title="Trợ lý nghề nghiệp" /><EmptyState title="Phiên đăng nhập đã hết hạn" description="Auth không làm mới được phiên. Hãy đăng nhập lại bằng tài khoản ứng viên rồi mở lại chatbot." /></main>;
+    return <main><PageHeader eyebrow="ĐỊNH HƯỚNG NGHỀ NGHIỆP" title="Trợ lý nghề nghiệp" /><EmptyState title="Phiên đăng nhập đã hết hạn" description="Hãy đăng nhập lại bằng tài khoản ứng viên để tiếp tục trò chuyện." href="/login?returnTo=%2Fai" action="Đăng nhập lại" /></main>;
   }
 
   return (
     <main>
       <PageHeader
-        eyebrow="CANDIDATE · AI ASSISTANT"
+        eyebrow="ĐỊNH HƯỚNG NGHỀ NGHIỆP"
         title="Trợ lý nghề nghiệp"
-        description="Mỗi cuộc trò chuyện dùng một session UUID v4 riêng, chỉ giữ trong bộ nhớ của tab hiện tại."
+        description="Trao đổi về định hướng nghề nghiệp, tìm việc và chuẩn bị cho hành trình ứng tuyển."
       />
       <section className="chat-layout">
         <section className="panel">
           <div className="section-head">
-            <div><h2>Cuộc trò chuyện mới</h2><p className="help">Backend không có endpoint tạo session; trình duyệt tạo định danh canonical sau khi trang sẵn sàng.</p></div>
-            <StatusBadge tone={sessionId ? "success" : "warning"}>{sessionId ? "Session sẵn sàng" : "Đang tạo session"}</StatusBadge>
+            <div><h2>Cuộc trò chuyện mới</h2><p className="help">Chia sẻ kỹ năng, kinh nghiệm hoặc công việc bạn đang quan tâm.</p></div>
+            <StatusBadge tone={sessionId ? "success" : "warning"}>{sessionId ? "Sẵn sàng trò chuyện" : "Đang chuẩn bị"}</StatusBadge>
           </div>
           <div className="chat-box" aria-live="polite" aria-label="Lịch sử hội thoại trong tab hiện tại">
             {messages.map((message) => (
@@ -153,18 +153,17 @@ export default function AiAssistantPage() {
             <label className="sr-only" htmlFor="ai-chat-message">Tin nhắn cho trợ lý nghề nghiệp</label>
             <div className="field">
               <textarea id="ai-chat-message" className="textarea resize-none" rows={3} value={draft} disabled={!sessionId || pending || cooldownSeconds > 0} placeholder="Hỏi về tìm việc hoặc quy trình ứng tuyển…" aria-invalid={validationAttempted && !!draftValidation.errorCode} aria-describedby="ai-chat-message-count ai-chat-message-error" onChange={(event) => { setDraft(event.target.value); setValidationAttempted(false); }} />
-              <p className="character-count" id="ai-chat-message-count">{draftValidation.characterCount.toLocaleString("vi-VN")}/2.000 ký tự · {draftValidation.byteCount.toLocaleString("vi-VN")}/8.000 byte UTF-8</p>
+              <p className="character-count" id="ai-chat-message-count">{draftValidation.characterCount.toLocaleString("vi-VN")}/2.000 ký tự</p>
               {validationAttempted && draftValidation.errorMessage ? <p className="form-error" id="ai-chat-message-error" role="alert">{draftValidation.errorMessage}</p> : <span id="ai-chat-message-error" />}
             </div>
             <button className="btn btn-primary" type="submit" disabled={!sessionId || pending || cooldownSeconds > 0}>{pending ? "Đang gửi…" : cooldownSeconds > 0 ? `Chờ ${cooldownSeconds}s` : sessionBusy ? "Thử lại" : "Gửi tin nhắn"}</button>
           </form>
         </section>
         <aside className="panel">
-          <p className="eyebrow">SESSION BOUNDARY</p>
-          <h2>Không lưu trên trình duyệt</h2>
-          <p className="help">Session ID không được ghi vào bộ nhớ bền vững hay URL. Reload trang sẽ tạo một session hiển thị mới.</p>
-          <p className="status-line">Mã phiên: {sessionId ? `${sessionId.slice(0, 8)}…${sessionId.slice(-4)}` : "đang tạo"}</p>
-          <p className="notice notice-warning">API chỉ trả một câu trả lời cho mỗi tin nhắn và không có endpoint đọc lại lịch sử. Reload sẽ mất các tin đang hiển thị.</p>
+          <p className="eyebrow">LỊCH SỬ TRÒ CHUYỆN</p>
+          <h2>Cuộc trò chuyện hiện tại</h2>
+          <p className="help">Các tin nhắn hiện chỉ hiển thị trong tab này. Hãy lưu lại thông tin hữu ích trước khi rời trang.</p>
+          <p className="notice notice-warning">Tải lại trang hoặc bắt đầu hội thoại mới sẽ xóa các tin nhắn đang hiển thị.</p>
           <button className="btn" type="button" disabled={!sessionId || pending} onClick={startNewConversation}>Bắt đầu hội thoại mới</button>
         </aside>
       </section>

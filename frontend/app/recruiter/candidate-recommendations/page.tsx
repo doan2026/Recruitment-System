@@ -1,5 +1,7 @@
 "use client";
 
+import { jobStatusLabel } from "@/lib/recruitmentLabels";
+
 import { useEffect, useState } from "react";
 import { EmptyState, ErrorState, LoadingState, PageHeader } from "@/components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
@@ -34,7 +36,7 @@ export default function RecruiterCandidateRecommendationsPage() {
       {loading ? <LoadingState /> : null}
       {error ? <ErrorState message={error} onRetry={() => setReloadKey((value) => value + 1)} /> : null}
       {!loading && !error && jobs.length === 0 ? <EmptyState title="Chưa có tin tuyển dụng" description="Tạo và gửi tin duyệt trước khi tìm ứng viên phù hợp." href="/recruiter/jobs/new" action="Tạo tin mới" /> : null}
-      {jobs.length > 0 ? <div className="panel field"><label className="label" htmlFor="candidate-discovery-job">Tin tuyển dụng</label><select id="candidate-discovery-job" className="select" value={jobId} onChange={(event) => setJobId(event.target.value)}>{jobs.map((job) => <option key={job.id} value={job.id}>{job.title} · {job.status}</option>)}</select></div> : null}
+      {jobs.length > 0 ? <div className="panel field"><label className="label" htmlFor="candidate-discovery-job">Tin tuyển dụng</label><select id="candidate-discovery-job" className="select" value={jobId} onChange={(event) => setJobId(event.target.value)}>{jobs.map((job) => <option key={job.id} value={job.id}>{job.title} · {jobStatusLabel(job.status)}</option>)}</select></div> : null}
       {selected ? <RecruiterCandidateRecommendations key={selected.id} job={selected} /> : null}
     </main>
   );

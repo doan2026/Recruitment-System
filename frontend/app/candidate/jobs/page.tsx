@@ -281,7 +281,7 @@ export default function CandidateJobsPage() {
 
   return (
     <main>
-      <PageHeader eyebrow="CANDIDATE · JOB SEARCH" title="Việc làm công khai" description="Lọc theo nhu cầu, chọn phân trang theo trang hoặc tải thêm bằng cursor ổn định." />
+      <PageHeader eyebrow="KHÁM PHÁ CƠ HỘI" title="Việc làm công khai" description="Tìm công việc theo kỹ năng, địa điểm và mức lương phù hợp với bạn." />
 
       <form className="panel form-grid" noValidate onSubmit={applyFilters}>
         <div className="field span-2">
@@ -341,13 +341,13 @@ export default function CandidateJobsPage() {
             <option value={5}>5</option><option value={10}>10</option><option value={20}>20</option><option value={50}>50</option>
           </select>
         </div>
-        <p className="filter-note">Đổi bộ lọc, cách xem hoặc số kết quả sẽ bắt đầu lại từ đầu và bỏ cursor cũ.</p>
+        <p className="filter-note">Thay đổi bộ lọc hoặc cách xem để bắt đầu một danh sách kết quả mới.</p>
       </section>
 
       {tooDeep || (hasMore && nextOffsetTooDeep) ? (
         <section className="notice notice-warning" role="status">
           <strong>Đã tới giới hạn 10.000 kết quả của chế độ theo trang.</strong>
-          <p>Chuyển sang tải thêm để đi sâu bằng cursor ổn định, hoặc bổ sung bộ lọc để thu hẹp danh sách.</p>
+          <p>Chuyển sang tải thêm để tiếp tục xem các việc làm phù hợp, hoặc bổ sung bộ lọc để thu hẹp danh sách.</p>
           <div className="btn-group"><button className="btn btn-primary" type="button" onClick={switchToCursor}>Chuyển sang tải thêm</button><button className="btn" type="button" onClick={() => document.getElementById("q")?.focus()}>Thu hẹp bộ lọc</button></div>
         </section>
       ) : null}
@@ -393,7 +393,7 @@ export default function CandidateJobsPage() {
 
         <section className="panel" id="suitable-jobs" tabIndex={-1}>
           <h2>Gợi ý phù hợp</h2>
-          <p className="help">Mỗi thẻ ghi rõ nguồn xếp hạng. Khi dùng dữ liệu dự phòng, lý do và hành động phục hồi được hiển thị riêng.</p>
+          <p className="help">Khám phá các cơ hội theo CV, sở thích nghề nghiệp hoặc tin mới nhất.</p>
           {!canRecommend ? <p className="notice">Đăng nhập bằng tài khoản ứng viên để nhận gợi ý phù hợp với hồ sơ của bạn.</p> : null}
           {canRecommend && !recommendationLoading && !recommendationError && recs.length === 0 ? (() => {
             const fallback = recommendationFallbackView(recommendationFallback);

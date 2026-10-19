@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Person1Gate } from "@/components/Person1Gate";
-import { ErrorState, LoadingState, PageHeader } from "@/components/ui";
+import { ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
 import { requestApi } from "../../../../lib/apiClient";
 import { person1Error, type CandidateCv } from "../../../../lib/person1Api";
 
@@ -36,17 +36,16 @@ function CvDetail({ cvId }: { cvId: string }) {
     finally { setPending(false); }
   }
   return <main>
-    <PageHeader eyebrow="HỒ SƠ · CV" title={cv?.title ?? "Chi tiết CV"} />
+    <PageHeader eyebrow="ỨNG VIÊN · CV" title={cv?.title ?? "Chi tiết CV"} description="Xem phiên bản CV và tải bản PDF để kiểm tra nội dung." action={<Link className="btn" href="/candidate/profile/cvs">Danh sách CV</Link>} />
     {error ? <ErrorState message={error} onRetry={() => setReload(n => n + 1)} /> : !cv ? <LoadingState label="Đang tải CV" /> : <section className="card stack">
-      <p>{cv.type === "ONLINE" ? "CV trực tuyến" : "CV tải lên"} · Phiên bản {cv.revisionNumber}</p>
-      {cv.isDefault && <p>CV mặc định</p>}
+      <div className="section-head"><h2>Thông tin CV</h2>{cv.isDefault && <StatusBadge tone="success">CV mặc định</StatusBadge>}</div>
+      <div className="chip-list"><StatusBadge tone="neutral">{cv.type === "ONLINE" ? "CV trực tuyến" : "CV tải lên"}</StatusBadge><span className="muted">Phiên bản {cv.revisionNumber}</span></div>
       <div className="btn-group">
         <button className="btn btn-primary" disabled={pending} onClick={() => void download()}>{pending ? "Đang lấy liên kết…" : "Tải xuống PDF"}</button>
         {cv.type === "ONLINE" && <Link className="btn" href={`/candidate/profile/cvs/builder?id=${encodeURIComponent(cv.id)}`}>Chỉnh sửa CV</Link>}
       </div>
     </section>}
     {actionError && <p role="alert" className="notice notice-danger">{actionError}</p>}
-    <Link className="btn" href="/candidate/profile/cvs">Danh sách CV</Link>
   </main>;
 }
 

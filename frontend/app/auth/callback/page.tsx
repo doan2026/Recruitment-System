@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { AuthFrame } from "../../../components/AuthFrame";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { signOut } from "../../../lib/authSession";
@@ -40,16 +41,9 @@ export default function GoogleCallback() {
       }
     })();
   }, [router]);
-  return (
-    <section className="card form-stack">
-      <h1>Đăng nhập Google</h1>
-      {pending ? <p role="status">Đang hoàn tất đăng nhập…</p> : null}
-      {error ? (
-        <p className="notice notice-danger" role="alert">
-          {error}
-        </p>
-      ) : null}
-      {error ? <Link href={loginRoute(role)}>Quay lại đăng nhập</Link> : null}
-    </section>
-  );
+  return <AuthFrame portal={role} title="Đăng nhập Google" description="Hoàn tất xác thực để tiếp tục sử dụng tài khoản CareerHub.">
+    {pending ? <p className="auth-message" role="status">Đang hoàn tất đăng nhập…</p> : null}
+    {error ? <p className="auth-error" role="alert">{error}</p> : null}
+    {error ? <Link className="auth-back-link" href={loginRoute(role)}>Quay lại đăng nhập</Link> : null}
+  </AuthFrame>;
 }

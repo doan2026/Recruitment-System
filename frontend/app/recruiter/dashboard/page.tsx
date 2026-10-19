@@ -1,5 +1,7 @@
 "use client";
 
+import { applicationStatusLabel } from "@/lib/recruitmentLabels";
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { EmptyState, ErrorState, LoadingState, Metric, PageHeader, StatusBadge } from "@/components/ui";
@@ -42,13 +44,13 @@ export default function RecruiterDashboardPage() {
   return (
     <main>
       <PageHeader
-        eyebrow="RECRUITER · DASHBOARD"
+        eyebrow="TỔNG QUAN TUYỂN DỤNG"
         title="Sức khỏe tuyển dụng"
-        description="Số liệu Application vẫn hiển thị độc lập khi nguồn thống kê Job tạm gián đoạn."
+        description="Theo dõi hiệu quả tuyển dụng, số lượng hồ sơ và tiến trình của từng vị trí."
         action={<Link className="btn" href="/recruiter/jobs">Quản lý tin</Link>}
       />
       {error ? <ErrorState message={error} onRetry={() => setReloadKey((value) => value + 1)} /> : null}
-      {loading ? <LoadingState label="Đang tổng hợp dashboard" /> : null}
+      {loading ? <LoadingState label="Đang tổng hợp số liệu tuyển dụng" /> : null}
       {dashboard ? (
         <>
           {dashboard.warnings.map((warning) => (
@@ -59,26 +61,26 @@ export default function RecruiterDashboardPage() {
           <section className="metric-grid" aria-label="Tóm tắt tuyển dụng">
             <Metric label="Tin đang tuyển" value={activeJobs?.value ?? "—"} detail={activeJobs?.detail} />
             <Metric label="Tổng hồ sơ" value={String(dashboard.summary.totalApplications)} detail="Trong kỳ đang xem" />
-            <Metric label="Đã tuyển" value={String(dashboard.summary.hiredApplications)} detail="Application ở trạng thái HIRED" />
+            <Metric label="Đã tuyển" value={String(dashboard.summary.hiredApplications)} detail="Ứng viên hoàn tất tuyển dụng" />
             <Metric label="Tỷ lệ tuyển" value={`${dashboard.summary.hiredRatePercent}%`} detail="Trên tổng hồ sơ" />
           </section>
           <section className="panel">
             <div className="section-head">
-              <div><p className="eyebrow">APPLICATION BREAKDOWN</p><h2>Hồ sơ theo tin tuyển dụng</h2></div>
-              <StatusBadge tone={activeJobs?.degraded ? "warning" : "success"}>{activeJobs?.degraded ? "Dữ liệu một phần" : "Đủ nguồn"}</StatusBadge>
+              <div><p className="eyebrow">TIẾN TRÌNH ỨNG TUYỂN</p><h2>Hồ sơ theo tin tuyển dụng</h2></div>
+              <StatusBadge tone={activeJobs?.degraded ? "warning" : "success"}>{activeJobs?.degraded ? "Dữ liệu một phần" : "Đã cập nhật"}</StatusBadge>
             </div>
             {dashboard.applicationsByJob.length === 0 ? (
               <EmptyState title="Chưa có hồ sơ trong kỳ" description="Thống kê theo tin sẽ xuất hiện khi ứng viên nộp hồ sơ." />
             ) : (
               <div className="table-wrap">
-                <table>
+                <table className="data-table">
                   <thead><tr><th>Tin tuyển dụng</th><th>Tổng hồ sơ</th><th>Trạng thái</th></tr></thead>
                   <tbody>
                     {dashboard.applicationsByJob.map((job) => (
                       <tr key={job.jobId}>
                         <td><strong>{job.jobTitle}</strong></td>
                         <td>{job.totalApplications}</td>
-                        <td><div className="chip-list">{Object.entries(job.statusCounts).map(([status, count]) => <span className="chip" key={status}>{status}: {count}</span>)}</div></td>
+                        <td><div className="chip-list">{Object.entries(job.statusCounts).map(([status, count]) => <span className="chip" key={status}>{applicationStatusLabel(status)}: {count}</span>)}</div></td>
                       </tr>
                     ))}
                   </tbody>

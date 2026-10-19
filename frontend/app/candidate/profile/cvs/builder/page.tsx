@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { LoadingState, PageHeader } from "@/components/ui";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ApiClientError, requestApi } from "../../../../../lib/apiClient";
@@ -161,19 +162,15 @@ export default function BuilderPage() {
   }
   return (
     <main className="form-stack">
-      <div className="page-header">
-        <h1>{original ? "Chỉnh sửa CV" : "Tạo CV trực tuyến"}</h1>
-        <Link className="btn" href="/candidate/profile/cvs">
-          Danh sách CV
-        </Link>
-      </div>
+      <PageHeader eyebrow="ỨNG VIÊN · CV" title={original ? "Chỉnh sửa CV" : "Tạo CV trực tuyến"} description="Sắp xếp kinh nghiệm, chọn mẫu trình bày và xem trước bản PDF trước khi lưu."
+        action={<Link className="btn" href="/candidate/profile/cvs">Danh sách CV</Link>} />
       {loading ? (
-        <p role="status">Đang tải nội dung…</p>
+        <LoadingState label="Đang tải nội dung…" />
       ) : (
         <form className="card form-stack" noValidate onSubmit={save}>
           <fieldset
             disabled={pending || loadFailed}
-            className="person1-fieldset form-stack"
+            className="person1-fieldset form-grid"
           >
             <label className="field">
               Tên CV
@@ -198,7 +195,7 @@ export default function BuilderPage() {
             </label>
             {(["fullName", "headline", "contact", "summary"] as const).map(
               (key, index) => (
-                <label className="field" key={key}>
+                <label className={key === "summary" ? "field span-2" : "field"} key={key}>
                   {
                     [
                       "Họ tên",
@@ -218,7 +215,7 @@ export default function BuilderPage() {
               ),
             )}
             {content.sections.map((section, index) => (
-              <section className="person1-builder-section" key={index}>
+              <section className="person1-builder-section span-2 stack" key={index}>
                 <label className="field">
                   Tên mục
                   <input
@@ -298,7 +295,7 @@ export default function BuilderPage() {
             >
               Thêm mục
             </button>
-            <div className="btn-group">
+            <div className="btn-group span-2">
               <button className="btn" type="button" onClick={() => void pdf()}>
                 Xem trước PDF
               </button>
@@ -328,9 +325,9 @@ export default function BuilderPage() {
         </p>
       ) : null}
       {preview ? (
-        <section className="card">
-          <h2>Bản xem trước PDF</h2>
-          <p>Nhấn xem trước lần nữa sau khi chỉnh sửa.</p>
+        <section className="panel stack">
+          <div className="section-head"><div><h2>Bản xem trước PDF</h2>
+          <p className="help">Nhấn xem trước lần nữa sau khi chỉnh sửa.</p></div></div>
           <iframe
             className="person1-pdf"
             src={preview}

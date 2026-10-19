@@ -1,5 +1,7 @@
 "use client";
 
+import { jobStatusLabel, jobTypeLabel } from "@/lib/recruitmentLabels";
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { BookmarkButton } from "@/components/BookmarkButton";
@@ -88,15 +90,14 @@ export default function CandidateJobDetailPage({ params, searchParams }: {
   const canApply = job.status === "PUBLISHED" && job.deadline.slice(0, 10) >= new Date().toISOString().slice(0, 10);
   return (
     <main>
-      <PageHeader title={job.title} description={`${job.location} · ${job.level}`} action={<Link className="btn" href="/candidate/jobs">Quay về danh sách</Link>} />
-      <Link className="btn" href={`/reports?type=JOB&id=${encodeURIComponent(job.id)}`}>Báo cáo tin tuyển dụng</Link>
+      <PageHeader title={job.title} description={`${job.location} · ${job.level}`} action={<div className="btn-group"><Link className="btn" href="/candidate/jobs">Quay về danh sách</Link><Link className="btn btn-ghost" href={`/reports?type=JOB&id=${encodeURIComponent(job.id)}`}>Báo cáo tin tuyển dụng</Link></div>} />
       <section className="grid-2">
         <section className="panel">
-          <div className="section-head"><h2>Chi tiết công việc</h2><StatusBadge tone={canApply ? "success" : "warning"}>{job.status}</StatusBadge></div>
+          <div className="section-head"><h2>Chi tiết công việc</h2><StatusBadge tone={canApply ? "success" : "warning"}>{jobStatusLabel(job.status)}</StatusBadge></div>
           <p>{job.description}</p>
           <div className="grid-2">
             <div className="stat"><strong>Lương</strong><p>{job.isNegotiable ? "Thỏa thuận" : `${formatSalary(job.salaryMin, job.currency)} – ${job.salaryMax === null ? "Chưa công bố" : formatSalary(job.salaryMax, job.currency)}`}</p></div>
-            <div className="stat"><strong>Hình thức</strong><p>{({ FULLTIME: "Toàn thời gian", PARTTIME: "Bán thời gian", REMOTE: "Làm việc từ xa", INTERNSHIP: "Thực tập" })[job.type]}</p></div>
+            <div className="stat"><strong>Hình thức</strong><p>{jobTypeLabel(job.type)}</p></div>
           </div>
           <h3>Yêu cầu ứng viên</h3>
           <ul>{job.requirements.map((item, index) => <li key={index}>{item}</li>)}</ul>

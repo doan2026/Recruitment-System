@@ -1,5 +1,7 @@
 "use client";
 
+import { applicationStatusLabel } from "@/lib/recruitmentLabels";
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { PageHeader, StatusBadge, LoadingState, ErrorState } from "@/components/ui";
@@ -24,13 +26,13 @@ export default function RecruiterApplicationDetailPage({ params }: { params: { a
   if (loading) return <main><LoadingState /></main>;
   if (error || !application) return <main><ErrorState message={error || "Không tìm thấy hồ sơ."} onRetry={() => setReload(v => v + 1)} /></main>;
   return <main>
-    <PageHeader eyebrow="CHI TIẾT HỒ SƠ" title={application.jobTitle} description={`Mã ứng viên: ${application.candidateId || "—"}`}
+    <PageHeader eyebrow="CHI TIẾT HỒ SƠ" title={application.jobTitle} description="Xem hồ sơ, đánh giá và liên hệ ứng viên trong cùng một nơi."
       action={<div className="btn-group">
         {["REVIEWING", "INTERVIEW"].includes(application.status) && <Link className="btn btn-primary" href={`/recruiter/applications/${application.id}/interview`}>Đặt lịch phỏng vấn</Link>}
         {application.status === "INTERVIEW" && <Link className="btn" href={`/recruiter/applications/${application.id}/offer`}>Tạo Offer</Link>}
-        <Link className="btn" href={`/recruiter/jobs/${application.jobId}`}>Xem pipeline</Link>
+        <Link className="btn" href={`/recruiter/jobs/${application.jobId}`}>Hồ sơ theo tin</Link>
       </div>} />
-    <section className="card stack"><h2>Thông tin ứng tuyển</h2><StatusBadge>{application.status}</StatusBadge>
+    <section className="card stack"><h2>Thông tin ứng tuyển</h2><StatusBadge>{applicationStatusLabel(application.status)}</StatusBadge>
       <p>Nộp ngày {new Date(application.createdAt).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })}</p>
       {application.coverLetter && <p style={{ whiteSpace: "pre-wrap" }}>{application.coverLetter}</p>}
       <RecruiterCvAccess applicationId={application.id} />

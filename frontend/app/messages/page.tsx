@@ -198,11 +198,11 @@ function ChatInterface({ accountId }: { accountId: string }) {
   }
 
   return <main>
-    <PageHeader title="Tin nhắn" description="Trao đổi với ứng viên và nhà tuyển dụng trong từng cuộc trò chuyện." />
+    <PageHeader eyebrow="TRAO ĐỔI" title="Tin nhắn" description="Trao đổi với ứng viên và nhà tuyển dụng trong từng cuộc trò chuyện." />
     <div className="messages-workspace card" style={{ padding: 0, overflow: "hidden" }}>
       <section className="messages-list" aria-label="Danh sách hội thoại">
         <div className="stack" style={{ padding: 16 }}>
-          <h2 style={{ fontSize: "1rem", margin: 0 }}>Cuộc trò chuyện</h2>
+          <h2>Cuộc trò chuyện</h2>
           <button className="btn" type="button" onClick={() => void fetchConversations()} disabled={loading}>Tải lại hội thoại</button>
           {loading && <LoadingState />}
           {listError && <ErrorState message={listError} onRetry={() => void fetchConversations()} />}
@@ -218,8 +218,8 @@ function ChatInterface({ accountId }: { accountId: string }) {
       </section>
       <section className="messages-thread" aria-label="Nội dung cuộc trò chuyện">
         {selectedId ? <>
-          <div className="btn-group" style={{ padding: 16, borderBottom: "1px solid var(--line)", justifyContent: "space-between" }}>
-            <div><h2 style={{ fontSize: "1rem", margin: 0 }}>{selected?.title || "Cuộc trò chuyện"}</h2>
+          <div className="section-head" style={{ padding: 16, marginBottom: 0, borderBottom: "1px solid var(--line)" }}>
+            <div><h2>{selected?.title || "Cuộc trò chuyện"}</h2>
               <small className="muted" role="status">{connected ? "Đã kết nối" : "Đang kết nối lại · Tin nhắn cập nhật định kỳ"}</small></div>
             <button className="btn btn-primary" type="button" onClick={() => void startCall()} disabled={!selected || startingCall}>{startingCall ? "Đang tạo cuộc gọi…" : "Gọi video"}</button>
           </div>

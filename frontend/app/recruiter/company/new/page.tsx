@@ -60,9 +60,9 @@ export default function NewCompanyPage() {
   return (
     <main>
       <PageHeader
-        eyebrow="RECRUITER · COMPANY ONBOARDING"
+        eyebrow="DOANH NGHIỆP"
         title="Tạo hồ sơ công ty"
-        description="Thông tin này tạo công ty và quyền OWNER của bạn trong cùng một giao dịch."
+        description="Giới thiệu doanh nghiệp và bắt đầu quản lý tuyển dụng với vai trò chủ sở hữu."
       />
 
       <section className="grid-2">
@@ -129,9 +129,9 @@ export default function NewCompanyPage() {
         <aside className="panel">
           <h2>Sau khi tạo hồ sơ</h2>
           <ol className="stack">
-            <li className="card"><strong>1. Chờ xác minh</strong><p className="help">Hồ sơ bắt đầu ở trạng thái PENDING.</p></li>
-            <li className="card"><strong>2. Hoàn thiện hình ảnh</strong><p className="help">Tải logo và thư viện qua Media handshake.</p></li>
-            <li className="card"><strong>3. Mời thành viên</strong><p className="help">Bạn là OWNER đầu tiên và có thể mời recruiter khác.</p></li>
+            <li className="card"><strong>1. Chờ xác minh</strong><p className="help">Hồ sơ mới sẽ chờ xác minh trước khi công khai.</p></li>
+            <li className="card"><strong>2. Hoàn thiện hình ảnh</strong><p className="help">Bổ sung logo và hình ảnh để giới thiệu môi trường làm việc.</p></li>
+            <li className="card"><strong>3. Mời thành viên</strong><p className="help">Bạn là chủ sở hữu đầu tiên và có thể mời nhà tuyển dụng khác cùng tham gia.</p></li>
           </ol>
         </aside>
       </section>

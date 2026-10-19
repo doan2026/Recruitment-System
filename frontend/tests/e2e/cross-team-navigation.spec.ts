@@ -81,3 +81,35 @@ test("Recruiter notifications use a responsive sidebar with an active destinatio
   await page.evaluate(async () => { await document.fonts.ready; });
   await page.screenshot({ path: `/tmp/recruitment-fe-recruiter-${info.project.name}.png`, fullPage: true });
 });
+
+test("Homepage directs visitors into job discovery and the recruiter portal", async ({ page }, info) => {
+  await session(page);
+  await page.route(api + "/jobs**", r => reply(r, [], 200));
+  await page.goto("/");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Cơ hội mới");
+  await noPageOverflow(page);
+  await page.evaluate(() => document.fonts.ready);
+  await page.screenshot({ path: `/tmp/recruitment-ui-after-home-${info.project.name}.png`, fullPage: true });
+  await page.getByRole("link", { name: "Tìm việc ngay", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Việc làm công khai" })).toBeVisible();
+  await expect(page.locator(".workspace-sidebar")).toHaveCount(0);
+  await page.getByRole("link", { name: "CareerHub - Trang chủ" }).click();
+  await page.getByRole("main").getByRole("link", { name: "Dành cho nhà tuyển dụng", exact: true }).click();
+  await expect(page).toHaveURL(/\/recruiter\/login$/);
+  await expect(page.getByLabel("Email công việc", { exact: true })).toBeVisible();
+  await noPageOverflow(page);
+});
+
+test("Candidate can reach general reporting from the workspace on every viewport", async ({ page }) => {
+  await session(page, "CANDIDATE");
+  await page.goto("/notifications");
+  const nav = page.getByRole("navigation", { name: "Khu vực ứng viên" });
+  const report = nav.getByRole("link", { name: "Báo cáo vi phạm", exact: true });
+  await report.focus();
+  await expect(report).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/reports$/);
+  await expect(page.getByRole("heading", { name: "Báo cáo vi phạm", exact: true })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Báo cáo vi phạm", exact: true })).toHaveAttribute("aria-current", "page");
+  await noPageOverflow(page);
+});

@@ -50,8 +50,7 @@ export default async function CompanyDetailPage({ params }: { params: { companyI
 
   return (
     <main>
-      <PageHeader eyebrow="CANDIDATE · COMPANY" title={company.name} description={company.description} />
-      <Link className="btn" href={`/reports?type=COMPANY&id=${encodeURIComponent(company.id)}`}>Báo cáo công ty</Link>
+      <PageHeader eyebrow="DOANH NGHIỆP" title={company.name} description={company.description} action={<Link className="btn" href={`/reports?type=COMPANY&id=${encodeURIComponent(company.id)}`}>Báo cáo công ty</Link>} />
 
       <section className="panel company-public-hero">
         <div className="company-public-logo">
@@ -75,9 +74,9 @@ export default async function CompanyDetailPage({ params }: { params: { companyI
       </section>
 
       <section className="panel">
-        <div className="section-head"><div><p className="eyebrow">KHÔNG GIAN LÀM VIỆC</p><h2>Hình ảnh doanh nghiệp</h2></div><span className="badge">{media.length} media</span></div>
+        <div className="section-head"><div><p className="eyebrow">KHÔNG GIAN LÀM VIỆC</p><h2>Hình ảnh doanh nghiệp</h2></div><span className="badge">{media.length} ảnh và video</span></div>
         {media.length === 0 ? (
-          <EmptyState title="Chưa có hình ảnh công khai" description="Media chỉ xuất hiện sau khi hoàn tất xử lý và được hồ sơ công khai trả về." />
+          <EmptyState title="Chưa có hình ảnh công khai" description="Doanh nghiệp chưa bổ sung hình ảnh. Hãy quay lại sau để khám phá môi trường làm việc." />
         ) : (
           <div className="company-public-media">
             {media.map((item, index) => item.type === "VIDEO" ? (
@@ -87,7 +86,7 @@ export default async function CompanyDetailPage({ params }: { params: { companyI
             ))}
           </div>
         )}
-        <p className="filter-note">Danh sách này lấy từ response công khai hiện tại; media vừa xác nhận có thể cần thời gian xử lý trước khi xuất hiện.</p>
+        <p className="filter-note">Hình ảnh và video mới có thể cần một chút thời gian xử lý trước khi xuất hiện.</p>
       </section>
     </main>
   );

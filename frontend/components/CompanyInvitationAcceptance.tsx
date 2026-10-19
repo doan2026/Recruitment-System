@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { companyMemberRoleLabel } from "@/lib/recruitmentLabels";
+import { companyVerificationView } from "@/lib/companyVerification";
 import { type FormEvent, useRef, useState } from "react";
 import { ApiClientError } from "../lib/apiClient";
 import {
@@ -63,7 +65,7 @@ export function CompanyInvitationAcceptance() {
       <section className="panel invitation-accept-success" aria-live="polite">
         <p className="eyebrow">ĐÃ THAM GIA</p>
         <h2>{membership.name}</h2>
-        <p>Bạn đã tham gia với vai trò <strong>{membership.memberRole}</strong>. Trạng thái công ty: {membership.verifiedStatus}.</p>
+        <p>Bạn đã tham gia với vai trò <strong>{companyMemberRoleLabel(membership.memberRole)}</strong>. Trạng thái công ty: {companyVerificationView(membership.verifiedStatus).title}.</p>
         <Link className="btn btn-primary" href="/recruiter/company">Mở hồ sơ công ty</Link>
       </section>
     );
@@ -72,9 +74,9 @@ export function CompanyInvitationAcceptance() {
   return (
     <section className="panel invitation-accept-panel" aria-labelledby="invitation-accept-title">
       <div>
-        <p className="eyebrow">RECRUITER · LỜI MỜI</p>
-        <h2 id="invitation-accept-title">Nhập token từ OWNER</h2>
-        <p className="help">Token được OWNER gửi thủ công. Giá trị chỉ nằm trong form này và không được đưa lên URL hoặc lưu trên trình duyệt.</p>
+        <p className="eyebrow">LỜI MỜI THAM GIA</p>
+        <h2 id="invitation-accept-title">Nhập mã từ chủ sở hữu</h2>
+        <p className="help">Nhập mã lời mời do chủ sở hữu gửi riêng cho bạn. Mã chỉ được dùng trong biểu mẫu này.</p>
       </div>
 
       {failure ? (
@@ -93,7 +95,7 @@ export function CompanyInvitationAcceptance() {
 
       <form className="form-grid" noValidate onSubmit={submit}>
         <div className="field span-2">
-          <label className="label" htmlFor="accept-invitation-token">Token lời mời</label>
+          <label className="label" htmlFor="accept-invitation-token">Mã lời mời</label>
           <input
             ref={tokenRef}
             id="accept-invitation-token"
@@ -118,7 +120,7 @@ export function CompanyInvitationAcceptance() {
           <button className="btn btn-primary" type="submit" disabled={submitting} aria-busy={submitting}>
             {submitting ? "Đang xác nhận…" : "Nhận lời mời"}
           </button>
-          {token ? <button className="btn" type="button" disabled={submitting} onClick={resetToken}>Xóa token</button> : null}
+          {token ? <button className="btn" type="button" disabled={submitting} onClick={resetToken}>Xóa mã lời mời</button> : null}
         </div>
       </form>
     </section>

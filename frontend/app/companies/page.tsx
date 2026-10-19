@@ -90,7 +90,7 @@ export default function CompaniesPage() {
 
   return (
     <main>
-      <PageHeader eyebrow="CANDIDATE · COMPANY" title="Khám phá doanh nghiệp" description="Tìm các công ty đã được xác minh và xem nơi phù hợp với định hướng của bạn." />
+      <PageHeader eyebrow="DOANH NGHIỆP" title="Khám phá doanh nghiệp" description="Tìm các công ty đã được xác minh và xem nơi phù hợp với định hướng của bạn." />
       <section className="panel">
         <div className="toolbar">
           <div className="field search-field">
@@ -106,7 +106,7 @@ export default function CompaniesPage() {
           </div>
           {locked ? <button className="btn" type="button" onClick={startNewSearch}>Tìm kiếm mới</button> : null}
         </div>
-        <p className="filter-note">Khi tải thêm, từ khóa và số lượng được khóa để cursor luôn hợp lệ.</p>
+        <p className="filter-note">Để đổi từ khóa hoặc số lượng sau khi tải thêm, hãy chọn “Tìm kiếm mới”.</p>
       </section>
 
       <section className="panel company-search-results" aria-busy={loading}>

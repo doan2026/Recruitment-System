@@ -39,6 +39,9 @@
     "build": "frontend/.next/build-manifest.json",
     "fullFlowFixes": "frontend/tests/e2e/person2-flow-fixes.spec.ts",
     "companyProfile": "frontend/tests/e2e/company-profile-edit.spec.ts",
-    "sessionApi": "frontend/lib/person2Flow.test.ts"
+    "sessionApi": "frontend/lib/person2Flow.test.ts",
+    "workspaceConsistency": "frontend/tests/e2e/workspace-consistency.spec.ts",
+    "authConsistency": "frontend/tests/e2e/auth-consistency.spec.ts",
+    "publicLogout": "frontend/tests/e2e/public-logout.spec.ts"
   }
 }

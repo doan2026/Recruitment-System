@@ -8,7 +8,7 @@ export function bookmarkCardView(bookmark: BookmarkDegradedInput) {
     return {
       available: false as const,
       title: "Chi tiết việc làm tạm thời không khả dụng",
-      description: `Bookmark ${bookmark.jobId} vẫn được giữ. Hãy thử lại khi Job Service hoạt động ổn định.`,
+      description: `Tin đã lưu (${bookmark.jobId}) vẫn được giữ. Hãy thử lại để tải nội dung việc làm.`,
     };
   }
   return {
@@ -16,7 +16,7 @@ export function bookmarkCardView(bookmark: BookmarkDegradedInput) {
     title: bookmark.job.title,
     description: bookmark.job.exists
       ? "Thông tin việc làm đã được đồng bộ."
-      : "Tin đã không còn tồn tại nhưng bookmark vẫn được giữ để bạn nhận biết.",
+      : "Tin không còn tồn tại nhưng vẫn được giữ trong danh sách đã lưu của bạn.",
   };
 }
 
@@ -24,7 +24,7 @@ export function activeJobsMetricView(activeJobs: { count: number | null; availab
   if (!activeJobs.available || activeJobs.count === null) {
     return {
       value: "—",
-      detail: "Job Service đang gián đoạn; các số liệu Application khác vẫn chính xác.",
+      detail: "Chưa tải được thống kê tin tuyển dụng; các số liệu hồ sơ khác vẫn được hiển thị.",
       degraded: true,
     };
   }

@@ -11,14 +11,14 @@ export interface RecruiterJobScopeView {
 export function recruiterJobScopeView(role: RecruiterJobScopeRole): RecruiterJobScopeView {
   if (role === "OWNER") {
     return {
-      label: "OWNER · Toàn công ty",
+      label: "Chủ sở hữu · Toàn công ty",
       description: "Bạn đang xem mọi tin tuyển dụng thuộc công ty, gồm cả tin do thành viên khác tạo.",
       tone: "success",
     };
   }
   return {
-    label: "MEMBER · Tin của bạn",
-    description: "Danh sách chỉ gồm tin do bạn tạo. Backend vẫn từ chối thao tác lên tin của người khác.",
+    label: "Thành viên · Tin của bạn",
+    description: "Bạn có thể xem và quản lý những tin do bạn tạo.",
     tone: "info",
   };
 }

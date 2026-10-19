@@ -1,98 +1,21 @@
 import Link from "next/link";
-import { PageHeader } from "@/components/ui";
-
-const person2Cards = [
-  {
-    title: "Tìm việc theo AI & Search",
-    desc: "Trang việc làm công khai, lọc theo nguồn, cursor/page mode và dữ liệu fallback từ AI/recommendation.",
-    href: "/candidate/jobs",
-    cta: "Mở việc làm",
-  },
-  {
-    title: "Theo dõi hồ sơ ứng tuyển",
-    desc: "Máy trạng thái hồ sơ APPLIED → REVIEWING → INTERVIEW → OFFER → HIRED/REJECTED.",
-    href: "/candidate/applications",
-    cta: "Mở hồ sơ của tôi",
-  },
-  {
-    title: "Việc làm đã lưu",
-    desc: "Giữ bookmark ổn định và hiển thị placeholder khi dữ liệu Job tạm gián đoạn.",
-    href: "/candidate/bookmarks",
-    cta: "Mở việc đã lưu",
-  },
-  {
-    title: "Quản trị tin đăng",
-    desc: "Recruiter tạo/sửa job, duyệt, đóng/mở tin, và quy tắc owner-only.",
-    href: "/recruiter/jobs",
-    cta: "Quản lý tin",
-  },
-  {
-    title: "Dashboard tuyển dụng",
-    desc: "Theo dõi số liệu Application đầy đủ ngay cả khi thống kê tin đang tuyển bị suy giảm.",
-    href: "/recruiter/dashboard",
-    cta: "Mở dashboard",
-  },
-  {
-    title: "Quản lý công ty",
-    desc: "Tạo công ty, upload media theo 3 bước, theo dõi verify status.",
-    href: "/recruiter/company",
-    cta: "Mở công ty",
-  },
-  {
-    title: "Offer Center",
-    desc: "Mẫu gửi offer theo phiên bản, gửi lại theo thời gian đáp ứng, và preview attachment.",
-    href: "/recruiter/offer",
-    cta: "Tạo offer",
-  },
-  {
-    title: "AI Job Assistant",
-    desc: "Chat UI với quản lý session_id, validate đầu vào, và chế độ rate limit.",
-    href: "/ai",
-    cta: "Mở AI",
-  },
-];
-
+import { ArrowRight, BriefcaseBusiness, Building2, FileText, Files, MessageSquare, Search } from "lucide-react";
 import { PublicShell } from "@/components/PublicShell";
 
+const destinations = [
+  { title: "Tìm việc làm", description: "Khám phá cơ hội theo kỹ năng, vị trí và hình thức làm việc của bạn.", href: "/candidate/jobs", label: "Khám phá việc làm", icon: Search },
+  { title: "Chuẩn bị hồ sơ", description: "Cập nhật thông tin cá nhân, quản lý CV và sẵn sàng ứng tuyển.", href: "/candidate/profile/cvs", label: "Quản lý CV", icon: FileText },
+  { title: "Theo dõi ứng tuyển", description: "Xem tiến trình hồ sơ, lịch phỏng vấn và phản hồi từ nhà tuyển dụng.", href: "/candidate/applications", label: "Xem đơn ứng tuyển", icon: Files },
+  { title: "Khám phá doanh nghiệp", description: "Tìm hiểu công ty và các vị trí đang mở trước khi gửi hồ sơ.", href: "/companies", label: "Xem doanh nghiệp", icon: Building2 },
+  { title: "Quản lý tuyển dụng", description: "Đăng tin, xem hồ sơ ứng viên và theo dõi hoạt động tuyển dụng của công ty.", href: "/recruiter/dashboard", label: "Vào không gian tuyển dụng", icon: BriefcaseBusiness },
+  { title: "Kết nối và trao đổi", description: "Tiếp tục trò chuyện với ứng viên hoặc nhà tuyển dụng trong một nơi.", href: "/messages", label: "Mở tin nhắn", icon: MessageSquare },
+];
 export default function HomePage() {
-  return (
-    <PublicShell>
-      <main>
-        <section className="hero">
-          <div className="hero-copy">
-            <p className="eyebrow">CAREER OPERATING SYSTEM</p>
-            <h1>Nơi mỗi bước tuyển dụng đều <em>rõ ràng.</em></h1>
-            <p>Tìm đúng công việc, theo dõi hồ sơ và vận hành pipeline tuyển dụng trên cùng một nhịp làm việc.</p>
-            <div className="btn-group">
-              <Link className="btn btn-primary btn-large" href="/candidate/jobs">Khám phá việc làm</Link>
-              <Link className="btn btn-secondary btn-large" href="/recruiter/jobs">Không gian recruiter</Link>
-            </div>
-          </div>
-          <div className="hero-orbit" aria-label="Tổng quan nền tảng">
-            <span className="orbit-label">Career signal</span>
-            <strong>92%</strong>
-            <p>độ phù hợp cao nhất hôm nay</p>
-            <div className="orbit-track"><span /></div>
-            <small>AI · Skills · Preferences</small>
-          </div>
-        </section>
-
-        <PageHeader
-          eyebrow="PHẠM VI NGƯỜI 2"
-          title="Các luồng nghiệp vụ đã sẵn sàng"
-          description="Company, Job & Search, Application và AI được kết nối bằng một ngôn ngữ giao diện thống nhất."
-        />
-        <section className="feature-grid">
-          {person2Cards.map((card, index) => (
-            <article className="feature-card" key={card.href}>
-              <span className="feature-number">{String(index + 1).padStart(2, "0")}</span>
-              <h2>{card.title}</h2>
-              <p>{card.desc}</p>
-              <Link className="text-link" href={card.href}>{card.cta} <span aria-hidden="true">→</span></Link>
-            </article>
-          ))}
-        </section>
-      </main>
-    </PublicShell>
-  );
+  return <PublicShell><main className="home-page">
+    <section className="home-intro">
+      <div><p className="eyebrow">CÙNG BẠN TRÊN HÀNH TRÌNH NGHỀ NGHIỆP</p><h1>Cơ hội mới.<br /><span>Một nơi để bắt đầu.</span></h1><p>Từ chuẩn bị CV đến kết nối với nhà tuyển dụng, CareerHub giúp bạn theo dõi từng bước và chủ động với cơ hội tiếp theo.</p><div className="btn-group"><Link className="btn btn-primary" href="/candidate/jobs">Tìm việc ngay <ArrowRight size={17} aria-hidden="true" /></Link><Link className="btn" href="/recruiter/login">Dành cho nhà tuyển dụng</Link></div></div>
+      <aside className="home-journey" aria-label="Hành trình ứng tuyển"><p className="eyebrow">BƯỚC TIẾP THEO CỦA BẠN</p><h2>Tự tin từ bước đầu tiên</h2><ol><li><span>01</span><div><strong>Chuẩn bị hồ sơ</strong><p>Giới thiệu kinh nghiệm và thế mạnh của bạn.</p></div></li><li><span>02</span><div><strong>Tìm việc phù hợp</strong><p>Khám phá vị trí và doanh nghiệp bạn quan tâm.</p></div></li><li><span>03</span><div><strong>Kết nối và theo dõi</strong><p>Ứng tuyển, trao đổi và cập nhật tiến trình.</p></div></li></ol><Link className="text-link" href="/candidate/profile">Hoàn thiện hồ sơ <ArrowRight size={16} aria-hidden="true" /></Link></aside>
+    </section>
+    <section aria-labelledby="home-destinations"><div className="section-head"><div><p className="eyebrow">KHÔNG GIAN CAREERHUB</p><h2 id="home-destinations">Bạn muốn bắt đầu từ đâu?</h2><p className="muted">Các công cụ dành cho ứng viên và nhà tuyển dụng, cùng một trải nghiệm xuyên suốt.</p></div></div><div className="home-destinations">{destinations.map(({ title, description, href, label, icon: Icon }) => <article className="card home-destination" key={href}><span className="home-icon"><Icon size={22} strokeWidth={1.7} aria-hidden="true" /></span><h3>{title}</h3><p>{description}</p><Link className="text-link" href={href}>{label}<ArrowRight size={16} aria-hidden="true" /></Link></article>)}</div></section>
+  </main></PublicShell>;
 }

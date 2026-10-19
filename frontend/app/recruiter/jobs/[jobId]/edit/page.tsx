@@ -1,5 +1,7 @@
 "use client";
 
+import { jobStatusLabel } from "@/lib/recruitmentLabels";
+
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -169,7 +171,7 @@ export default function EditRecruiterJobPage() {
   return (
     <main>
       <PageHeader
-        eyebrow="RECRUITER · JOB REVIEW"
+        eyebrow="CHỈNH SỬA TIN"
         title={job.rejectionReason ? "Sửa tin theo góp ý" : "Sửa tin tuyển dụng"}
         description="Sửa nội dung tuyển dụng. Với tin đang công khai, đổi tiêu đề, mô tả, yêu cầu, lương hoặc đơn vị tiền cần admin duyệt lại; hạn nộp, số lượng và các trường khác được cập nhật ngay."
         action={<Link className="btn" href="/recruiter/jobs">Về danh sách</Link>}
@@ -186,7 +188,7 @@ export default function EditRecruiterJobPage() {
       {!editable ? (
         <section className="notice" role="status">
           <strong>Tin không còn ở trạng thái có thể sửa.</strong>
-          <p>Trạng thái hiện tại: <StatusBadge tone={job.status === "PUBLISHED" ? "success" : "warning"}>{job.status}</StatusBadge></p>
+          <p>Trạng thái hiện tại: <StatusBadge tone={job.status === "PUBLISHED" ? "success" : "warning"}>{jobStatusLabel(job.status)}</StatusBadge></p>
         </section>
       ) : null}
       {successMessage ? <p className="notice notice-success" role="status">{successMessage}</p> : null}

@@ -1,5 +1,7 @@
 "use client";
 
+import { applicationStatusLabel } from "@/lib/recruitmentLabels";
+
 import Link from "next/link";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { applicationCooldownView } from "../lib/applicationCooldown";
@@ -56,7 +58,7 @@ export function ApplyForm({ jobId, source = "SEARCH" }: { jobId: string; source?
     try {
       const response = await submitCandidateApplication({ jobId, cvId, coverLetter, source });
       setSubmitted(true);
-      setMessage(`Đã gửi hồ sơ ứng tuyển. Trạng thái hiện tại: ${response.data.status}.`);
+      setMessage(`Đã gửi hồ sơ ứng tuyển. Trạng thái hiện tại: ${applicationStatusLabel(response.data.status)}.`);
     } catch (reason) { setResponseError(reason); }
     finally { locked.current = false; setPending(false); }
   }

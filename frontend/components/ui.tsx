@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Inbox } from "lucide-react";
 import type { ReactNode } from "react";
 
 export function PageHeader({
@@ -41,7 +42,7 @@ export function EmptyState({
 }) {
   return (
     <div className="empty-state">
-      <span className="empty-mark" aria-hidden="true">◎</span>
+      <span className="empty-mark" aria-hidden="true"><Inbox size={24} strokeWidth={1.7} /></span>
       <h3>{title}</h3>
       <p>{description}</p>
       {href && action ? (

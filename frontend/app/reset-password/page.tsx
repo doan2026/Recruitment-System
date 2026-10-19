@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { AuthFrame } from "../../components/AuthFrame";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { requestApi } from "../../lib/apiClient";
 import { publicAuth, passwordError, person1Error, person1FormError } from "../../lib/person1Api";
@@ -50,56 +51,17 @@ export default function ResetPasswordPage() {
       setPending(false);
     }
   }
-  return (
-    <section className="page-section">
-      <h1>Đặt lại mật khẩu</h1>
-      <form className="card form-stack" noValidate onSubmit={submit}>
-        {done ? (
-          <p role="status">Mật khẩu đã được cập nhật. Hãy đăng nhập lại.</p>
-        ) : (
-          <>
-            <label className="field">
-              Mật khẩu mới
-              <input
-                className="input"
-                type="password"
-                autoComplete="new-password"
-                required
-                maxLength={128}
-                disabled={pending}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </label>
-            <label className="field">
-              Nhập lại mật khẩu
-              <input
-                className="input"
-                type="password"
-                autoComplete="new-password"
-                required
-                maxLength={128}
-                disabled={pending}
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-              />
-            </label>
-            <button
-              className="btn btn-primary"
-              disabled={pending || !token.current}
-            >
-              {pending ? "Đang lưu…" : "Lưu mật khẩu"}
-            </button>
-          </>
-        )}
-        {error ? (
-          <p role="alert" className="notice notice-danger">
-            {error}
-          </p>
-        ) : null}
-        <Link href="/login">Đăng nhập</Link>
-        <Link href="/forgot-password">Yêu cầu liên kết mới</Link>
-      </form>
-    </section>
-  );
+  return <AuthFrame title="Đặt lại mật khẩu" description="Chọn mật khẩu mới để tiếp tục sử dụng tài khoản CareerHub.">
+    <form className="auth-form" noValidate onSubmit={submit}>
+      {done ? <p className="auth-message" role="status">Mật khẩu đã được cập nhật. Hãy đăng nhập lại.</p> : <>
+        <div className="auth-field"><label htmlFor="reset-password">Mật khẩu mới</label><input id="reset-password" type="password" autoComplete="new-password" required maxLength={128} disabled={pending} value={password} onChange={event => setPassword(event.target.value)} aria-describedby="reset-password-help" /></div>
+        <div className="auth-field"><label htmlFor="reset-confirm">Nhập lại mật khẩu</label><input id="reset-confirm" type="password" autoComplete="new-password" required maxLength={128} disabled={pending} value={confirm} onChange={event => setConfirm(event.target.value)} /></div>
+        <p id="reset-password-help" className="auth-help">Ít nhất 8 ký tự, có chữ và số, tối đa 72 byte.</p>
+        <button className="auth-submit" type="submit" disabled={pending || !token.current} aria-busy={pending}>{pending ? "Đang lưu…" : "Lưu mật khẩu"}</button>
+      </>}
+      {error ? <p className="auth-error" role="alert">{error}</p> : null}
+    </form>
+    <p className="auth-signup"><Link href="/login">Đăng nhập</Link></p>
+    <Link className="auth-back-link" href="/forgot-password">Yêu cầu liên kết mới</Link>
+  </AuthFrame>;
 }

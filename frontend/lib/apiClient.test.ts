@@ -764,7 +764,7 @@ test("bookmark degradation keeps the saved record and replaces only missing Job 
 test("dashboard degradation preserves Application metrics and masks unavailable active Jobs", () => {
   assert.deepEqual(activeJobsMetricView({ count: null, available: false }), {
     value: "—",
-    detail: "Job Service đang gián đoạn; các số liệu Application khác vẫn chính xác.",
+    detail: "Chưa tải được thống kê tin tuyển dụng; các số liệu hồ sơ khác vẫn được hiển thị.",
     degraded: true,
   });
   assert.equal(activeJobsMetricView({ count: 7, available: true }).value, "7");
@@ -1093,9 +1093,9 @@ test("company invitation blocks missing, malformed and oversized emails", () => 
 });
 
 test("invitation acceptance validates tokens without persisting them", () => {
-  assert.equal(validateInvitationToken(""), "Nhập token lời mời.");
-  assert.equal(validateInvitationToken("short"), "Token phải có ít nhất 32 ký tự.");
-  assert.equal(validateInvitationToken("x".repeat(129)), "Token không được vượt quá 128 ký tự.");
+  assert.equal(validateInvitationToken(""), "Nhập mã lời mời.");
+  assert.equal(validateInvitationToken("short"), "Mã lời mời phải có ít nhất 32 ký tự.");
+  assert.equal(validateInvitationToken("x".repeat(129)), "Mã lời mời không được vượt quá 128 ký tự.");
   assert.equal(validateInvitationToken(`  ${"x".repeat(32)}  `), null);
 });
 
@@ -1105,19 +1105,19 @@ test("invitation acceptance maps every business failure to a distinct recovery C
 
   assert.deepEqual(
     [view("INVITATION_NOT_FOUND", 404).title, view("INVITATION_NOT_FOUND", 404).actionLabel],
-    ["Không tìm thấy lời mời", "Kiểm tra token khác"],
+    ["Không tìm thấy lời mời", "Kiểm tra mã lời mời khác"],
   );
-  assert.equal(view("INVITATION_EXPIRED", 410).actionLabel, "Nhập token được phát lại");
-  assert.equal(view("INVITATION_REISSUE_REQUIRED", 409).actionLabel, "Nhập token mới");
+  assert.equal(view("INVITATION_EXPIRED", 410).actionLabel, "Nhập mã được gửi lại");
+  assert.equal(view("INVITATION_REISSUE_REQUIRED", 409).actionLabel, "Nhập mã lời mời mới");
   assert.match(
     view("INVITATION_NOT_ACTIVE", 409, { status: "REVOKED" }).description,
-    /REVOKED/,
+    /Đã thu hồi/,
   );
   assert.deepEqual(
     [view("RECRUITER_ALREADY_HAS_COMPANY", 409).action, view("RECRUITER_ALREADY_HAS_COMPANY", 409).actionLabel],
     ["OPEN_COMPANY", "Mở hồ sơ công ty"],
   );
-  assert.equal(view("INVITATION_EMAIL_MISMATCH", 403).actionLabel, "Dùng token cho tài khoản này");
+  assert.equal(view("INVITATION_EMAIL_MISMATCH", 403).actionLabel, "Dùng mã lời mời cho tài khoản này");
   assert.equal(view("AUTH_ACCOUNT_INACTIVE", 403).actionLabel, "Kiểm tra bằng tài khoản khác");
   assert.equal(view("AUTH_ACCOUNT_INVALID", 401).actionLabel, "Thử lại sau khi đăng nhập");
 });
@@ -1129,7 +1129,7 @@ test("invitation acceptance keeps unknown failures retryable", () => {
     details: {},
   }), {
     title: "Chưa nhận được lời mời",
-    description: "Kết nối có thể đang gián đoạn. Token vẫn được giữ trên màn hình này.",
+    description: "Kết nối có thể đang gián đoạn. Mã lời mời vẫn được giữ trên màn hình này.",
     action: "RETRY",
     actionLabel: "Thử lại",
   });
@@ -1314,7 +1314,7 @@ test("only stale Job and recommendation cursors restart their owning list", () =
 
 test("Job and recommendation sources have transparent user-facing context", () => {
   assert.match(jobDataSourceView("ELASTICSEARCH").description, /chỉ mục/i);
-  assert.match(jobDataSourceView("POSTGRESQL").description, /PostgreSQL/);
+  assert.match(jobDataSourceView("POSTGRESQL").description, /trực tiếp.*chưa sẵn sàng/);
   assert.match(recommendationSourceView("AI").label, /AI/);
   assert.notEqual(recommendationSourceView("PREFERENCES").label, recommendationSourceView("LATEST").label);
 });

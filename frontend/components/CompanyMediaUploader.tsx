@@ -105,7 +105,7 @@ export function CompanyMediaUploader({
 
   function requestSignature() {
     if (!file) {
-      setError("Hãy chọn file trước khi xin chữ ký tải lên.");
+      setError("Hãy chọn tệp trước khi bắt đầu tải lên.");
       return;
     }
     const localError = validateCompanyMediaFile(file, type);
@@ -121,7 +121,7 @@ export function CompanyMediaUploader({
       if (capabilityError) throw new ApiClientError({ code: "MEDIA_UPLOAD_POLICY_MISMATCH" });
       setCapability(response.data);
       setPhase("signed");
-      setStatus("Đã nhận chữ ký. Tải file lên trước khi thời gian hết hạn.");
+      setStatus("Đã sẵn sàng. Hãy tải tệp lên trước khi hết thời gian cho phép.");
     });
   }
 
@@ -138,14 +138,14 @@ export function CompanyMediaUploader({
     void run(async (signal) => {
       if (!isDemoPerson2Api) await uploadToSignedProvider(capability, file, signal);
       setPhase("uploaded");
-      setStatus("File đã tải lên. Hãy xác nhận để Media kiểm tra dữ liệu canonical.");
+      setStatus("Tệp đã tải lên. Hãy xác nhận để kiểm tra tệp trước khi lưu vào hồ sơ.");
     });
   }
 
   function confirmUpload() {
     if (!capability) return;
     if (remainingSeconds <= 0) {
-      setError("Chữ ký đã hết hạn. File cũ sẽ được hệ thống dọn; hãy xin chữ ký mới để tải lại.");
+      setError("Phiên tải lên đã hết hạn. Hãy chuẩn bị lại để tải tệp.");
       return;
     }
     void run(async (signal) => {
@@ -178,13 +178,13 @@ export function CompanyMediaUploader({
       const response = await updateCompany(company.id, { ...input, expectedVersion: company.aggregateVersion }, signal);
       onCompanyChange(response.data);
       resetForSelection(null);
-      setStatus("Đã gắn media vào hồ sơ công ty.");
+      setStatus("Đã lưu tệp vào hồ sơ công ty.");
     });
   }
 
   function discardConfirmed() {
     resetForSelection(null);
-    setStatus("Đã bỏ file khỏi bản nháp. Upload intent sẽ được hệ thống dọn tự động sau thời gian grace.");
+    setStatus("Đã bỏ tệp khỏi bản nháp. Tệp chưa được lưu vào hồ sơ sẽ được dọn tự động.");
   }
 
   function renewExpiredSignature() {
@@ -193,7 +193,7 @@ export function CompanyMediaUploader({
     setPhase("idle");
     setIdempotencyKey("");
     setError("");
-    setStatus("Phiên cũ sẽ được hệ thống dọn tự động. Hãy xin chữ ký mới cho file đã chọn.");
+    setStatus("Hãy chuẩn bị lại để tải tệp đã chọn. Phiên tải lên cũ sẽ được dọn tự động.");
   }
 
   const accept = type === "COMPANY_VIDEO" ? ".mp4,video/mp4" : ".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp";
@@ -201,7 +201,7 @@ export function CompanyMediaUploader({
   return (
     <div className="stack company-media-uploader">
       <div className="field">
-        <label className="label" htmlFor="company-media-type">Loại media</label>
+        <label className="label" htmlFor="company-media-type">Loại tệp</label>
         <select
           id="company-media-type"
           className="select"
@@ -228,7 +228,7 @@ export function CompanyMediaUploader({
 
       {capability && phase !== "confirmed" ? (
         <p className={remainingSeconds > 30 ? "notice notice-success" : "notice notice-warning"} role="status">
-          Chữ ký còn {remainingSeconds} giây.{remainingSeconds === 0 ? " Hãy xin chữ ký mới." : ""}
+          Thời gian tải lên còn {remainingSeconds} giây.{remainingSeconds === 0 ? " Hãy chuẩn bị tải lên lại." : ""}
         </p>
       ) : null}
       {status ? <p className="notice notice-success" role="status">{status}</p> : null}
@@ -242,10 +242,10 @@ export function CompanyMediaUploader({
       ) : null}
 
       <div className="btn-group">
-        {phase === "idle" ? <button className="btn btn-secondary" type="button" disabled={pending || transientError !== null || !file} onClick={requestSignature}>{pending ? "Đang xin chữ ký…" : "1. Xin chữ ký"}</button> : null}
+        {phase === "idle" ? <button className="btn btn-secondary" type="button" disabled={pending || transientError !== null || !file} onClick={requestSignature}>{pending ? "Đang chuẩn bị…" : "1. Chuẩn bị tải lên"}</button> : null}
         {phase === "signed" ? <button className="btn btn-secondary" type="button" disabled={pending || transientError !== null || remainingSeconds === 0} onClick={uploadFile}>{pending ? "Đang tải…" : "2. Tải file"}</button> : null}
         {phase === "uploaded" ? <button className="btn btn-secondary" type="button" disabled={pending || transientError !== null || remainingSeconds === 0} onClick={confirmUpload}>{pending ? "Đang xác nhận…" : "3. Xác nhận file"}</button> : null}
-        {remainingSeconds === 0 && (phase === "signed" || phase === "uploaded") ? <button className="btn" type="button" disabled={pending} onClick={renewExpiredSignature}>Xin chữ ký mới</button> : null}
+        {remainingSeconds === 0 && (phase === "signed" || phase === "uploaded") ? <button className="btn" type="button" disabled={pending} onClick={renewExpiredSignature}>Chuẩn bị tải lại</button> : null}
         {phase === "confirmed" ? <button className="btn btn-primary" type="button" disabled={pending || transientError !== null} onClick={attachUpload}>{pending ? "Đang gắn…" : "Gắn vào hồ sơ"}</button> : null}
         {phase === "confirmed" ? <button className="btn" type="button" disabled={pending} onClick={discardConfirmed}>Bỏ file</button> : null}
       </div>

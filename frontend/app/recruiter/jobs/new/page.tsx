@@ -1,5 +1,7 @@
 "use client";
 
+import { jobStatusLabel } from "@/lib/recruitmentLabels";
+
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { PageHeader, StatusBadge } from "@/components/ui";
@@ -48,11 +50,11 @@ export default function CreateJobPage() {
 
   return (
     <main>
-      <PageHeader eyebrow="RECRUITER · NEW JOB" title="Tạo tin tuyển dụng" description="Tin mới được lưu ở trạng thái bản nháp. Bạn sẽ chủ động gửi admin duyệt sau khi kiểm tra." />
+      <PageHeader eyebrow="TIN TUYỂN DỤNG" title="Tạo tin tuyển dụng" description="Tin mới được lưu ở trạng thái bản nháp. Bạn sẽ chủ động gửi admin duyệt sau khi kiểm tra." />
       {createdJob ? (
         <section className="notice notice-success" role="status">
           <strong>Đã lưu bản nháp “{createdJob.title}”.</strong>
-          <p>Trạng thái hiện tại: <StatusBadge>{createdJob.status}</StatusBadge>. Tin chưa được công khai.</p>
+          <p>Trạng thái hiện tại: <StatusBadge>{jobStatusLabel(createdJob.status)}</StatusBadge>. Tin chưa được công khai.</p>
           <div className="btn-group"><Link className="btn btn-primary" href={`/recruiter/jobs/${createdJob.id}/edit`}>Kiểm tra và gửi duyệt</Link><Link className="btn" href="/recruiter/jobs">Về danh sách</Link></div>
         </section>
       ) : null}

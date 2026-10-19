@@ -1,5 +1,7 @@
 "use client";
 
+import { jobStatusLabel } from "@/lib/recruitmentLabels";
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { RecruiterApplicationPipeline } from "@/components/RecruiterApplicationPipeline";
@@ -28,11 +30,11 @@ export default function RecruiterJobPipelinePage({ params }: { params: { jobId: 
     return () => { active = false; controller.abort(); };
   }, [params.jobId, reloadKey]);
 
-  if (loading) return <main><LoadingState label="Đang tải pipeline tuyển dụng" /></main>;
+  if (loading) return <main><LoadingState label="Đang tải hồ sơ tuyển dụng" /></main>;
   if (error || !job) return <main><ErrorState message={error || "Không tìm thấy tin tuyển dụng."} onRetry={() => setReloadKey((value) => value + 1)} /><Link className="btn" href="/recruiter/jobs">Về danh sách tin</Link></main>;
   return (
     <main>
-      <PageHeader title={job.title} description="Theo dõi hồ sơ và khám phá ứng viên phù hợp." action={<div className="btn-group"><StatusBadge tone={job.status === "PUBLISHED" ? "success" : "warning"}>{job.status}</StatusBadge><Link className="btn" href="/recruiter/jobs">Về danh sách tin</Link></div>} />
+      <PageHeader title={job.title} description="Theo dõi hồ sơ và khám phá ứng viên phù hợp." action={<div className="btn-group"><StatusBadge tone={job.status === "PUBLISHED" ? "success" : "warning"}>{jobStatusLabel(job.status)}</StatusBadge><Link className="btn" href="/recruiter/jobs">Về danh sách tin</Link></div>} />
       <RecruiterApplicationPipeline jobId={job.id} />
       <RecruiterCandidateRecommendations key={job.id} job={job} />
     </main>

@@ -16,7 +16,7 @@ export interface RecommendationFallbackView {
 export function jobDataSourceView(source: JobDataSource): DataSourceView {
   return source === "ELASTICSEARCH"
     ? { label: "Chỉ mục tìm kiếm", description: "Kết quả từ chỉ mục tìm kiếm tối ưu.", tone: "success" }
-    : { label: "Dữ liệu trực tiếp", description: "Đang đọc từ PostgreSQL khi chỉ mục tìm kiếm chưa sẵn sàng.", tone: "warning" };
+    : { label: "Dữ liệu trực tiếp", description: "Đang hiển thị tin tuyển dụng trực tiếp khi tìm kiếm tạm thời chưa sẵn sàng.", tone: "warning" };
 }
 
 export function recommendationSourceView(source: RecommendationSource): DataSourceView {
@@ -51,14 +51,14 @@ export function recommendationFallbackView(reason?: FallbackReason): Recommendat
     case "AI_NOT_READY":
       return {
         title: "AI đang chuẩn bị dữ liệu",
-        description: "CV hoặc việc làm mới có thể chưa được vector hóa xong.",
+        description: "CV hoặc tin tuyển dụng mới đang được xử lý để tạo gợi ý phù hợp.",
         actionLabel: "Kiểm tra tiến độ xử lý",
         action: "RETRY",
       };
     case "AI_RESPONSE_INVALID":
       return {
-        title: "Kết quả AI chưa đạt định dạng an toàn",
-        description: "Phản hồi lỗi đã bị loại bỏ; danh sách dự phòng vẫn có thể sử dụng.",
+        title: "Chưa thể hiển thị kết quả AI",
+        description: "Bạn vẫn có thể xem việc làm theo sở thích hoặc các tin mới nhất.",
         actionLabel: "Yêu cầu gợi ý mới",
         action: "RETRY",
       };

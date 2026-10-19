@@ -1,5 +1,7 @@
 "use client";
 
+import { jobTypeLabel } from "@/lib/recruitmentLabels";
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
@@ -52,9 +54,9 @@ export default function CandidateBookmarksPage() {
   return (
     <main>
       <PageHeader
-        eyebrow="CANDIDATE · BOOKMARKS"
+        eyebrow="CƠ HỘI CỦA BẠN"
         title="Việc làm đã lưu"
-        description="Bookmark luôn được giữ ngay cả khi Job Service tạm gián đoạn hoặc tin không còn khả dụng."
+        description="Lưu các cơ hội bạn quan tâm để dễ dàng xem lại và ứng tuyển. Tin đã lưu vẫn được giữ khi nội dung tạm thời chưa truy cập được."
         action={<Link className="btn" href="/candidate/jobs">Tìm thêm việc</Link>}
       />
       {error ? <ErrorState message={error} onRetry={() => setReloadKey((value) => value + 1)} /> : null}
@@ -82,7 +84,7 @@ export default function CandidateBookmarksPage() {
               {bookmark.job ? (
                 <div className="chip-list" aria-label="Thông tin việc làm">
                   {bookmark.job.location ? <span className="chip">{bookmark.job.location}</span> : null}
-                  {bookmark.job.jobType ? <span className="chip">{bookmark.job.jobType}</span> : null}
+                  {bookmark.job.jobType ? <span className="chip">{jobTypeLabel(bookmark.job.jobType)}</span> : null}
                   {(bookmark.job.skills ?? []).slice(0, 4).map((skill) => <span className="chip" key={skill}>{skill}</span>)}
                 </div>
               ) : null}

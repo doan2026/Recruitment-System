@@ -1,9 +1,11 @@
 "use client";
 
+import { offerStatusLabel } from "@/lib/recruitmentLabels";
+
 import Link from "next/link";
 import { ConfirmationDialog } from "@/components/ConfirmationDialog";
 import { useEffect, useRef, useState } from "react";
-import { ErrorState, LoadingState, StatusBadge } from "@/components/ui";
+import { ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
 import { ApiClientError, toUserMessage } from "../../../../lib/apiClient";
 import { offerResponseRecoveryView } from "../../../../lib/offerResponseRecovery";
 import { getOffer, Offer, respondToApplicationOffer } from "../../../../lib/person2Api";
@@ -107,7 +109,7 @@ export default function CandidateOfferResponsePage({ params }: { params: { offer
   if (!offer) {
     return (
       <main>
-        <p>Không tìm thấy offer.</p>
+        <p>Không tìm thấy thư mời nhận việc.</p>
         <Link className="btn" href="/candidate/applications">
           Về hồ sơ ứng tuyển
         </Link>
@@ -123,7 +125,7 @@ export default function CandidateOfferResponsePage({ params }: { params: { offer
 
   return (
     <main>
-      <h1 className="page-title">Phản hồi Offer</h1>
+      <PageHeader eyebrow="THƯ MỜI NHẬN VIỆC" title="Phản hồi Offer" description="Xem thông tin công việc, mức lương và hạn phản hồi trước khi quyết định." action={<Link className="btn" href="/candidate/applications">Về hồ sơ ứng tuyển</Link>} />
       <ConfirmationDialog open={confirmDecision !== null} title={confirmDecision === "ACCEPTED" ? "Chấp nhận Offer?" : "Từ chối Offer?"} description={`Quyết định cho vị trí “${offer.jobTitle}” sẽ được gửi tới nhà tuyển dụng và kết thúc bước phản hồi này.`} confirmLabel={confirmDecision === "ACCEPTED" ? "Chấp nhận Offer" : "Từ chối Offer"} pending={phase !== null} onConfirm={() => { if (confirmDecision) void submit(confirmDecision, true); }} onCancel={() => setConfirmDecision(null)} />
       <section className="grid-2">
         <section className="panel">
@@ -131,7 +133,7 @@ export default function CandidateOfferResponsePage({ params }: { params: { offer
           <p className="help">Kiểm tra nội dung và hạn phản hồi trước khi đưa ra quyết định.</p>
           <div className="row-wrap">
             <span className="badge">Hạn phản hồi: {new Date(offer.expiresAt).toLocaleString("vi-VN")}</span>
-            <StatusBadge tone={canRespond ? "warning" : offer.status === "ACCEPTED" ? "success" : "danger"}>{offer.status}</StatusBadge>
+            <StatusBadge tone={canRespond ? "warning" : offer.status === "ACCEPTED" ? "success" : "danger"}>{offerStatusLabel(offer.status)}</StatusBadge>
           </div>
           <p>Công việc: {offer.jobTitle}</p>
           {offer.startDate ? <p>Ngày bắt đầu: <time dateTime={offer.startDate}>{offer.startDate.split("-").reverse().join("/")}</time></p> : null}
@@ -160,8 +162,8 @@ export default function CandidateOfferResponsePage({ params }: { params: { offer
           ) : null}
           {responseError && !recoveryView ? <ErrorState message={toUserMessage(responseError)} /> : null}
         </section>
-        <section className="panel">
-          <h2>Gợi ý</h2>
+        <section className="panel stack">
+          <h2>Bước tiếp theo</h2>
           <p className="help">Nếu nhà tuyển dụng vừa cập nhật hồ sơ hoặc Offer, hãy tải nội dung mới trước khi quyết định.</p>
           <Link className="btn" href={`/candidate/applications/${offer.applicationId}`}>Xem hồ sơ ứng tuyển</Link>
           <Link className="btn" href="/candidate/jobs">

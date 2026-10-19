@@ -3,7 +3,7 @@
 > Ngày cập nhật: 13/10/2026
 > Nhánh kiểm tra: `develop`, commit `db418e3` (09/10/2026)
 > Căn cứ phân công: [Phan-cong-cong-viec-He-thong-tuyen-dung.md](Phan-cong-cong-viec-He-thong-tuyen-dung.md), mục I.2, III, IV, V và IX.
-> **Kết quả sửa lỗi/kiểm thử mới nhất: mục 2.60; baseline toàn dự án: mục 2.59. Dự án chưa đạt gate nghiệm thu toàn hệ thống.** Các số PASS trong mục 2.1–2.58 là bằng chứng lịch sử; không thay thế kết quả chạy lại trên commit này, đặc biệt với Chat/Notification/Video đã chuyển sang Go.
+> **Kết quả đồng bộ FE mới nhất: mục 2.63; kiểm thử toàn hệ thống gần nhất: mục 2.60; baseline toàn dự án: mục 2.59. Dự án chưa đạt gate nghiệm thu toàn hệ thống.** Các số PASS trong mục 2.1–2.58 là bằng chứng lịch sử; không thay thế kết quả chạy lại trên commit này, đặc biệt với Chat/Notification/Video đã chuyển sang Go.
 
 ## Phạm vi và quy ước đánh giá
 
@@ -1311,6 +1311,38 @@ Log local: `/tmp/recruitment-fe-unit-final.log`, `/tmp/recruitment-fe-build-fina
 - Sửa `frontend/Dockerfile`: đưa `middleware.ts` vào build context được COPY; khai báo `ARG API_INTERNAL_BASE_URL` để nhận giá trị `http://api-gateway:8080` mà workflow đã truyền. Giữ mặc định `http://api-gateway` cho Compose local.
 - Bản sửa Dockerfile cần được đưa vào release tiếp theo; không sửa tag đã tồn tại, kích hoạt workflow hay triển khai production trong lượt kiểm tra này.
 - Kiểm chứng đóng gói: **PASS** production build từ đúng tập source COPY bởi Dockerfile trong thư mục tạm không chứa `.env`; manifest có middleware và rewrite `/api/:path*` trỏ đúng `http://api-gateway:8080/:path*`. Log: `/tmp/recruitment-frontend-image-check.log`. Docker daemon local chưa chạy nên chưa xác nhận image/container thật (build kiểm chứng dùng Node local).
+
+---
+
+## 2.63. Đồng bộ giao diện giữa các màn hình — 19/10/2026
+
+Theo yêu cầu sửa phần hiển thị, đã đưa các màn thuộc ba người về cùng hệ giao diện CareerHub, giữ màu thương hiệu hiện có và các quyền/nghiệp vụ đã nối ở mục 2.61.
+
+### Thay đổi hiển thị và điều hướng
+
+- **Workspace:** `WorkspaceShell` sở hữu header, menu, identity, content và footer cho Candidate/Recruiter/Admin. Wrapper mỗi vai trò chỉ cung cấp menu và danh tính; context tránh lồng hai shell. Menu desktop248px; cả ba vai trò dùng menu cuộn ngang ở ≤980px, giữ mục hiện tại trong vùng nhìn và luôn truy cập được Báo cáo vi phạm.
+- **Thành phần dùng chung:** chuẩn hóa tiêu đề28px/24px mobile, nút/input46px, card16px, lề32px/16px mobile; cùng mẫu `PageHeader`, `Metric`, bảng, trạng thái tải/lỗi/trống và icon Lucide. Bổ sung `.form-stack` bị thiếu để form hồ sơ/CV/báo cáo/thư mời có khoảng cách nhất quán. Nút xuất dữ liệu Admin không bị kéo cao theo hàng bộ lọc.
+- **Các màn nghiệp vụ:** Candidate dashboard/profile/CV/settings/interviews; Recruiter dashboard/company/jobs/applications/AI; Admin dashboard và các tab; Messages/Notifications/Reports dùng chung khung và thang chữ. Bỏ ảnh đại diện mẫu, dùng danh tính thật; trạng thái công việc/đơn/thư mời/vai trò thành viên có nhãn tiếng Việt, vẫn giữ cảnh báo khi dữ liệu bị suy giảm.
+- **Xác thực:** `AuthFrame` dùng chung cho login/register/forgot/reset/callback của ba cổng. Desktop hai cột, mobile một cột; cùng logo, card, form, password toggle và thông báo. Bỏ các số liệu/lời chứng thực không có nguồn.
+- **Trang chủ:** bố cục mới dùng cùng logo, màu, nút và card; dẫn rõ vào tìm việc, CV, ứng tuyển, doanh nghiệp, tuyển dụng và tin nhắn.
+- **Luồng được sửa khi rà soát:** preview tin đọc đúng dữ liệu đã lưu thay cho nội dung mẫu; tab Admin đi theo URL chuẩn và giữ đúng sau reload, Nhật ký tại `/admin?tab=audit`; logout từ cả trang công khai lẫn workspace về đúng cổng vai trò và giữ cảnh báo khi chưa xác nhận thu hồi phiên máy chủ.
+
+### Kiểm chứng trên bản cuối
+
+| Kiểm tra | Kết quả |
+| --- | --- |
+| Unit/API frontend | **151/151 PASS**. |
+| TypeScript và production build | **PASS**; bản E2E build riêng tại `.next-e2e`. |
+| Browser Chrome desktop1440×960 và mobile390×844 | **224 ca đã được xác nhận PASS**: lượt đầy đủ đạt 222/224; hai ca rút hồ sơ thất bại do selector tìm heading thay vì nội dung article. Sau khi sửa selector, chạy lại đúng hai ca trên cùng build: **2/2 PASS**; vẫn kiểm tra hủy không mutation, đọc version một lần và gửi expectedVersion đúng. Không có thay đổi application source sau lượt đầy đủ. |
+| Strict UI audit | **0 errors / 0 warnings / 0 violations**, artifact `premium-audit.json`. |
+| DESIGN lint | **0 errors**, 8 cảnh báo token màu chưa được component tham chiếu trong tài liệu; không có lỗi token schema. |
+| Whitespace | `git diff --check` PASS. |
+
+Đã kiểm tra ảnh trực tiếp của trang chủ, ba dashboard, hồ sơ/CV, thông báo và các màn xác thực trên desktop/mobile. Bài kiểm thử mới kiểm tra geometry giữa các vai trò/màn auth, không tràn ngang, menu active/keyboard, tab Admin/reload, logout và preview dữ liệu thật theo API fixture.
+
+Log local: `/tmp/recruitment-ui-unit-final.log`, `/tmp/recruitment-ui-build-final.log`, `/tmp/recruitment-ui-e2e-build-final.log`, `/tmp/recruitment-ui-e2e-final.log`, `/tmp/recruitment-ui-withdraw-final.log`. Ảnh ở `/tmp/recruitment-ui-after-*.png`; báo cáo browser tại `frontend/playwright-report/` (ignored).
+
+Các bài browser dùng API fixture/gateway stub, không thay thế nghiệm thu ba luồng xuyên toàn bộ backend thật. Các giới hạn dịch vụ tại 2.61 vẫn giữ nguyên. Push `develop` không tự triển khai website; workflow hiện chỉ nhận tag `v*`. Không đổi env, tag release hoặc triển khai production trong lượt đồng bộ giao diện này.
 
 ---
 

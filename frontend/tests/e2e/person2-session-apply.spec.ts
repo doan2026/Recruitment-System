@@ -137,7 +137,7 @@ test("Profile CV picker selects the default and sends the chosen CV with actual 
     releaseResponse();
   }
   await expect(page.getByRole("button", { name: "Đã ứng tuyển", exact: true })).toBeDisabled();
-  await expect(page.getByText("Đã gửi hồ sơ ứng tuyển. Trạng thái hiện tại: APPLIED.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Đã gửi hồ sơ ứng tuyển. Trạng thái hiện tại: Đã ứng tuyển.", { exact: true })).toBeVisible();
   expect(writes).toHaveLength(1);
 });
 

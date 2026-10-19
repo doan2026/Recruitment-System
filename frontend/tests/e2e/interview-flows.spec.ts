@@ -81,7 +81,7 @@ test("Recruiter detail loads the stored application and hides scheduling for a t
   await page.route(api + "/applications/" + applicationId, r => reply(r, { ...application, status: "HIRED" }));
   await login(page, "RECRUITER", "/recruiter/applications/" + applicationId);
   await expect(page.getByRole("heading", { name: application.jobTitle })).toBeVisible();
-  await expect(page.getByText("HIRED", { exact: true })).toBeVisible();
+  await expect(page.getByText("Đã tuyển", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Đặt lịch phỏng vấn" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Tạo Offer" })).toHaveCount(0);
   await expect(page.getByText("nguyenvana@example.com")).toHaveCount(0);
