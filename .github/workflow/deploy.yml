@@ -1,0 +1,119 @@
+name: Deploy
+
+# Chỉ chạy khi push tag: git tag v1.0.0 && git push origin v1.0.0
+on:
+  push:
+    tags: ['v*']
+
+concurrency: deploy-production
+
+env:
+  DEPLOY_DIR: /home/ubuntu/careerhub   # thư mục trên server chứa docker-compose.prod.yml, .env, env/, secrets/
+
+jobs:
+  # 1) GitHub build image từ Dockerfile của từng service rồi đẩy lên GHCR
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        # name   = tên image (khớp docker-compose.prod.yml: <IMAGE_PREFIX>-<name>:<TAG>, ví dụ ghcr.io/vuongptit/recruitment-system-auth-service:v1.0.0)
+        # path   = thư mục chứa Dockerfile
+        # target = stage của Dockerfile (để trống = stage cuối)
+        include:
+          - { name: auth-service,         path: services/auth-service }
+          - { name: application-service,  path: services/application-service }
+          - { name: interview-service,    path: services/interview-service }
+          - { name: admin-service,        path: services/admin-service }
+          - { name: profile-service,      path: services/profile-service }
+          - { name: profile-migrate,      path: services/profile-service, target: build }
+          - { name: company-service,      path: services/company-service }
+          - { name: job-search-service,   path: services/job-search-service }
+          - { name: notification-service, path: services/notification-service, target: runtime }
+          - { name: media-service,        path: services/media-service }
+          - { name: media-migrate,        path: services/media-service, target: build }
+          - { name: chat-service,         path: services/chat-service }
+          - { name: ai-service,           path: services/ai-service, target: runtime }
+          - { name: ai-worker,            path: services/ai-service, target: worker }
+          - { name: video-service,        path: services/video-service }
+          - name: frontend
+            path: frontend
+            # NEXT_PUBLIC_* được nhúng vào bundle lúc build, nên phải truyền ở đây
+            # (giữ khớp với phần frontend trong docker-compose.prod.yml).
+            build_args: |
+              NEXT_PUBLIC_API_BASE_URL=/api
+              NEXT_PUBLIC_API_MODE=gateway
+              NEXT_PUBLIC_GATEWAY_URL=https://doantvv.ddns.net
+              NEXT_PUBLIC_GOOGLE_LOGIN_ENABLED=true
+              API_INTERNAL_BASE_URL=http://api-gateway:8080
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image name (viết thường)
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}-${{ matrix.name }}" >> "$GITHUB_ENV"
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.path }}
+          target: ${{ matrix.target }}
+          build-args: ${{ matrix.build_args }}
+          push: true
+          tags: ${{ env.IMAGE }}:${{ github.ref_name }}
+          # Gắn package GHCR với repo này để GITHUB_TOKEN được phép đẩy các lần sau
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  # 2) Server chỉ pull image mới rồi khởi động lại
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Chuẩn bị SSH key
+        run: |
+          install -m 700 -d ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -p ${{ secrets.SSH_PORT || 22 }} ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Chép compose + nginx + init SQL lên server
+        run: |
+          SSH_OPTS="-i $HOME/.ssh/id_deploy -P ${{ secrets.SSH_PORT || 22 }}"
+          TARGET="${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}"
+          ssh -i ~/.ssh/id_deploy -p ${{ secrets.SSH_PORT || 22 }} "$TARGET" \
+            "mkdir -p $DEPLOY_DIR/infra/nginx $DEPLOY_DIR/infra/postgres"
+          # scp ghi đè tại chỗ (giữ nguyên inode) nên nginx đang mount file vẫn thấy nội dung mới
+          scp $SSH_OPTS docker-compose.prod.yml "$TARGET:$DEPLOY_DIR/"
+          scp $SSH_OPTS infra/nginx/nginx.prod.conf "$TARGET:$DEPLOY_DIR/infra/nginx/"
+          scp $SSH_OPTS infra/postgres/init-schemas.sql "$TARGET:$DEPLOY_DIR/infra/postgres/"
+
+      - name: Pull image mới và khởi động lại
+        run: |
+          IMAGE_PREFIX="ghcr.io/${GITHUB_REPOSITORY,,}"
+          ssh -i ~/.ssh/id_deploy -p ${{ secrets.SSH_PORT || 22 }} \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} bash -s <<REMOTE
+          set -e
+          cd $DEPLOY_DIR
+          touch .env
+          sed -i '/^TAG=/d;/^IMAGE_PREFIX=/d' .env
+          echo "TAG=${{ github.ref_name }}" >> .env
+          echo "IMAGE_PREFIX=$IMAGE_PREFIX" >> .env
+
+          docker compose -f docker-compose.prod.yml pull
+          docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+          # Kiểm tra cú pháp rồi nạp lại cấu hình nginx (sai cú pháp thì workflow báo đỏ)
+          docker compose -f docker-compose.prod.yml exec -T api-gateway nginx -t
+          docker compose -f docker-compose.prod.yml exec -T api-gateway nginx -s reload
+
+          docker image prune -af --filter "until=168h"
+          docker compose -f docker-compose.prod.yml ps
+          REMOTE

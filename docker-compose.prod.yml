@@ -1,0 +1,703 @@
+name: recruitment-system
+
+# ============================================================================
+# docker-compose.prod.yml - chạy trên SERVER (độc lập với docker-compose.yml local)
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# - Không build: chỉ pull image đã build sẵn từ GHCR (IMAGE_PREFIX + TAG do deploy.yml ghi vào .env)
+# - Chỉ api-gateway (nginx) publish cổng 80/443. Mọi service/DB khác không mở cổng ra host.
+# - Cấu hình service đặt ở ./env/<tên>.env, secret JWT ở ./secrets/ (tạo tay trên server, không commit)
+# ============================================================================
+
+# Domain production: sửa MỘT chỗ này (và infra/nginx/nginx.prod.conf, deploy.yml) nếu đổi tên miền.
+# Giá trị đặt cứng ở đây nên thắng mọi giá trị localhost còn sót trong .env / env/*.env
+x-prod-origin: &prod_origin "https://doantvv.ddns.net"
+
+x-java-environment: &java-environment
+  JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--Xms64m -Xmx256m -XX:MaxMetaspaceSize=192m}
+
+x-java-healthcheck: &java-healthcheck
+  test: [ "CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/actuator/health" ]
+  interval: 15s
+  timeout: 5s
+  retries: 12
+  start_period: 60s
+
+# Giới hạn dung lượng log để không đầy ổ đĩa
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  api-gateway:
+    image: nginx:1.30.4-alpine
+    restart: unless-stopped
+    logging: *logging
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      profile-service:
+        condition: service_healthy
+      company-service:
+        condition: service_healthy
+      job-search-service:
+        condition: service_healthy
+      application-service:
+        condition: service_healthy
+      interview-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+      media-service:
+        condition: service_healthy
+      admin-service:
+        condition: service_healthy
+      chat-service:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+      video-service:
+        condition: service_healthy
+    healthcheck:
+      # Cổng 80 chỉ redirect HTTPS, nên kiểm tra qua cổng nội bộ 8080
+      test: [ "CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/auth/health" ]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init-schemas.sql:/docker-entrypoint-initdb.d/01-init-schemas.sql:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: [ "CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)" ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    logging: *logging
+    command: [ "redis-server", "--requirepass", "${REDIS_PASSWORD}" ]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  kafka:
+    image: apache/kafka:3.8.0
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      CLUSTER_ID: ${KAFKA_KRAFT_CLUSTER_ID}
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: controller,broker
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx384m
+    volumes:
+      - kafka-data-apache:/var/lib/kafka/data
+    healthcheck:
+      test: [ "CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list" ]
+      interval: 10s
+      timeout: 45s
+      retries: 12
+
+  kafka-init:
+    image: apache/kafka:3.8.0
+    logging: *logging
+    environment:
+      KAFKA_INTERVIEW_TOPIC: ${KAFKA_INTERVIEW_TOPIC:-interview-events}
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command:
+      - /bin/bash
+      - -ec
+      - |
+        for topic in job-events cv-events application-events "$$KAFKA_INTERVIEW_TOPIC" chat-events video.call.started video.call.ended; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$$topic" --partitions 3 --replication-factor 1
+        done
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.3
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS 'http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=5s' > /dev/null" ]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
+  auth-service:
+    image: ${IMAGE_PREFIX:?IMAGE_PREFIX is required}-auth-service:${TAG:?TAG is required}
+    env_file:
+      - ./env/auth-service.env       # GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET và các secret khác để ở đây
+    environment:
+      <<: *java-environment
+      # --- Production overrides (không bí mật) ---
+      GOOGLE_OAUTH_ENABLED: "true"
+      GOOGLE_REDIRECT_URI: https://doantvv.ddns.net/auth/google/callback
+      GOOGLE_FRONTEND_REDIRECT_URI: https://doantvv.ddns.net/auth/callback
+      GOOGLE_SECURE_COOKIES: "true"
+      CORS_ORIGINS: *prod_origin
+      PASSWORD_RESET_FRONTEND_URI: https://doantvv.ddns.net/reset-password
+    healthcheck: *java-healthcheck
+    logging: *logging
+    secrets:
+      - source: jwt-private-key
+        target: jwt-private.pem
+      - source: jwt-public-key
+        target: jwt-public.pem
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    expose:
+      - "8080"
+
+  application-service:
+    image: ${IMAGE_PREFIX}-application-service:${TAG}
+    env_file:
+      - ./env/application-service.env
+    environment:
+      <<: *java-environment
+      PROFILE_INTERNAL_API_KEY: ${PROFILE_INTERNAL_API_KEY_APPLICATION:?PROFILE_INTERNAL_API_KEY_APPLICATION is required}
+      INTERNAL_API_KEY_PROFILE: ${APPLICATION_INTERNAL_API_KEY_PROFILE:?APPLICATION_INTERNAL_API_KEY_PROFILE is required}
+      INTERNAL_API_KEY_INTERVIEW: ${APPLICATION_INTERNAL_API_KEY_INTERVIEW:?APPLICATION_INTERNAL_API_KEY_INTERVIEW is required}
+      INTERNAL_API_KEY_METRICS: ${APPLICATION_INTERNAL_API_KEY_METRICS:?APPLICATION_INTERNAL_API_KEY_METRICS is required}
+    healthcheck: *java-healthcheck
+    logging: *logging
+    secrets:
+      - source: jwt-public-key
+        target: jwt-public.pem
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    expose:
+      - "8080"
+
+  interview-service:
+    image: ${IMAGE_PREFIX}-interview-service:${TAG}
+    env_file:
+      - ./env/interview-service.env
+    environment:
+      <<: *java-environment
+      APPLICATION_SERVICE_URL: http://application-service:8080
+      APPLICATION_SERVICE_ALLOWED_HOSTS: application-service
+      APPLICATION_REQUEST_TIMEOUT_MS: ${INTERVIEW_APPLICATION_REQUEST_TIMEOUT_MS:-2000}
+      APPLICATION_INTERNAL_API_KEY: ${APPLICATION_INTERNAL_API_KEY_INTERVIEW:?APPLICATION_INTERNAL_API_KEY_INTERVIEW is required}
+      COMPANY_SERVICE_URL: http://company-service:3000
+      COMPANY_SERVICE_ALLOWED_HOSTS: company-service
+      COMPANY_REQUEST_TIMEOUT_MS: ${INTERVIEW_COMPANY_REQUEST_TIMEOUT_MS:-2000}
+      INTERVIEW_CURSOR_HMAC_KEY: ${INTERVIEW_CURSOR_HMAC_KEY:?INTERVIEW_CURSOR_HMAC_KEY is required}
+      JWT_ISSUER: ${JWT_ISSUER:-https://auth.recruitment.local}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-recruitment-api}
+      CORS_ORIGINS: *prod_origin
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_INTERVIEW_TOPIC: ${KAFKA_INTERVIEW_TOPIC:-interview-events}
+      INTERVIEW_EVENT_PUBLISHER_ENABLED: ${INTERVIEW_EVENT_PUBLISHER_ENABLED:-true}
+    healthcheck: *java-healthcheck
+    logging: *logging
+    secrets:
+      - source: jwt-public-key
+        target: jwt-public.pem
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      application-service:
+        condition: service_healthy
+      company-service:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    expose:
+      - "8080"
+
+  admin-service:
+    image: ${IMAGE_PREFIX}-admin-service:${TAG}
+    env_file:
+      - ./env/admin-service.env
+    environment:
+      <<: *java-environment
+      JWT_ISSUER: ${JWT_ISSUER:?JWT_ISSUER is required}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:?JWT_AUDIENCE is required}
+      JWT_JWKS_URI: http://auth-service:8080/auth/.well-known/jwks.json
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      AUTH_SERVICE_URL: http://auth-service:8080
+      COMPANY_SERVICE_URL: http://company-service:3000
+      JOB_SERVICE_URL: http://job-search-service:3000
+    healthcheck: *java-healthcheck
+    logging: *logging
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    expose:
+      - "8080"
+
+  profile-migrate:
+    image: ${IMAGE_PREFIX}-profile-migrate:${TAG}
+    env_file:
+      - ./env/profile-service.env
+    logging: *logging
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: [ "npm", "run", "prisma:migrate:deploy" ]
+
+  profile-service:
+    image: ${IMAGE_PREFIX}-profile-service:${TAG}
+    env_file:
+      - ./env/profile-service.env
+    environment:
+      JWT_JWKS_URI: http://auth-service:8080/auth/.well-known/jwks.json
+      JWT_ALLOW_INSECURE_JWKS: "true"
+      JWT_ISSUER: ${JWT_ISSUER:-https://auth.recruitment.local}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-recruitment-api}
+      MEDIA_SERVICE_URL: http://media-service:3000
+      MEDIA_INTERNAL_API_KEY: ${MEDIA_INTERNAL_API_KEY_PROFILE:?MEDIA_INTERNAL_API_KEY_PROFILE is required}
+      APPLICATION_SERVICE_URL: http://application-service:8080
+      APPLICATION_INTERNAL_API_KEY: ${APPLICATION_INTERNAL_API_KEY_PROFILE:?APPLICATION_INTERNAL_API_KEY_PROFILE is required}
+      INTERNAL_API_KEY_APPLICATION: ${PROFILE_INTERNAL_API_KEY_APPLICATION:?PROFILE_INTERNAL_API_KEY_APPLICATION is required}
+      INTERNAL_API_KEY_JOB_SEARCH: ${PROFILE_INTERNAL_API_KEY_JOB_SEARCH:?PROFILE_INTERNAL_API_KEY_JOB_SEARCH is required}
+      MEDIA_REQUEST_TIMEOUT_MS: ${PROFILE_MEDIA_REQUEST_TIMEOUT_MS:-3000}
+      APPLICATION_REQUEST_TIMEOUT_MS: ${PROFILE_APPLICATION_REQUEST_TIMEOUT_MS:-3000}
+      CV_DELETION_RECONCILE_ENABLED: "true"
+      CV_MEDIA_CLEANUP_ENABLED: "true"
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_CV_TOPIC: ${KAFKA_CV_TOPIC:-cv-events}
+      CV_EVENT_PUBLISHER_ENABLED: ${PROFILE_CV_EVENT_PUBLISHER_ENABLED:-true}
+      CORS_ORIGINS: *prod_origin
+      SWAGGER_ENABLED: "false"
+    logging: *logging
+    secrets:
+      - source: jwt-public-key
+        target: jwt-public.pem
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      profile-migrate:
+        condition: service_completed_successfully
+      kafka-init:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+      media-service:
+        condition: service_healthy
+    expose:
+      - "3000"
+
+  company-service:
+    image: ${IMAGE_PREFIX}-company-service:${TAG}
+    env_file:
+      - ./env/company-service.env
+    environment:
+      JWT_ISSUER: ${JWT_ISSUER:-https://auth.recruitment.local}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-recruitment-api}
+      MEDIA_SERVICE_URL: http://media-service:3000
+      MEDIA_INTERNAL_API_KEY: ${MEDIA_INTERNAL_API_KEY_COMPANY:?MEDIA_INTERNAL_API_KEY_COMPANY is required}
+      INTERNAL_API_KEY_METRICS: ${COMPANY_INTERNAL_API_KEY_METRICS:?COMPANY_INTERNAL_API_KEY_METRICS is required}
+      INTERNAL_API_KEY_JOB_SEARCH: ${COMPANY_INTERNAL_API_KEY_JOB_SEARCH:?COMPANY_INTERNAL_API_KEY_JOB_SEARCH is required}
+      MEDIA_REQUEST_TIMEOUT_MS: ${COMPANY_MEDIA_REQUEST_TIMEOUT_MS:-3000}
+    logging: *logging
+    secrets:
+      - source: jwt-public-key
+        target: jwt-public.pem
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      media-service:
+        condition: service_healthy
+    expose:
+      - "3000"
+
+  job-search-service:
+    image: ${IMAGE_PREFIX}-job-search-service:${TAG}
+    env_file:
+      - ./env/job-search-service.env
+    environment:
+      PROFILE_SERVICE_URL: http://profile-service:3000
+      PROFILE_REQUEST_TIMEOUT_MS: ${JOB_PROFILE_REQUEST_TIMEOUT_MS:-1000}
+      INTERNAL_API_KEY_METRICS: ${JOB_INTERNAL_API_KEY_METRICS:?JOB_INTERNAL_API_KEY_METRICS is required}
+      PROFILE_SERVICE_ALLOWED_HOSTS: ${JOB_PROFILE_ALLOWED_HOSTS:-profile-service}
+      AI_SERVICE_URL: http://ai-service:8000
+      AI_REQUEST_TIMEOUT_MS: ${JOB_AI_REQUEST_TIMEOUT_MS:-2500}
+      AI_SERVICE_ALLOWED_HOSTS: ${JOB_AI_ALLOWED_HOSTS:-ai-service}
+      AI_INTERNAL_API_KEY: ${AI_INTERNAL_API_KEY_JOB_SEARCH:?AI_INTERNAL_API_KEY_JOB_SEARCH is required}
+      AI_CANDIDATE_INTERNAL_API_KEY: ${AI_INTERNAL_API_KEY_JOB_SEARCH_CANDIDATES:?AI_INTERNAL_API_KEY_JOB_SEARCH_CANDIDATES is required}
+      PROFILE_INTERNAL_API_KEY: ${PROFILE_INTERNAL_API_KEY_JOB_SEARCH:?PROFILE_INTERNAL_API_KEY_JOB_SEARCH is required}
+      COMPANY_INTERNAL_API_KEY: ${COMPANY_INTERNAL_API_KEY_JOB_SEARCH:?COMPANY_INTERNAL_API_KEY_JOB_SEARCH is required}
+    logging: *logging
+    secrets:
+      - source: jwt-public-key
+        target: jwt-public.pem
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    expose:
+      - "3000"
+    healthcheck:
+      # Job không có route /health; dùng OpenAPI để xác nhận HTTP đã chạy.
+      test: [ "CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/docs-json" ]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  notification-service:
+    image: ${IMAGE_PREFIX}-notification-service:${TAG}
+    env_file:
+      - ./env/notification-service.env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      JWT_JWKS_URI: http://auth-service:8080/auth/.well-known/jwks.json
+      JWT_ALLOW_INSECURE_JWKS: "true"
+      JWT_ISSUER: ${JWT_ISSUER:-https://auth.recruitment.local}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-recruitment-api}
+      CURSOR_HMAC_KEY: ${NOTIFICATION_CURSOR_HMAC_KEY:?NOTIFICATION_CURSOR_HMAC_KEY is required}
+      ALLOWED_ORIGINS: *prod_origin
+      PORT: "8080"
+    logging: *logging
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+    expose:
+      - "8080"
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health/ready" ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+  media-migrate:
+    image: ${IMAGE_PREFIX}-media-migrate:${TAG}
+    user: node
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=media
+    logging: *logging
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: [ "npm", "run", "prisma:migrate:deploy" ]
+
+  media-service:
+    image: ${IMAGE_PREFIX}-media-service:${TAG}
+    env_file:
+      - ./env/media-service.env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=media
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:?CLOUDINARY_CLOUD_NAME is required}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:?CLOUDINARY_API_KEY is required}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:?CLOUDINARY_API_SECRET is required}
+      CLOUDINARY_UPLOAD_PRESET_CV: ${CLOUDINARY_UPLOAD_PRESET_CV:-recruitment_cv_signed}
+      CLOUDINARY_UPLOAD_PRESET_AVATAR: ${CLOUDINARY_UPLOAD_PRESET_AVATAR:-recruitment_avatar_signed}
+      CLOUDINARY_UPLOAD_PRESET_COMPANY_LOGO: ${CLOUDINARY_UPLOAD_PRESET_COMPANY_LOGO:-recruitment_company_logo_signed}
+      CLOUDINARY_UPLOAD_PRESET_COMPANY_IMAGE: ${CLOUDINARY_UPLOAD_PRESET_COMPANY_IMAGE:-recruitment_company_image_signed}
+      CLOUDINARY_UPLOAD_PRESET_COMPANY_VIDEO: ${CLOUDINARY_UPLOAD_PRESET_COMPANY_VIDEO:-recruitment_company_video_signed}
+      CLOUDINARY_UPLOAD_PRESET_CHAT_ATTACHMENT: ${CLOUDINARY_UPLOAD_PRESET_CHAT_ATTACHMENT:-recruitment_chat_attachment_signed}
+      JWT_JWKS_URI: http://auth-service:8080/auth/.well-known/jwks.json
+      JWT_ALLOW_INSECURE_JWKS: "true"
+      JWT_ISSUER: ${JWT_ISSUER:-https://auth.recruitment.local}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-recruitment-api}
+      INTERNAL_API_KEY_PROFILE: ${MEDIA_INTERNAL_API_KEY_PROFILE:?MEDIA_INTERNAL_API_KEY_PROFILE is required}
+      INTERNAL_API_KEY_COMPANY: ${MEDIA_INTERNAL_API_KEY_COMPANY:?MEDIA_INTERNAL_API_KEY_COMPANY is required}
+      INTERNAL_API_KEY_APPLICATION: ${MEDIA_INTERNAL_API_KEY_APPLICATION:?MEDIA_INTERNAL_API_KEY_APPLICATION is required}
+      INTERNAL_API_KEY_CHAT: ${MEDIA_INTERNAL_API_KEY_CHAT:?MEDIA_INTERNAL_API_KEY_CHAT is required}
+      INTERNAL_API_KEY_INTERVIEW: ${MEDIA_INTERNAL_API_KEY_INTERVIEW:?MEDIA_INTERNAL_API_KEY_INTERVIEW is required}
+      INTERNAL_API_KEY_AI: ${MEDIA_INTERNAL_API_KEY_AI:?MEDIA_INTERNAL_API_KEY_AI is required}
+      MEDIA_CLEANUP_ENABLED: ${MEDIA_CLEANUP_ENABLED:-true}
+      MEDIA_CLEANUP_INTERVAL_SECONDS: ${MEDIA_CLEANUP_INTERVAL_SECONDS:-300}
+      MEDIA_CLEANUP_BATCH_SIZE: ${MEDIA_CLEANUP_BATCH_SIZE:-5}
+      MEDIA_CLEANUP_LEASE_SECONDS: ${MEDIA_CLEANUP_LEASE_SECONDS:-300}
+      MEDIA_CLEANUP_PROVIDER_TIMEOUT_SECONDS: ${MEDIA_CLEANUP_PROVIDER_TIMEOUT_SECONDS:-20}
+      MEDIA_CLEANUP_RETRY_BASE_SECONDS: ${MEDIA_CLEANUP_RETRY_BASE_SECONDS:-30}
+      MEDIA_CLEANUP_RETRY_MAX_SECONDS: ${MEDIA_CLEANUP_RETRY_MAX_SECONDS:-21600}
+      MEDIA_CLEANUP_PROVIDER_GRACE_SECONDS: ${MEDIA_CLEANUP_PROVIDER_GRACE_SECONDS:-300}
+      MEDIA_CLEANUP_CLEAN_INTERVAL_SECONDS: ${MEDIA_CLEANUP_CLEAN_INTERVAL_SECONDS:-60}
+      MEDIA_CLEANUP_EXPIRED_RETENTION_SECONDS: ${MEDIA_CLEANUP_EXPIRED_RETENTION_SECONDS:-86400}
+      MEDIA_CLEANUP_STARTUP_JITTER_SECONDS: ${MEDIA_CLEANUP_STARTUP_JITTER_SECONDS:-30}
+      CORS_ORIGINS: *prod_origin
+      SWAGGER_ENABLED: "false"
+    logging: *logging
+    secrets:
+      - source: jwt-public-key
+        target: jwt-public.pem
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      media-migrate:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+    expose:
+      - "3000"
+
+  chat-service:
+    image: ${IMAGE_PREFIX}-chat-service:${TAG}
+    env_file:
+      - ./env/chat-service.env
+    environment:
+      PORT: "8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      JWT_JWKS_URI: http://auth-service:8080/auth/.well-known/jwks.json
+      JWT_ISSUER: ${JWT_ISSUER:-https://auth.recruitment.local}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-recruitment-api}
+      JWT_ALLOW_INSECURE_JWKS: "true"
+      ALLOWED_ORIGINS: *prod_origin
+    logging: *logging
+    secrets:
+      - source: jwt-public-key
+        target: jwt-public.pem
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+    expose:
+      - "8080"
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health/ready" ]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+
+  # Chạy migration một lần; API và worker chỉ khởi động sau khi thành công.
+  ai-migrate:
+    image: ${IMAGE_PREFIX}-ai-service:${TAG}
+    env_file:
+      - ./env/ai-service.env
+    command: [ "alembic", "upgrade", "head" ]
+    logging: *logging
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ai-service:
+    image: ${IMAGE_PREFIX}-ai-service:${TAG}
+    env_file:
+      - ./env/ai-service.env
+    environment:
+      INTERNAL_API_KEY_JOB_SEARCH: ${AI_INTERNAL_API_KEY_JOB_SEARCH:?AI_INTERNAL_API_KEY_JOB_SEARCH is required}
+      INTERNAL_API_KEY_JOB_SEARCH_CANDIDATES: ${AI_INTERNAL_API_KEY_JOB_SEARCH_CANDIDATES:?AI_INTERNAL_API_KEY_JOB_SEARCH_CANDIDATES is required}
+      INTERNAL_API_KEY_METRICS: ${AI_INTERNAL_API_KEY_METRICS:?AI_INTERNAL_API_KEY_METRICS is required}
+    # Ghi đè lệnh khởi động của image: migration thuộc về ai-migrate.
+    command: [ "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000" ]
+    logging: *logging
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-migrate:
+        condition: service_completed_successfully
+    expose:
+      - "8000"
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready', timeout=2)" ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  ai-job-embedding-worker:
+    image: ${IMAGE_PREFIX}-ai-worker:${TAG}
+    env_file:
+      - ./env/ai-service.env
+    environment:
+      EMBEDDING_MODEL_LOCAL_FILES_ONLY: ${EMBEDDING_MODEL_LOCAL_FILES_ONLY:-false}
+    logging: *logging
+    restart: unless-stopped
+    depends_on:
+      ai-service:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    volumes:
+      - ai-model-cache:/models
+
+  ai-cv-embedding-worker:
+    image: ${IMAGE_PREFIX}-ai-worker:${TAG}
+    env_file:
+      - ./env/ai-service.env
+    environment:
+      EMBEDDING_MODEL_LOCAL_FILES_ONLY: ${EMBEDDING_MODEL_LOCAL_FILES_ONLY:-false}
+      MEDIA_SERVICE_URL: http://media-service:3000
+      MEDIA_INTERNAL_API_KEY: ${MEDIA_INTERNAL_API_KEY_AI:?MEDIA_INTERNAL_API_KEY_AI is required}
+      KAFKA_CV_TOPIC: ${KAFKA_CV_TOPIC:-cv-events}
+    command: [ "python", "-m", "app.cv_worker_main" ]
+    logging: *logging
+    restart: unless-stopped
+    depends_on:
+      ai-service:
+        condition: service_healthy
+      media-service:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    volumes:
+      - ai-model-cache:/models
+
+  video-service:
+    image: ${IMAGE_PREFIX}-video-service:${TAG}
+    env_file:
+      - ./env/video-service.env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?sslmode=disable
+      JWT_JWKS_URI: http://auth-service:8080/auth/.well-known/jwks.json
+      JWT_ISSUER: ${JWT_ISSUER:-https://auth.recruitment.local}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-recruitment-api}
+      JWT_ALLOW_INSECURE_JWKS: "true"
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?LIVEKIT_API_KEY is required}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET is required}
+      LIVEKIT_URL: ${LIVEKIT_URL:?LIVEKIT_URL is required}
+      KAFKA_BROKERS: kafka:9092
+      ALLOWED_ORIGINS: *prod_origin
+      PORT: "8080"
+    logging: *logging
+    secrets:
+      - source: jwt-public-key
+        target: jwt-public.pem
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+    expose:
+      - "8080"
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health/ready" ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+  frontend:
+    image: ${IMAGE_PREFIX}-frontend:${TAG}
+    env_file:
+      - ./env/frontend.env
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: /api
+      NEXT_PUBLIC_API_MODE: gateway
+      NEXT_PUBLIC_GATEWAY_URL: *prod_origin
+      NEXT_PUBLIC_GOOGLE_LOGIN_ENABLED: "true"
+      # Cổng 80 của gateway chỉ redirect HTTPS; gọi nội bộ qua cổng 8080 (không TLS).
+      API_INTERNAL_BASE_URL: http://api-gateway:8080
+    logging: *logging
+    restart: unless-stopped
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))" ]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+volumes:
+  ai-model-cache:
+  postgres-data:
+  mongo-data:
+  redis-data:
+  kafka-data-apache:
+  elasticsearch-data:
+
+secrets:
+  jwt-private-key:
+    file: ${JWT_PRIVATE_KEY_FILE:-./secrets/jwt-private.pem}
+  jwt-public-key:
+    file: ${JWT_PUBLIC_KEY_FILE:-./secrets/jwt-public.pem}
