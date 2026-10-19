@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -45,11 +46,24 @@ func checkOrigin(r *http.Request) bool {
 	if allowedOrigins[origin] {
 		return true
 	}
-	if strings.Contains(origin, "localhost") {
+	if isLoopbackOrigin(origin) {
 		return true
 	}
 	log.Printf("[WS Upgrade] Origin not allowed: %s", origin)
 	return false
+}
+
+// isLoopbackOrigin returns true when the origin URL points to a loopback
+// address (localhost, 127.0.0.1 or [::1]). This is used as a dev-mode
+// convenience so that local browser windows can open WebSocket connections
+// without needing an explicit ALLOWED_ORIGINS entry.
+func isLoopbackOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	h := strings.ToLower(u.Hostname())
+	return h == "localhost" || h == "127.0.0.1" || h == "::1"
 }
 
 var upgrader = websocket.Upgrader{

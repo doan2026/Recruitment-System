@@ -148,9 +148,17 @@ function ChatInterface({ accountId }: { accountId: string }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = window.location.host; 
-    const wsUrl = `${protocol}//${host}/api/chat/ws/chat`;
+    // When NEXT_PUBLIC_GATEWAY_URL is set, connect WebSocket directly to the
+    // gateway because Next.js rewrites don't support HTTP Upgrade.
+    const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL?.replace(/\/+$/, "");
+    let wsUrl: string;
+    if (gatewayUrl) {
+      wsUrl = gatewayUrl.replace(/^https:/, "wss:").replace(/^http:/, "ws:") + "/chat/ws/chat";
+    } else {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const host = window.location.host;
+      wsUrl = `${protocol}//${host}/api/chat/ws/chat`;
+    }
     
     let socket: WebSocket | null = null;
     let reconnectTimer: NodeJS.Timeout;

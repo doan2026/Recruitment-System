@@ -120,12 +120,12 @@ export const NotificationProvider = ({ children }: { children: React.ReactNode }
     // Check if running in browser
     if (typeof window === "undefined") return;
     
-    // We append the access token to URL if possible or let the gateway handle cookie.
-    // Assuming gateway handles cookie/auth for SSE.
     // Bypassing Next.js proxy because Next.js rewrites buffer the SSE stream indefinitely.
-    const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-    const evtSourceUrl = isLocal 
-      ? `http://${window.location.hostname}:8080/notifications/stream` 
+    // When NEXT_PUBLIC_GATEWAY_URL is set (e.g. "https://doantvv.ddns.net"), use it
+    // to connect directly to the gateway. Otherwise fall back to the relative /api path.
+    const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL?.replace(/\/+$/, "");
+    const evtSourceUrl = gatewayUrl
+      ? `${gatewayUrl}/notifications/stream`
       : "/api/notifications/stream";
     const evtSource = new EventSource(evtSourceUrl, { withCredentials: true });
     
