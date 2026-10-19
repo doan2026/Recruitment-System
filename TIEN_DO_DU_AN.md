@@ -1303,6 +1303,17 @@ Log local: `/tmp/recruitment-fe-unit-final.log`, `/tmp/recruitment-fe-build-fina
 
 ---
 
+
+## 2.62. Kiểm tra giao diện chưa cập nhật và đóng gói frontend — 19/10/2026
+
+- Commit `17986d9` chủ yếu sửa luồng và khung dùng chung; không thay bố cục trang chủ, danh sách việc làm và hai dashboard. Không mô tả lượt này là thiết kế lại toàn bộ giao diện.
+- `.github/workflows/deploy.yml` chỉ chạy khi push tag `v*`; push `develop` không tự triển khai. Release `v1.0.6` tại `6aca997` có chứa `17986d9`, nhưng [run 39270665974](https://github.com/vuongptit/Recruitment-System/actions/runs/39270665974) thất bại tại build `job-search-service`; frontend bị hủy theo matrix và bước deploy bị bỏ qua. Vì vậy run này chưa cập nhật server.
+- Sửa `frontend/Dockerfile`: đưa `middleware.ts` vào build context được COPY; khai báo `ARG API_INTERNAL_BASE_URL` để nhận giá trị `http://api-gateway:8080` mà workflow đã truyền. Giữ mặc định `http://api-gateway` cho Compose local.
+- Bản sửa Dockerfile cần được đưa vào release tiếp theo; không sửa tag đã tồn tại, kích hoạt workflow hay triển khai production trong lượt kiểm tra này.
+- Kiểm chứng đóng gói: **PASS** production build từ đúng tập source COPY bởi Dockerfile trong thư mục tạm không chứa `.env`; manifest có middleware và rewrite `/api/:path*` trỏ đúng `http://api-gateway:8080/:path*`. Log: `/tmp/recruitment-frontend-image-check.log`. Docker daemon local chưa chạy nên chưa xác nhận image/container thật (build kiểm chứng dùng Node local).
+
+---
+
 # 3. Danh sách task CHƯA làm (Pending)
 
 ## P01 — Hoàn tất và bàn giao Application Pipeline

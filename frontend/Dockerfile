@@ -3,10 +3,11 @@ WORKDIR /app
 ARG NEXT_PUBLIC_API_BASE_URL=/api
 ARG NEXT_PUBLIC_API_MODE=gateway
 ARG NEXT_PUBLIC_GOOGLE_LOGIN_ENABLED=false
+ARG API_INTERNAL_BASE_URL=http://api-gateway
 ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL \
     NEXT_PUBLIC_API_MODE=$NEXT_PUBLIC_API_MODE \
     NEXT_PUBLIC_GOOGLE_LOGIN_ENABLED=$NEXT_PUBLIC_GOOGLE_LOGIN_ENABLED \
-    API_INTERNAL_BASE_URL=http://api-gateway
+    API_INTERNAL_BASE_URL=$API_INTERNAL_BASE_URL
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 COPY package*.json ./
 RUN npm ci
@@ -15,7 +16,7 @@ COPY components components
 COPY lib lib
 COPY types types
 COPY public public
-COPY next.config.mjs tsconfig.json next-env.d.ts ./
+COPY next.config.mjs tsconfig.json next-env.d.ts middleware.ts ./
 RUN npm run build
 
 FROM node:20-bookworm-slim
