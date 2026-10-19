@@ -1,7 +1,8 @@
-﻿"use client";
+"use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { LoadingState } from "./ui";
 import { useCurrentAccount } from "./SessionGate";
 export function Person1Gate({
   children,
@@ -12,14 +13,17 @@ export function Person1Gate({
 }) {
   const account = useCurrentAccount();
   const path = usePathname();
+  const [returnTo, setReturnTo] = useState(path);
+  useEffect(() => { setReturnTo(path + window.location.search); }, [path]);
   if (role === "ADMIN" && path === "/admin/login") return <>{children}</>;
+  if (account === undefined) return <LoadingState label="Đang kiểm tra phiên đăng nhập" />;
   if (!account)
     return (
       <section className="card empty-state">
         <h1>Đăng nhập để tiếp tục</h1>
         <Link
           className="btn btn-primary"
-          href={role === "ADMIN" ? `/admin/login?returnTo=${encodeURIComponent(path)}` : `/login?returnTo=${encodeURIComponent(path)}`}
+          href={role === "ADMIN" ? `/admin/login?returnTo=${encodeURIComponent(returnTo)}` : `/login?returnTo=${encodeURIComponent(returnTo)}`}
         >
           Đăng nhập
         </Link>

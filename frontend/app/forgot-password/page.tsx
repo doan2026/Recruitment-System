@@ -1,11 +1,16 @@
 "use client";
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { requestApi } from "../../lib/apiClient";
-import { publicAuth, person1Error } from "../../lib/person1Api";
+import { publicAuth, person1Error, loginRoute } from "../../lib/person1Api";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
+  const [portal, setPortal] = useState<"CANDIDATE" | "RECRUITER" | "ADMIN">("CANDIDATE");
+  useEffect(() => {
+    const role = new URLSearchParams(window.location.search).get("role");
+    if (role === "RECRUITER" || role === "ADMIN") setPortal(role);
+  }, []);
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");
@@ -34,7 +39,7 @@ export default function ForgotPasswordPage() {
           {done ? <p className="auth-message" role="status">Nếu email đủ điều kiện, bạn sẽ nhận được liên kết đặt lại mật khẩu.</p> : null}
           {error ? <p className="auth-error" role="alert">{error}</p> : null}
         </form>
-        <Link className="auth-back-link" href="/login">← Quay lại đăng nhập</Link>
+        <Link className="auth-back-link" href={loginRoute(portal)}>← Quay lại đăng nhập</Link>
       </div>
     </section>
     <aside className="auth-forgot-visual" aria-hidden="true"><div className="auth-forgot-art" /></aside>

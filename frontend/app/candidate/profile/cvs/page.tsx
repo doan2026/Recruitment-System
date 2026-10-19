@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { requestApi } from "../../../../lib/apiClient";
 import {
   person1Error,
+  person1FormError,
   uploadPersonalFile,
   type CandidateCv,
 } from "../../../../lib/person1Api";
@@ -38,8 +39,10 @@ export default function CvsPage() {
       });
     return () => controller.abort();
   }, [reload]);
-  async function upload(e: FormEvent) {
+  async function upload(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const formIssue = person1FormError(e.currentTarget);
+    if (formIssue) { setError(formIssue); return; }
     if (pending || !file) return;
     setPending(true);
     setError("");
@@ -139,7 +142,7 @@ export default function CvsPage() {
           </Link>
         </div>
       </div>
-      <form className="card form-stack" onSubmit={upload}>
+      <form className="card form-stack" noValidate onSubmit={upload}>
         <h2>Tải CV PDF</h2>
         <fieldset
           disabled={pending || loading || cvs.length >= 5}
@@ -244,8 +247,11 @@ export default function CvsPage() {
       {rename ? (
         <form
           className="card form-stack"
+          noValidate
           onSubmit={(e) => {
             e.preventDefault();
+            const formIssue = person1FormError(e.currentTarget);
+            if (formIssue) { setError(formIssue); return; }
             void mutate(rename, "rename");
           }}
         >

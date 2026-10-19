@@ -22,3 +22,10 @@ export function middleware(request: NextRequest) {
   
   return NextResponse.next();
 }
+
+// Next 14 middleware expects ServerResponse and cannot process upgrade sockets.
+// Only this exact WS endpoint skips cookie-to-header adaptation. Chat's
+// ServeWS verifies the same HttpOnly cookie before upgrading (client.go:193).
+export const config = {
+  matcher: ["/api/((?!chat/ws/chat$).*)"],
+};

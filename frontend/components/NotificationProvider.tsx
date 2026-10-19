@@ -1,337 +1,224 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
-import { useCurrentAccount } from "./SessionGate";
-import { requestApi } from "@/lib/apiClientCore";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-
-export interface Notification {
-  id: string;
-  type: string;
-  title: string;
-  body: string;
-  is_read: boolean;
-  created_at: string;
-  metadata?: any;
-}
+import { useCurrentAccount } from "./SessionGate";
+import { requestApi, toUserMessage } from "@/lib/apiClientCore";
+import { parseCallMessage, sendChatMessage } from "@/lib/chatApi";
+import { mergeNotifications, type InboxNotification } from "@/lib/notificationState";
+export type Notification = InboxNotification;
 
 interface NotificationContextValue {
   unreadCount: number;
   notifications: Notification[];
   hasMore: boolean;
   loading: boolean;
+  error: string;
+  marking: boolean;
   refresh: () => Promise<void>;
   loadMore: () => Promise<void>;
   markAsRead: (id: string) => Promise<void>;
   markAllAsRead: () => Promise<void>;
 }
-
 const NotificationContext = createContext<NotificationContextValue | null>(null);
+export function useNotifications() {
+  const context = useContext(NotificationContext);
+  if (!context) throw new Error("useNotifications must be used within a NotificationProvider");
+  return context;
+}
 
-export const useNotifications = () => {
-  const ctx = useContext(NotificationContext);
-  if (!ctx) throw new Error("useNotifications must be used within a NotificationProvider");
-  return ctx;
-};
-
-export const NotificationProvider = ({ children }: { children: React.ReactNode }) => {
+export function NotificationProvider({ children }: { children: ReactNode }) {
   const account = useCurrentAccount();
+  const accountId = account?.id;
+  const identity = useRef(accountId);
+  identity.current = accountId;
+  const router = useRouter();
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const notificationsRef = useRef(notifications);
+  notificationsRef.current = notifications;
+  const notificationRevision = useRef(0);
+  const notificationUpdates = useRef(new Map<string, { revision: number; notification: Notification }>());
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [incomingCall, setIncomingCall] = useState<{ callId: string, title: string, body: string, conversationId: string } | null>(null);
-  const [toastNotifs, setToastNotifs] = useState<Notification[]>([]);
-  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [marking, setMarking] = useState(false);
+  const [incomingCall, setIncomingCall] = useState<{ callId: string; conversationId: string; title: string } | null>(null);
+  const [callPending, setCallPending] = useState(false);
+  const [callError, setCallError] = useState("");
+  const loadLock = useRef(false);
+  const mutationLock = useRef(false);
+  const callLock = useRef(false);
+  const countRevision = useRef(0);
+  const isCurrent = useCallback(() => !!accountId && identity.current === accountId, [accountId]);
 
-  const fetchUnreadCount = async () => {
-    try {
-      const res = await requestApi<{ unread_count: number }>("/notifications/unread-count", { privateData: true });
-      setUnreadCount(res.data.unread_count);
-    } catch (e) {
-      console.error("Failed to fetch unread count", e);
+  // GET snapshots may finish after a live update or successful read action.
+  // Overlay only updates observed after that GET started, without changing its cursor.
+  const recordUpdates = useCallback((updates: Notification[]) => {
+    for (const notification of updates) {
+      notificationUpdates.current.set(notification.id, { revision: ++notificationRevision.current, notification });
     }
-  };
+    notificationsRef.current = mergeNotifications(notificationsRef.current, updates);
+    setNotifications(notificationsRef.current);
+  }, []);
 
-  const loadMore = async () => {
-    if (loading || !hasMore) return;
-    setLoading(true);
+  const fetchUnreadCount = useCallback(async () => {
+    if (!isCurrent()) return;
+    const revision = ++countRevision.current;
     try {
-      const res = await requestApi<Notification[]>("/notifications", {
-        privateData: true,
-        query: nextCursor ? { cursor: nextCursor } : {},
-      });
-      setNotifications(prev => [...prev, ...res.data]);
-      setNextCursor(res.meta?.nextCursor ?? null);
-      setHasMore(!!res.meta?.nextCursor);
-    } catch (e) {
-      console.error("Failed to load notifications", e);
-    } finally {
-      setLoading(false);
-    }
-  };
+      const response = await requestApi<{ unread_count: number }>("/notifications/unread-count", { privateData: true });
+      if (isCurrent() && revision === countRevision.current) setUnreadCount(response.data.unread_count);
+    } catch { /* Inbox read failures are shown by refresh; keep the last known count. */ }
+  }, [isCurrent]);
 
-  const refresh = async () => {
-    setLoading(true);
+  const refresh = useCallback(async () => {
+    if (!isCurrent() || loadLock.current) return;
+    loadLock.current = true; setLoading(true); setError("");
+    const startedAt = notificationRevision.current;
     try {
-      const res = await requestApi<Notification[]>("/notifications", { privateData: true });
-      setNotifications(res.data);
-      setNextCursor(res.meta?.nextCursor ?? null);
-      setHasMore(!!res.meta?.nextCursor);
-    } catch (e) {
-      console.error("Failed to fetch notifications", e);
-    } finally {
-      setLoading(false);
-    }
-  };
+      const response = await requestApi<Notification[]>("/notifications", { privateData: true });
+      if (!isCurrent()) return;
+      const overlay = [...notificationUpdates.current.values()].filter(update => update.revision > startedAt).map(update => update.notification);
+      notificationsRef.current = mergeNotifications(response.data ?? [], overlay);
+      setNotifications(notificationsRef.current);
+      setNextCursor(response.meta?.nextCursor ?? null);
+      await fetchUnreadCount();
+    } catch (failure) { if (isCurrent()) setError(toUserMessage(failure)); }
+    finally { if (isCurrent()) { loadLock.current = false; setLoading(false); } }
+  }, [isCurrent, fetchUnreadCount]);
 
-  const markAsRead = async (id: string) => {
+  async function loadMore() {
+    if (!isCurrent() || loadLock.current || !nextCursor) return;
+    loadLock.current = true; setLoading(true); setError("");
+    const startedAt = notificationRevision.current;
     try {
-      await requestApi(`/notifications/${id}/read`, { method: "PATCH", privateData: true });
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-      setUnreadCount(prev => Math.max(0, prev - 1));
-    } catch (e) {
-      console.error("Failed to mark as read", e);
-    }
-  };
-
-  const markAllAsRead = async () => {
-    try {
-      await requestApi("/notifications/read-all", { method: "PATCH", privateData: true });
-      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
-      setUnreadCount(0);
-    } catch (e) {
-      console.error("Failed to mark all as read", e);
-    }
-  };
-
-  // Initial load
-  useEffect(() => {
-    if (!account) return;
-    fetchUnreadCount();
-    refresh();
-  }, [account]);
-
-  // Setup EventSource for real-time updates
-  useEffect(() => {
-    if (!account) return;
-    
-    // Check if running in browser
-    if (typeof window === "undefined") return;
-    
-    // Bypassing Next.js proxy because Next.js rewrites buffer the SSE stream indefinitely.
-    // When NEXT_PUBLIC_GATEWAY_URL is set (e.g. "https://doantvv.ddns.net"), use it
-    // to connect directly to the gateway. Otherwise fall back to the relative /api path.
-    const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL?.replace(/\/+$/, "");
-    const evtSourceUrl = gatewayUrl
-      ? `${gatewayUrl}/notifications/stream`
-      : "/api/notifications/stream";
-    const evtSource = new EventSource(evtSourceUrl, { withCredentials: true });
-    
-    evtSource.addEventListener("notification", (event) => {
-      try {
-        const notif = JSON.parse(event.data) as Notification;
-        setNotifications(prev => [notif, ...prev]);
-        setUnreadCount(prev => prev + 1);
-
-        // Show toast
-        if (notif.type !== "video_call" && notif.type !== "VIDEO_CALL_OFFLINE") {
-          setToastNotifs(prev => [...prev, notif]);
-          setTimeout(() => {
-            setToastNotifs(prev => prev.filter(n => n.id !== notif.id));
-          }, 5000);
-        }
-        
-        // Handle incoming video call
-        if (notif.type === "video_call") {
-          const callId = notif.metadata?.call_id;
-          const conversationId = notif.metadata?.conversation_id;
-          if (callId && conversationId) {
-            setIncomingCall({ callId, title: notif.title, body: notif.body || "Bạn có cuộc gọi đến", conversationId });
-          }
-        }
-        
-        // Handle offline video call receiver
-        if (notif.type === "VIDEO_CALL_OFFLINE") {
-          const callId = notif.metadata?.call_id;
-          // Here we can dispatch a custom event to tell the page that the call failed
-          if (callId && typeof window !== "undefined") {
-            window.dispatchEvent(new CustomEvent('video_call_offline', { detail: { callId } }));
-          }
-        }
-        
-        // Handle CALL_REJECTED message notification
-        if (notif.type === "new_message" && notif.body?.startsWith("[CALL_REJECTED]")) {
-          const callId = notif.body.split(" ")[1];
-          if (callId && typeof window !== "undefined") {
-            window.dispatchEvent(new CustomEvent('video_call_rejected', { detail: { callId } }));
-          }
-        }
-        
-        // Handle CALL_ENDED message notification
-        if (notif.type === "new_message" && notif.body?.startsWith("[CALL_ENDED]")) {
-          const callId = notif.body.split(" ")[1];
-          if (callId && typeof window !== "undefined") {
-            window.dispatchEvent(new CustomEvent('video_call_ended', { detail: { callId } }));
-          }
-          setIncomingCall(prev => (prev && prev.callId === callId) ? null : prev);
-        }
-      } catch (e) {
-        console.error("Failed to parse SSE", e);
+      const response = await requestApi<Notification[]>("/notifications", { privateData: true, query: { cursor: nextCursor } });
+      if (isCurrent()) {
+        const overlay = [...notificationUpdates.current.values()].filter(update => update.revision > startedAt).map(update => update.notification);
+        notificationsRef.current = mergeNotifications(mergeNotifications(notificationsRef.current, response.data ?? []), overlay);
+        setNotifications(notificationsRef.current);
+        setNextCursor(response.meta?.nextCursor ?? null);
       }
-    });
+    } catch (failure) { if (isCurrent()) setError(toUserMessage(failure)); }
+    finally { if (isCurrent()) { loadLock.current = false; setLoading(false); } }
+  }
 
-    evtSource.addEventListener("read_all", () => {
-      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
-      setUnreadCount(0);
-    });
+  async function markAsRead(id: string) {
+    if (!isCurrent() || mutationLock.current || notifications.find(notification => notification.id === id)?.is_read) return;
+    mutationLock.current = true; setMarking(true); setError("");
+    try {
+      await requestApi(`/notifications/${encodeURIComponent(id)}/read`, { method: "PATCH", privateData: true, maxRetries: 0 });
+      if (isCurrent()) {
+        const latest = notificationsRef.current.find(notification => notification.id === id);
+        if (latest) recordUpdates([{ ...latest, is_read: true }]);
+      }
+      await fetchUnreadCount();
+    } catch (failure) { if (isCurrent()) setError(toUserMessage(failure)); }
+    finally { if (isCurrent()) { mutationLock.current = false; setMarking(false); } }
+  }
 
-    return () => {
-      evtSource.close();
-    };
-  }, [account]);
-
-  // Timeout for incoming call (20s)
-  useEffect(() => {
-    if (!incomingCall) return;
-    const timer = setTimeout(async () => {
-      try {
-        await requestApi(`/chat/chats/${incomingCall.conversationId}/messages`, {
-          method: "POST",
-          body: { 
-            content: `[CALL_REJECTED] ${incomingCall.callId}`, 
-            client_message_id: globalThis.crypto?.randomUUID?.() || Date.now().toString() 
-          },
-          privateData: true
+  async function markAllAsRead() {
+    if (!isCurrent() || mutationLock.current) return;
+    const visibleIds = new Set(notifications.map(notification => notification.id));
+    mutationLock.current = true; setMarking(true); setError("");
+    try {
+      await requestApi("/notifications/read-all", { method: "PATCH", privateData: true, maxRetries: 0 });
+      if (isCurrent()) {
+        const updates = [...visibleIds].flatMap(id => {
+          const latest = notificationsRef.current.find(notification => notification.id === id);
+          return latest ? [{ ...latest, is_read: true }] : [];
         });
-        await requestApi(`/calls/${incomingCall.callId}/reject`, { method: "POST", privateData: true });
-      } catch (e) { console.error("Reject err", e); }
-      setIncomingCall(null);
-    }, 20000); // 20 seconds timeout
+        recordUpdates(updates);
+      }
+      await fetchUnreadCount();
+    } catch (failure) { if (isCurrent()) setError(toUserMessage(failure)); }
+    finally { if (isCurrent()) { mutationLock.current = false; setMarking(false); } }
+  }
 
-    return () => clearTimeout(timer);
-  }, [incomingCall]);
+  useEffect(() => {
+    identity.current = accountId;
+    notificationUpdates.current.clear(); notificationRevision.current = 0; notificationsRef.current = [];
+    setNotifications([]); setUnreadCount(0); setNextCursor(null); setIncomingCall(null); setError("");
+    loadLock.current = false; mutationLock.current = false; callLock.current = false;
+    setMarking(false); setCallPending(false); setLoading(false); setCallError("");
+    if (accountId) void refresh();
+    return () => { identity.current = undefined; ++countRevision.current; };
+  }, [accountId, refresh]);
 
-  return (
-    <NotificationContext.Provider value={{ unreadCount, notifications, hasMore, loading, refresh, loadMore, markAsRead, markAllAsRead }}>
-      {children}
-      {incomingCall && (
-        <div style={{
-          position: "fixed",
-          top: "20px", right: "20px",
-          zIndex: 9999,
-          animation: "slideIn 0.3s ease-out forwards"
-        }}>
-          <div style={{
-            background: "white",
-            padding: "16px",
-            borderRadius: "12px",
-            width: "320px",
-            boxShadow: "0 10px 25px rgba(0,0,0,0.2)",
-            border: "1px solid var(--line)"
-          }}>
-            <div style={{ display: "flex", gap: "12px", marginBottom: "12px" }}>
-              <div style={{
-                width: 48, height: 48, borderRadius: "50%", background: "var(--primary-soft)", 
-                color: "var(--primary)", display: "flex", alignItems: "center", justifyContent: "center",
-                flexShrink: 0
-              }}>
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
-                </svg>
-              </div>
-              <div style={{ overflow: "hidden" }}>
-                <h4 style={{ margin: "0 0 4px 0", fontSize: "1rem", whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{incomingCall.title}</h4>
-                <p style={{ color: "var(--muted)", margin: "0", fontSize: "0.85rem", whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{incomingCall.body}</p>
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button 
-                className="btn btn-outline" 
-                style={{ flex: 1, borderColor: "var(--danger)", color: "var(--danger)", padding: "6px" }}
-                onClick={async () => {
-                  try {
-                    await requestApi(`/chat/chats/${incomingCall.conversationId}/messages`, {
-                      method: "POST",
-                      body: { 
-                        content: `[CALL_REJECTED] ${incomingCall.callId}`, 
-                        client_message_id: globalThis.crypto?.randomUUID?.() || Date.now().toString() 
-                      },
-                      privateData: true
-                    });
-                    await requestApi(`/calls/${incomingCall.callId}/reject`, { method: "POST", privateData: true });
-                  } catch (e) { console.error("Reject err", e); }
-                  setIncomingCall(null);
-                }}
-              >
-                Từ chối
-              </button>
-              <button 
-                className="btn btn-primary" 
-                style={{ flex: 1, background: "var(--primary-2)", borderColor: "var(--primary-2)", padding: "6px" }}
-                onClick={async () => {
-                  try {
-                    await requestApi(`/chat/chats/${incomingCall.conversationId}/messages`, {
-                      method: "POST",
-                      body: { 
-                        content: `[CALL_ACCEPTED] ${incomingCall.callId}`, 
-                        client_message_id: globalThis.crypto?.randomUUID?.() || Date.now().toString() 
-                      },
-                      privateData: true
-                    });
-                  } catch (e) { console.error("Accept err", e); }
-                  setIncomingCall(null);
-                  router.push(`/interviews/${incomingCall.callId}/room`);
-                }}
-              >
-                Chấp nhận
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Toast Notifications */}
-      <div style={{
-        position: "fixed",
-        bottom: "20px",
-        right: "20px",
-        zIndex: 9999,
-        display: "flex",
-        flexDirection: "column",
-        gap: "10px",
-        pointerEvents: "none"
-      }}>
-        {toastNotifs.map(toast => (
-          <div key={toast.id} style={{
-            background: "white",
-            border: "1px solid var(--line)",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-            padding: "16px",
-            borderRadius: "8px",
-            width: "320px",
-            pointerEvents: "auto",
-            animation: "slideIn 0.3s ease-out forwards",
-            display: "flex",
-            flexDirection: "column",
-            gap: "4px",
-            borderLeft: "4px solid var(--primary)"
-          }}>
-            <strong style={{ fontSize: "0.95rem" }}>{toast.title}</strong>
-            <span style={{ fontSize: "0.85rem", color: "var(--muted)", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
-              {toast.body}
-            </span>
-          </div>
-        ))}
-      </div>
-      
-      <style dangerouslySetInnerHTML={{__html: `
-        @keyframes slideIn {
-          from { transform: translateX(100%); opacity: 0; }
-          to { transform: translateX(0); opacity: 1; }
+  useEffect(() => {
+    if (!accountId) return;
+    let active = true;
+    const verifyCallSignal = async (call: { callId: string; action: "ENDED" | "REJECTED" }) => {
+      if (!active || !isCurrent()) return;
+      try {
+        const response = await requestApi<{ id: string }[]>("/calls", { privateData: true, maxRetries: 0 });
+        const calls = response.data;
+        // Chat content is user-authored. Only Video can establish that a call is closed.
+        // This endpoint is capped at 50; absence in a full page proves nothing.
+        if (!active || !isCurrent() || !Array.isArray(calls) || calls.length >= 50
+          || calls.some(item => !item || typeof item.id !== "string" || item.id === call.callId)) return;
+        window.dispatchEvent(new CustomEvent(call.action === "REJECTED" ? "video_call_rejected" : "video_call_ended", { detail: { callId: call.callId } }));
+        setIncomingCall(current => current?.callId === call.callId ? null : current);
+      } catch { /* Keep the room and invitation open when Video state is unavailable. */ }
+    };
+    const handleCallSignal = (event: Event) => {
+      const detail = (event as CustomEvent<{ callId?: unknown; action?: unknown }>).detail;
+      if (typeof detail?.callId !== "string" || (detail.action !== "ENDED" && detail.action !== "REJECTED")) return;
+      const call = parseCallMessage(`[CALL_${detail.action}] ${detail.callId}`);
+      if (call) void verifyCallSignal({ callId: call.callId, action: detail.action });
+    };
+    window.addEventListener("video_call_signal", handleCallSignal);
+    // Authentication cookies belong to the frontend origin, including SSE reconnects.
+    const source = new EventSource("/api/notifications/stream", { withCredentials: true });
+    source.addEventListener("notification", event => {
+      if (!isCurrent()) return;
+      try {
+        const notification = JSON.parse((event as MessageEvent).data) as Notification;
+        if (typeof notification.id !== "string" || typeof notification.body !== "string") return;
+        if (notification.type !== "VIDEO_CALL_OFFLINE") {
+          recordUpdates([notification]);
+          void fetchUnreadCount(); // Chat notifications are upserts; receiving one does not imply +1.
         }
-      `}} />
-    </NotificationContext.Provider>
-  );
-};
+        const callId = notification.metadata?.call_id;
+        const conversationId = notification.metadata?.conversation_id;
+        if (notification.type === "video_call" && typeof callId === "string" && typeof conversationId === "string") {
+          setIncomingCall({ callId, conversationId, title: notification.title }); setCallError("");
+        }
+        if (notification.type === "VIDEO_CALL_OFFLINE" && typeof callId === "string") {
+          window.dispatchEvent(new CustomEvent("video_call_offline", { detail: { callId } }));
+        }
+        const call = parseCallMessage(notification.body);
+        if (call && (call.action === "REJECTED" || call.action === "ENDED")) {
+          void verifyCallSignal({ callId: call.callId, action: call.action });
+        }
+      } catch { /* Ignore malformed stream data; the inbox can always be refreshed. */ }
+    });
+    source.addEventListener("connected", () => { void refresh(); });
+    const poll = setInterval(() => { if (document.visibilityState === "visible") void fetchUnreadCount(); }, 30000);
+    return () => { active = false; source.close(); clearInterval(poll); window.removeEventListener("video_call_signal", handleCallSignal); };
+  }, [accountId, isCurrent, fetchUnreadCount, refresh, recordUpdates]);
+
+  async function respondToCall(accept: boolean) {
+    if (!incomingCall || callLock.current) return;
+    const call = incomingCall;
+    callLock.current = true; setCallPending(true); setCallError("");
+    try {
+      if (!accept) await requestApi(`/calls/${encodeURIComponent(call.callId)}/reject`, { method: "POST", privateData: true, maxRetries: 0 });
+      try { await sendChatMessage(call.conversationId, `[CALL_${accept ? "ACCEPTED" : "REJECTED"}] ${call.callId}`, crypto.randomUUID()); } catch { /* Call authorization stays in Video service. */ }
+      if (!isCurrent()) return;
+      setIncomingCall(null);
+      if (accept) router.push(`/interviews/${encodeURIComponent(call.callId)}/room?chat=${encodeURIComponent(call.conversationId)}`);
+    } catch (failure) { if (isCurrent()) setCallError(toUserMessage(failure)); }
+    finally { if (isCurrent()) { callLock.current = false; setCallPending(false); } }
+  }
+
+  return <NotificationContext.Provider value={{ unreadCount, notifications, hasMore: !!nextCursor, loading, error, marking, refresh, loadMore, markAsRead, markAllAsRead }}>
+    {children}
+    {incomingCall && <aside className="card stack" role="region" aria-label="Cuộc gọi đến" style={{ position: "fixed", bottom: 20, right: 20, width: "min(340px, calc(100vw - 40px))", zIndex: 9999 }}>
+      <strong>{incomingCall.title}</strong><p role="status">Bạn có lời mời tham gia cuộc gọi video.</p>
+      {callError && <p className="form-error" role="alert">{callError}</p>}
+      <div className="btn-group"><button className="btn" disabled={callPending} onClick={() => void respondToCall(false)}>Từ chối</button>
+        <button className="btn btn-primary" disabled={callPending} onClick={() => void respondToCall(true)}>{callPending ? "Đang xử lý…" : "Chấp nhận"}</button></div>
+    </aside>}
+  </NotificationContext.Provider>;
+}

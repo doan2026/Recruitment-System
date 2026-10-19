@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { createServer, type Server } from "node:http";
+import { createHash } from "node:crypto";
 
 const account = { id: "4795c0de-7908-4ab5-9bed-4c4f1cf9c213", email: "cookie@example.test", role: "CANDIDATE" };
 let server: Server;
@@ -120,3 +121,33 @@ test("Google exchange cannot skip the one-time binder", async ({ page }) => {
   expect(response.status()).toBe(401);
   expect((await response.json()).code).toBe("INVALID_EXCHANGE");
 });
+
+
+for (const authenticated of [true, false]) {
+  test(`same-origin chat WebSocket preserves gateway authentication: cookie ${authenticated}`, async ({ page, context }) => {
+    if (authenticated) await context.addCookies([{ name: "careerhub_token", value: "access-fixture", domain: "127.0.0.1", path: "/", httpOnly: true, sameSite: "Lax" }]);
+    let gatewayPath = "";
+    let cookieForwarded = false;
+    server.once("upgrade", (request, socket) => {
+      gatewayPath = request.url ?? "";
+      cookieForwarded = request.headers.cookie?.includes("careerhub_token=access-fixture") ?? false;
+      if (!cookieForwarded) { socket.end("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n"); return; }
+      const accept = createHash("sha1").update(String(request.headers["sec-websocket-key"]) + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
+      socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n");
+      // Keep the tunnel open until the browser completes its handshake and closes.
+      socket.once("data", () => socket.end(Buffer.from([0x88, 0x00])));
+    });
+    // Isolate transport from the Auth fixture's intentionally missing notification APIs.
+    // The document is static; the WebSocket still traverses the real Next proxy.
+    await page.goto("/icon.svg");
+    const connected = await page.evaluate(() => new Promise<boolean>(resolve => {
+      const socket = new WebSocket(`ws://${location.host}/api/chat/ws/chat`);
+      const timeout = setTimeout(() => { socket.close(); resolve(false); }, 5000);
+      socket.onopen = () => { clearTimeout(timeout); socket.close(); resolve(true); };
+      socket.onerror = () => { clearTimeout(timeout); resolve(false); };
+    }));
+    expect(connected).toBe(authenticated);
+    expect(gatewayPath).toBe("/chat/ws/chat");
+    expect(cookieForwarded).toBe(authenticated);
+  });
+}

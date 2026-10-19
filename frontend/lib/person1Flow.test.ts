@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { passwordError, validatePersonalFile, personalFileUploadError, landing, loginRoute, loginDestination } from "./person1Api";
+import { passwordError, validatePersonalFile, personalFileUploadError, landing, loginRoute, loginDestination, profileDateError } from "./person1Api";
 import { validateBuilder, contentFromProfile } from "./cvPdf";
 import { clearApiSession, requestApi, setApiSession } from "./apiClientCore";
 test("registration password validates Unicode letters and bcrypt byte boundary", () => {
@@ -121,4 +121,29 @@ test("binary response from a previous session is discarded", async () => {
     /REQUEST_CANCELLED|hủy|huỷ/i,
   );
   clearApiSession();
+});
+
+test("shared signed-in workflows preserve their destination within role permissions", () => {
+  for (const role of ["CANDIDATE", "RECRUITER"] as const) {
+    assert.equal(loginDestination(role, "/messages?conversation=abc"), "/messages?conversation=abc");
+    assert.equal(loginDestination(role, "/notifications"), "/notifications");
+    assert.equal(loginDestination(role, "/reports?type=JOB&id=abc"), "/reports?type=JOB&id=abc");
+  }
+  assert.equal(loginDestination("ADMIN", "/notifications"), "/notifications");
+  assert.equal(loginDestination("ADMIN", "/messages"), "/admin");
+  assert.equal(loginDestination("CANDIDATE", "/notifications/../admin"), "/candidate/profile");
+});
+test("profile experience dates follow current and past employment requirements", () => {
+  assert.match(profileDateError("experiences", { startDate: "2024-01-01", isCurrent: false }) ?? "", /ngày kết thúc/);
+  assert.equal(profileDateError("experiences", { startDate: "2024-01-01", isCurrent: true }), null);
+  assert.match(profileDateError("educations", { startDate: "2024-01-01", endDate: "2023-12-31" }) ?? "", /sau ngày bắt đầu/);
+  assert.equal(profileDateError("educations", { startDate: "2024-01-01", endDate: "2024-01-01" }), null);
+});
+
+test("video call login returns to the invited room only for participants' roles", () => {
+  const room = "/interviews/1795c0de-7908-4ab5-9bed-4c4f1cf9c211/room?chat=thread";
+  assert.equal(loginDestination("CANDIDATE", room), room);
+  assert.equal(loginDestination("RECRUITER", room), room);
+  assert.equal(loginDestination("ADMIN", room), "/admin");
+  assert.equal(loginDestination("CANDIDATE", "/interviews/untrusted/path/room"), "/candidate/profile");
 });

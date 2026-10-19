@@ -256,14 +256,14 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId?: string }) {
   }
 
   async function startChat(application: CandidateApplication) {
-    if (!application.candidateId) return;
+    if (!application.candidateId || chattingId) return;
+    setActionError("");
     setChattingId(application.id);
     try {
       const response = await createConversation(`Chat với ${application.candidateName}`, [application.candidateId], false);
       router.push(`/messages?chat=${response.data.id}`);
     } catch (error) {
-      console.error(error);
-      alert("Không thể tạo cuộc trò chuyện: " + toUserMessage(error));
+      setActionError("Không thể mở cuộc trò chuyện. " + toUserMessage(error));
     } finally {
       setChattingId(null);
     }
@@ -272,7 +272,7 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId?: string }) {
   return (
     <section className="panel">
       <div className="section-head row-between">
-        <div><h2>Pipeline hồ sơ</h2><p className="help">Action được suy từ trạng thái backend; mọi mutation dùng optimistic version hiện tại.</p></div>
+        <div><h2>Pipeline hồ sơ</h2><p className="help">Theo dõi hồ sơ, liên hệ ứng viên và chuyển sang bước tuyển dụng tiếp theo.</p></div>
         {total ? <span className="badge">{total} hồ sơ</span> : null}
       </div>
       <form className="toolbar application-filter-toolbar" aria-label="Bộ lọc hồ sơ ứng tuyển" onSubmit={applyFilters} noValidate>
@@ -303,7 +303,7 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId?: string }) {
         />
       ) : null}
       {actionStatus ? <p className="notice notice-success" role="status">{actionStatus}</p> : null}
-      {actionError ? <p className="notice notice-danger" role="alert"><strong>Chưa đổi được trạng thái.</strong> {actionError}</p> : null}
+      {actionError ? <p className="notice notice-danger" role="alert"><strong>Chưa hoàn tất thao tác.</strong> {actionError}</p> : null}
       {loadError ? <ErrorState message={loadError} onRetry={() => setReloadKey((value) => value + 1)} /> : null}
       {loading ? <LoadingState label="Đang tải pipeline hồ sơ" /> : null}
       {!loading && !loadError && applications.length === 0 ? <EmptyState title="Chưa có hồ sơ ứng tuyển" description="Hồ sơ mới sẽ xuất hiện tại đây sau khi ứng viên nộp thành công." /> : null}
@@ -346,7 +346,7 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId?: string }) {
                   <button key={action.status} className={action.status === "REJECTED" ? "btn btn-danger" : "btn btn-secondary"} type="button" disabled={pendingApplicationId !== null} aria-busy={pending} onClick={() => { void moveStatus(application, action.status); }}>{pending ? "Đang cập nhật…" : action.label}</button>
                 ))}
                 {application.candidateId ? (
-                  <button className="btn" type="button" disabled={chattingId === application.id} onClick={() => startChat(application)}>
+                  <button className="btn" type="button" disabled={chattingId !== null || !application.candidateId} aria-busy={chattingId === application.id} onClick={() => startChat(application)}>
                     {chattingId === application.id ? "Đang tạo..." : "Chat với ứng viên"}
                   </button>
                 ) : null}

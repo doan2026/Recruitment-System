@@ -522,3 +522,104 @@ test("recruiter portal restores only its own remembered email", async ({ page })
   await expect(page.getByLabel("Mật khẩu", { exact: true })).toHaveValue("");
   await expect(page.getByRole("checkbox")).toBeChecked();
 });
+
+test("candidate navigation is shared across profile and CV routes without duplicate shells", async ({ page }) => {
+  await base(page);
+  await page.route(api + "/profile/cvs", route => reply(route, []));
+  await login(page);
+  await expect(page.locator(".candidate-workspace")).toHaveCount(1);
+  const navigation = page.getByRole("navigation", { name: "Khu vực ứng viên" });
+  await expect(navigation.getByRole("link", { name: "Hồ sơ cá nhân", exact: true })).toHaveAttribute("aria-current", "page");
+  await navigation.getByRole("link", { name: "Quản lý CV", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "CV của tôi" })).toBeVisible();
+  await expect(page.locator(".candidate-workspace")).toHaveCount(1);
+  await expect(navigation.getByRole("link", { name: "Quản lý CV", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(navigation.getByRole("link", { name: "Thông báo", exact: true })).toHaveAttribute("href", "/notifications");
+});
+
+test("candidate public jobs do not present another role with a candidate workspace", async ({ page }) => {
+  await base(page);
+  await page.route(api + "/jobs**", route => reply(route, []));
+  await page.route(api + "/auth-cookie/refresh", route => reply(route, { user: tokens("RECRUITER").user }));
+  await page.goto("/candidate/jobs");
+  await expect(page.getByRole("heading", { name: "Bạn không có quyền truy cập" })).toHaveCount(0);
+  await expect(page.locator(".candidate-workspace")).toHaveCount(0);
+  await expect(page.locator(".candidate-sidebar")).toHaveCount(0);
+});
+
+test("registration rejects malformed email before sending any OTP", async ({ page }) => {
+  await base(page);
+  let dispatches = 0;
+  await page.route(api + "/auth/register", route => { dispatches++; return reply(route, {}, 202); });
+  await page.goto("/register");
+  await page.getByLabel("Họ tên", { exact: true }).fill("Nguyễn An");
+  await page.getByLabel("Email", { exact: true }).fill("invalid-email");
+  await page.getByLabel("Mật khẩu", { exact: true }).fill("Password123");
+  await page.getByLabel("Xác nhận mật khẩu", { exact: true }).fill("Password123");
+  await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "Đăng ký", exact: true }).click();
+  await expect(page.locator("form p[role=alert]")).toContainText("email hợp lệ");
+  await expect(page.getByLabel("Email", { exact: true })).toBeFocused();
+  expect(dispatches).toBe(0);
+});
+
+test("profile handles current experience dates and renders readable completion sections", async ({ page }) => {
+  await base(page);
+  let body: unknown;
+  await page.route(api + "/profile/experiences", route => {
+    body = route.request().postDataJSON();
+    return reply(route, { ...profile, experiences: [{ id: cvId, ...body as object }] });
+  });
+  await login(page);
+  await expect(page.getByText("Còn thiếu: Học vấn", { exact: true })).toBeVisible();
+  const section = page.locator("section").filter({ has: page.getByRole("heading", { name: "Kinh nghiệm", exact: true }) });
+  await section.getByLabel("Công ty").fill("CareerHub");
+  await section.getByLabel("Vị trí", { exact: false }).fill("Kỹ sư phần mềm");
+  await section.getByLabel("Ngày bắt đầu").fill("2024-01-01");
+  await section.getByRole("button", { name: "Lưu kinh nghiệm" }).click();
+  await expect(section.getByRole("alert")).toContainText("ngày kết thúc");
+  expect(body).toBeUndefined();
+  await section.getByLabel("Ngày kết thúc").fill("2025-01-01");
+  await section.getByLabel("Đang làm việc").check();
+  await expect(section.getByLabel("Ngày kết thúc")).toBeDisabled();
+  await expect(section.getByLabel("Ngày kết thúc")).toHaveValue("");
+  await section.getByRole("button", { name: "Lưu kinh nghiệm" }).click();
+  await expect.poll(() => body).toEqual({ companyName: "CareerHub", position: "Kỹ sư phần mềm", startDate: "2024-01-01", endDate: null, isCurrent: true, description: null });
+});
+
+for (const portal of ["RECRUITER", "ADMIN"] as const) {
+  test(`password recovery returns to the ${portal} login portal`, async ({ page }) => {
+    await base(page);
+    await page.goto(portal === "ADMIN" ? "/admin/login" : "/recruiter/login");
+    await page.getByRole("link", { name: "Quên mật khẩu?" }).click();
+    await expect(page.getByRole("link", { name: "Quay lại đăng nhập" })).toHaveAttribute("href", portal === "ADMIN" ? "/admin/login" : "/recruiter/login");
+  });
+}
+
+test("candidate registration preserves the interrupted CV library destination after OTP", async ({ page }) => {
+  await base(page);
+  await page.route(api + "/profile/cvs", route => reply(route, []));
+  await page.route(api + "/auth/register", route => reply(route, { registrationId: userId }, 202));
+  await page.route(api + "/auth-cookie/verify", route => reply(route, tokens()));
+  await page.goto("/login?returnTo=%2Fcandidate%2Fprofile%2Fcvs");
+  await page.getByRole("link", { name: "Đăng ký ngay" }).click();
+  await page.getByLabel("Họ tên", { exact: true }).fill("Nguyễn An");
+  await page.getByLabel("Email", { exact: true }).fill("candidate@example.com");
+  await page.getByLabel("Mật khẩu", { exact: true }).fill("Password123");
+  await page.getByLabel("Xác nhận mật khẩu", { exact: true }).fill("Password123");
+  await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "Đăng ký", exact: true }).click();
+  await page.getByLabel("Mã xác minh").fill("123456");
+  await page.getByRole("button", { name: "Xác nhận", exact: true }).click();
+  await expect(page).toHaveURL(/\/candidate\/profile\/cvs$/);
+  await expect(page.getByRole("heading", { name: "CV của tôi", exact: true })).toBeVisible();
+});
+
+test("candidate settings links to working security and notification workflows", async ({ page }) => {
+  await base(page);
+  await login(page, "CANDIDATE", "/candidate/settings");
+  await expect(page.getByRole("link", { name: "Đặt lại mật khẩu", exact: true })).toHaveAttribute("href", "/forgot-password");
+  await expect(page.getByRole("link", { name: "Xem thông báo", exact: true })).toHaveAttribute("href", "/notifications");
+  await expect(page.getByRole("checkbox")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Xoá tài khoản", exact: true })).toHaveCount(0);
+});

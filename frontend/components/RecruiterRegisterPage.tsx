@@ -1,9 +1,9 @@
-﻿"use client";
+"use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { requestApi } from "../lib/apiClient";
-import { landing, passwordError, person1Error, publicAuth, verifyRegistration } from "../lib/person1Api";
+import { loginDestination, passwordError, person1Error, publicAuth, verifyRegistration } from "../lib/person1Api";
 
 export default function RecruiterRegisterPage() {
   const router = useRouter();
@@ -19,10 +19,17 @@ export default function RecruiterRegisterPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [verified, setVerified] = useState(false);
+  const [destination, setDestination] = useState("/recruiter/jobs");
+  const [loginHref, setLoginHref] = useState("/recruiter/login");
+  useEffect(() => {
+    const returnTo = new URLSearchParams(window.location.search).get("returnTo");
+    setDestination(loginDestination("RECRUITER", returnTo));
+    if (returnTo) setLoginHref(`/recruiter/login?returnTo=${encodeURIComponent(loginDestination("RECRUITER", returnTo))}`);
+  }, []);
 
   async function saveContact() {
     await requestApi("/auth/me/recruiter-contact", { method: "PUT", privateData: true, body: { fullName: name.trim(), phone: phone.trim() } });
-    router.replace(landing("RECRUITER"));
+    router.replace(destination);
   }
 
   async function retryContact() {
@@ -81,10 +88,10 @@ export default function RecruiterRegisterPage() {
   return <main className="auth-portal-page auth-recruiter-register">
     <header className="auth-portal-header">
       <div className="auth-recruiter-header-brand-group"><Link className="auth-portal-brand" href="/" aria-label="CareerHub - Trang chủ"><img src="/figma/register/7f320.png" alt="" width="146" height="40" /></Link><Link className="auth-recruiter-header-title" href="/">CareerHub</Link></div>
-      <nav aria-label="Điều hướng"><Link href="/">Trang chủ</Link><Link href="/candidate/jobs">Việc làm</Link><Link href="/companies">Công ty</Link><span>Bạn là nhà tuyển dụng?</span><Link className="auth-header-action" href="/recruiter/login">Đăng nhập</Link></nav>
+      <nav aria-label="Điều hướng"><Link href="/">Trang chủ</Link><Link href="/candidate/jobs">Việc làm</Link><Link href="/companies">Công ty</Link><span>Bạn là nhà tuyển dụng?</span><Link className="auth-header-action" href={loginHref}>Đăng nhập</Link></nav>
     </header>
     <section className="auth-recruiter-register-main">
-      {verified ? <div className="auth-recruiter-register-card auth-recruiter-success"><h1>Tài khoản Recruiter đã xác minh</h1><p>{notice || "Tài khoản của bạn đã sẵn sàng."}</p>{notice ? <button className="auth-submit" type="button" onClick={() => void retryContact()} disabled={pending}>{pending ? "Đang lưu…" : "Lưu lại thông tin liên hệ"}</button> : null}{error ? <p role="alert" className="auth-error">{error}</p> : null}<Link className="auth-submit auth-submit-link" href="/recruiter/jobs">Tiếp tục đến khu vực tuyển dụng →</Link></div> :
+      {verified ? <div className="auth-recruiter-register-card auth-recruiter-success"><h1>Tài khoản Recruiter đã xác minh</h1><p>{notice || "Tài khoản của bạn đã sẵn sàng."}</p>{notice ? <button className="auth-submit" type="button" onClick={() => void retryContact()} disabled={pending}>{pending ? "Đang lưu…" : "Lưu lại thông tin liên hệ"}</button> : null}{error ? <p role="alert" className="auth-error">{error}</p> : null}<Link className="auth-submit auth-submit-link" href={destination}>Tiếp tục đến khu vực tuyển dụng →</Link></div> :
         <form className="auth-recruiter-register-card" noValidate onSubmit={submit}>
           <header className="auth-recruiter-register-heading"><h1>{otpStage ? "Xác minh email Recruiter" : <>Đăng ký tài khoản<br />Recruiter</>}</h1><p>{otpStage ? `Nhập mã OTP 6 số đã gửi đến ${email}.` : "Tạo tài khoản để đăng tin tuyển dụng và tìm kiếm ứng viên phù hợp."}</p></header>
           <div className="auth-recruiter-register-fields">
@@ -101,7 +108,7 @@ export default function RecruiterRegisterPage() {
           {otpStage ? <button className="auth-resend" type="button" onClick={resend} disabled={pending}>Gửi lại mã xác minh</button> : <>
             <div className="auth-recruiter-register-divider"><span>Hoặc</span></div>
             {process.env.NEXT_PUBLIC_GOOGLE_LOGIN_ENABLED === "true" ? <a className="auth-google" href="/auth/google?role=RECRUITER"><img src="/figma/login/bc562.svg" alt="" /><span>Đăng ký với Google</span></a> : <button className="auth-google" type="button" onClick={() => setError("Đăng ký Google chưa được cấu hình cho môi trường local.")}><img src="/figma/login/bc562.svg" alt="" /><span>Đăng ký với Google</span></button>}
-            <p className="auth-portal-signup">Đã có tài khoản? <Link href="/recruiter/login">Đăng nhập</Link></p>
+            <p className="auth-portal-signup">Đã có tài khoản? <Link href={loginHref}>Đăng nhập</Link></p>
           </>}
           </div>
         </form>}

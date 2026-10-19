@@ -13,8 +13,6 @@ export default function RecruiterInterviewRoomPage({
   return (
     <div style={{ height: "100%", width: "100%", background: "var(--surface)" }}>
       <InterviewVideoRoom
-        interviewId={`interview-for-${params.applicationId}`} // Mock logic vì url chỉ có applicationId
-        role="RECRUITER"
         onLeave={() => router.push(`/recruiter/applications/${params.applicationId}`)}
       />
     </div>

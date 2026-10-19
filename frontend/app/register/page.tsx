@@ -1,10 +1,10 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { requestApi } from "../../lib/apiClient";
-import { landing, passwordError, person1Error, publicAuth, verifyRegistration } from "../../lib/person1Api";
+import { loginDestination, passwordError, person1Error, publicAuth, verifyRegistration } from "../../lib/person1Api";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -21,9 +21,18 @@ export default function RegisterPage() {
   const [notice, setNotice] = useState("");
   const [verified, setVerified] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [destination, setDestination] = useState("/candidate/profile");
+  const [loginHref, setLoginHref] = useState("/login");
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("role") === "RECRUITER") router.replace("/recruiter/register");
+    const query = new URLSearchParams(window.location.search);
+    const returnTo = query.get("returnTo");
+    if (query.get("role") === "RECRUITER") {
+      router.replace("/recruiter/register" + (returnTo ? `?returnTo=${encodeURIComponent(loginDestination("RECRUITER", returnTo))}` : ""));
+      return;
+    }
+    setDestination(loginDestination("CANDIDATE", returnTo));
+    if (returnTo) setLoginHref(`/login?returnTo=${encodeURIComponent(loginDestination("CANDIDATE", returnTo))}`);
   }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -34,6 +43,11 @@ export default function RegisterPage() {
     if (!flow) {
       if (fullName.trim().length < 2 || fullName.trim().length > 160) {
         setError("Nhập họ tên từ 2 đến 160 ký tự."); return;
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+        setError("Nhập địa chỉ email hợp lệ.");
+        document.getElementById("register-email")?.focus();
+        return;
       }
       const passwordIssue = passwordError(password);
       if (passwordIssue) { setError(passwordIssue); return; }
@@ -57,7 +71,7 @@ export default function RegisterPage() {
             return;
           }
         }
-        router.replace(landing(account.role));
+        router.replace(loginDestination(account.role, destination));
       } else {
         const result = await requestApi<{ registrationId: string }>("/auth/register", {
           ...publicAuth,
@@ -93,7 +107,7 @@ export default function RegisterPage() {
         <h1>Tài khoản đã xác minh</h1>
         <p className="auth-copy">Tài khoản của bạn đã sẵn sàng. Tiếp tục đến hồ sơ để hoàn thiện thông tin.</p>
         {notice ? <p className="auth-message" role="status">{notice}</p> : null}
-        <Link className="auth-submit auth-submit-link" href="/candidate/profile">Tiếp tục đến CareerHub <span aria-hidden="true">→</span></Link>
+        <Link className="auth-submit auth-submit-link" href={destination}>Tiếp tục đến CareerHub <span aria-hidden="true">→</span></Link>
       </section>
       <aside className="auth-otp-visual" aria-label="Xác thực tài khoản"><div className="auth-otp-image" /></aside>
     </main>;
@@ -127,7 +141,7 @@ export default function RegisterPage() {
         {process.env.NEXT_PUBLIC_GOOGLE_LOGIN_ENABLED === "true"
           ? <a className="auth-google" href="/auth/google?role=CANDIDATE"><img src="/figma/register/bc562.svg" alt="" aria-hidden="true" /><span>Đăng ký với Google</span></a>
           : <button className="auth-google" type="button" onClick={() => setError("Đăng ký Google chưa được cấu hình cho môi trường local.")}><img src="/figma/register/bc562.svg" alt="" aria-hidden="true" /><span>Đăng ký với Google</span></button>}
-        <p className="auth-signup">Đã có tài khoản? <Link href="/login">Đăng nhập</Link></p>
+        <p className="auth-signup">Đã có tài khoản? <Link href={loginHref}>Đăng nhập</Link></p>
       </> : null}
     </section>
     {flow ? <aside className="auth-otp-visual" aria-label="Xác thực tài khoản"><div className="auth-otp-image" /><div className="auth-security-chip"><strong>Bảo mật</strong><span>An toàn 100%</span></div></aside> : <aside className="auth-register-visual" aria-label="Cơ hội nghề nghiệp tại CareerHub">

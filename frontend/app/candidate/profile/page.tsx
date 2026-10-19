@@ -6,6 +6,9 @@ import { ConfirmationDialog } from "../../../components/ConfirmationDialog";
 import { ApiClientError, requestApi } from "../../../lib/apiClient";
 import {
   person1Error,
+  person1FormError,
+  profileDateError,
+  profileSectionLabels,
   uploadPersonalFile,
   type CandidateProfile,
   type ProfileBlock,
@@ -16,6 +19,7 @@ type Field = {
   type?: string;
   required?: boolean;
   max?: number;
+  disabled?: boolean;
 };
 const general: Field[] = [
   { name: "fullName", label: "Họ tên", max: 160 },
@@ -112,7 +116,7 @@ function Fields({
           {f.required ? " *" : ""}
           {f.type === "textarea" ? (
             <textarea
-              className="textarea"
+              className="textarea resize-none"
               maxLength={f.max}
               required={f.required}
               value={String(value[f.name] ?? "")}
@@ -123,6 +127,8 @@ function Fields({
               className="input"
               type={f.type ?? "text"}
               required={f.required}
+              disabled={f.disabled}
+              min={f.name === "endDate" ? String(value.startDate ?? "") : undefined}
               maxLength={f.max ?? 2048}
               checked={
                 f.type === "checkbox" ? Boolean(value[f.name]) : undefined
@@ -157,9 +163,13 @@ function BlockEditor({
   const [deleting, setDeleting] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  async function save(e: FormEvent) {
+  async function save(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const formIssue = person1FormError(e.currentTarget);
+    if (formIssue) { setError(formIssue); return; }
     if (busy) return;
+    const dateIssue = profileDateError(block.key, draft);
+    if (dateIssue) { setError(dateIssue); return; }
     setBusy(true);
     setError("");
     const body = Object.fromEntries(
@@ -167,7 +177,9 @@ function BlockEditor({
         f.name,
         f.type === "checkbox"
           ? Boolean(draft[f.name])
-          : String(draft[f.name] ?? "").trim() || null,
+          : f.name === "endDate" && draft.isCurrent
+            ? null
+            : String(draft[f.name] ?? "").trim() || null,
       ]),
     );
     try {
@@ -194,6 +206,7 @@ function BlockEditor({
         { method: "DELETE", privateData: true },
       );
       onSaved(result.data);
+      if (editing === deleting) { setEditing(null); setDraft({}); }
       setDeleting(null);
     } catch (e) {
       setError(person1Error(e));
@@ -222,7 +235,7 @@ function BlockEditor({
                         "description",
                       ].includes(f.name),
                   )
-                  .map((f) => (item[f.name] ? String(item[f.name]) : ""))
+                  .map((f) => (f.name === "isCurrent" ? item.isCurrent ? "Đang làm việc" : "" : item[f.name] ? String(item[f.name]) : ""))
                   .filter(Boolean)
                   .join(" · ")}
               </p>
@@ -252,13 +265,16 @@ function BlockEditor({
       ) : (
         <p className="muted">Chưa có thông tin.</p>
       )}
-      <form onSubmit={save}>
+      <form noValidate onSubmit={save}>
         <fieldset disabled={busy} className="form-stack person1-fieldset">
           <h3>{editing ? "Chỉnh sửa" : "Thêm thông tin"}</h3>
           <Fields
-            fields={block.fields}
+            fields={block.fields.map((field) => field.name === "endDate" && block.key === "experiences" ? { ...field, disabled: Boolean(draft.isCurrent) } : field)}
             value={draft}
-            set={(name, value) => setDraft((d) => ({ ...d, [name]: value }))}
+            set={(name, value) => {
+              setError("");
+              setDraft((d) => ({ ...d, [name]: value, ...(name === "isCurrent" && value ? { endDate: null } : {}) }));
+            }}
           />
           <div className="btn-group">
             <button className="btn btn-primary">
@@ -331,8 +347,10 @@ export default function ProfilePage() {
       });
     return () => controller.abort();
   }, [account, reload]);
-  async function save(e: FormEvent) {
+  async function save(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const formIssue = person1FormError(e.currentTarget);
+    if (formIssue) { setError(formIssue); return; }
     if (busy || !account) return;
     setBusy(true);
     setError("");
@@ -349,6 +367,7 @@ export default function ProfilePage() {
         { method: "PUT", privateData: true, body },
       );
       setProfile(result.data);
+      setDraft({ ...result.data });
       setEditingGeneral(false);
       setNotice("Đã lưu hồ sơ.");
     } catch (e) {
@@ -385,7 +404,7 @@ export default function ProfilePage() {
         </div>
         <Link className="btn btn-primary" href="/candidate/profile/cvs">Quản lý CV</Link>
       </div>
-      {loading ? <p role="status">Đang tải hồ sơ…</p> : <>
+      {loading ? <p role="status">Đang tải hồ sơ…</p> : !profile && error ? null : <>
         <section className="candidate-profile-hero card">
           <div className="candidate-profile-banner" aria-hidden="true" />
           <div className="candidate-profile-hero-body">
@@ -408,7 +427,7 @@ export default function ProfilePage() {
             <div className="candidate-completion">
               <div><strong>Hồ sơ đã hoàn thiện {profile?.completionPercent ?? 0}%</strong><span>{profile?.completionPercent ?? 0}%</span></div>
               <progress max={100} value={profile?.completionPercent ?? 0} aria-label="Mức độ hoàn thiện hồ sơ" />
-              <p>{profile?.missingSections?.length ? `Còn thiếu: ${profile.missingSections.join(", ")}` : "Hồ sơ đã sẵn sàng để nhà tuyển dụng xem."}</p>
+              <p>{profile?.missingSections?.length ? `Còn thiếu: ${profile.missingSections.map((section) => profileSectionLabels[section] ?? "Thông tin bổ sung").join(", ")}` : profile ? "Hồ sơ đã sẵn sàng để nhà tuyển dụng xem." : "Bắt đầu bằng cách bổ sung thông tin cá nhân."}</p>
             </div>
           </div>
         </section>
@@ -417,7 +436,7 @@ export default function ProfilePage() {
             <section className="card candidate-profile-intro"><h2>Giới thiệu bản thân</h2><p>{profile?.summary || "Thêm phần giới thiệu ngắn để nhà tuyển dụng hiểu rõ hơn về kinh nghiệm và mục tiêu nghề nghiệp của bạn."}</p></section>
             <section className="card form-stack candidate-general-profile" id="profile-editor">
               <div className="candidate-profile-section-heading"><h2>Thông tin cá nhân</h2><button type="button" className="btn" onClick={() => setEditingGeneral((value) => !value)}>{editingGeneral ? "Đóng chỉnh sửa" : "✎ Chỉnh sửa hồ sơ"}</button></div>
-              {editingGeneral ? <form className="form-stack" onSubmit={save}>
+              {editingGeneral ? <form className="form-stack" noValidate onSubmit={save}>
                 <fieldset className="person1-fieldset person1-grid" disabled={busy}><Fields fields={general} value={draft} set={(name, value) => setDraft((d) => ({ ...d, [name]: value }))} /></fieldset>
                 <div className="row-wrap"><button className="btn btn-primary">{busy ? "Đang lưu…" : "Lưu thông tin chung"}</button><button className="btn" type="button" onClick={() => { setEditingGeneral(false); setDraft(profile ? { ...profile } : {}); }}>Hủy</button></div>
               </form> : <div className="candidate-profile-facts">

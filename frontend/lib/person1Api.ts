@@ -28,7 +28,9 @@ export function loginDestination(role: CurrentAccount["role"], returnTo: string 
     const pathname = decodeURIComponent(url.pathname);
     if (url.origin !== "https://careerhub.local" || /[\\\u0000-\u001f\u007f]/.test(pathname) || /%2f|%5c|%25/i.test(url.pathname)) return landing(role);
     const prefix = role === "ADMIN" ? "/admin" : role === "RECRUITER" ? "/recruiter" : "/candidate";
-    const allowed = pathname === prefix || pathname.startsWith(prefix + "/")
+    const shared = pathname === "/notifications"
+      || (role !== "ADMIN" && (pathname === "/messages" || pathname === "/reports" || /^\/interviews\/[0-9a-f-]{36}\/room$/i.test(pathname)));
+    const allowed = shared || pathname === prefix || pathname.startsWith(prefix + "/")
       || (role === "CANDIDATE" && (pathname === "/ai" || pathname.startsWith("/ai/")));
     if (!allowed || pathname === "/admin/login" || pathname === "/recruiter/login" || pathname === "/recruiter/register") return landing(role);
     return url.pathname + url.search + url.hash;
@@ -68,7 +70,9 @@ export function person1Error(error: unknown): string {
         "Chưa thể hoàn tất. Hãy kiểm tra nhật ký và trạng thái hiện tại trước khi thử lại.",
       UPSTREAM_REJECTED:
         "Thao tác không được chấp nhận. Tải lại dữ liệu để kiểm tra quyền và trạng thái.",
-      INVALID_DATE_RANGE: "Chọn khoảng thời gian hợp lệ, tối đa 367 ngày.",
+      INVALID_DATE_RANGE: "Ngày kết thúc phải bằng hoặc sau ngày bắt đầu.",
+      CURRENT_EXPERIENCE_END_DATE: "Công việc hiện tại không có ngày kết thúc.",
+      EXPERIENCE_END_DATE_REQUIRED: "Bổ sung ngày kết thúc hoặc chọn Đang làm việc.",
     };
     const message = messages[error.code] ?? toUserMessage(error);
     return error.retryAfterSeconds
@@ -103,6 +107,22 @@ export async function exchangeGoogle(
     body: { code, role },
   });
   return establishSession(result.data);
+}
+export const profileSectionLabels: Record<string, string> = {
+  fullName: "Họ tên", headline: "Vị trí mong muốn", summary: "Giới thiệu",
+  phone: "Điện thoại", address: "Địa chỉ", externalLinks: "Liên kết cá nhân",
+  educations: "Học vấn", experiences: "Kinh nghiệm", skills: "Kỹ năng",
+  certificates: "Chứng chỉ", projects: "Dự án",
+};
+export function profileDateError(block: string, draft: Record<string, unknown>): string | null {
+  if (block !== "educations" && block !== "experiences") return null;
+  if (block === "experiences" && !draft.isCurrent && !draft.endDate) {
+    return "Bổ sung ngày kết thúc hoặc chọn Đang làm việc.";
+  }
+  if (draft.startDate && draft.endDate && String(draft.endDate) < String(draft.startDate)) {
+    return "Ngày kết thúc phải bằng hoặc sau ngày bắt đầu.";
+  }
+  return null;
 }
 export interface ProfileBlock {
   id: string;
@@ -265,4 +285,23 @@ export function saveBlob(blob: Blob, name: string): void {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+/** Keep native constraints while rendering errors in the product's inline alert. */
+export function person1FormError(form: HTMLFormElement): string | null {
+  for (const field of Array.from(form.elements)) {
+    if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement) || field.disabled) continue;
+    const label = field.labels?.[0]?.textContent?.trim().replace(/\s+/g, " ").replace(/\s*\*$/, "") || "Thông tin";
+    let problem = "";
+    if (field.required && !field.value.trim()) problem = "Vui lòng bổ sung thông tin.";
+    else if (field.validity.typeMismatch) problem = field instanceof HTMLInputElement && field.type === "email" ? "Nhập email hợp lệ." : "Nhập liên kết hợp lệ.";
+    else if (field.validity.patternMismatch || field.validity.badInput) problem = "Kiểm tra lại định dạng.";
+    else if (field.validity.rangeUnderflow || field.validity.rangeOverflow) problem = "Giá trị nằm ngoài khoảng cho phép.";
+    else if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+      if (field.minLength > 0 && field.value && field.value.trim().length < field.minLength) problem = `Cần ít nhất ${field.minLength} ký tự.`;
+      else if (field.maxLength >= 0 && field.value.length > field.maxLength) problem = `Chỉ nhập tối đa ${field.maxLength} ký tự.`;
+    }
+    if (problem) { field.focus(); return `${label}: ${problem}`; }
+  }
+  return null;
 }

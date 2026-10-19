@@ -1,150 +1,88 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import {
-  LiveKitRoom,
-  VideoConference,
-  RoomAudioRenderer,
-} from "@livekit/components-react";
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
+import { LiveKitRoom, VideoConference, RoomAudioRenderer } from "@livekit/components-react";
 import "@livekit/components-styles";
-import { requestApi } from "@/lib/apiClientCore";
-import { useSearchParams } from "next/navigation";
+import { requestApi, toUserMessage } from "@/lib/apiClientCore";
+import { sendChatMessage } from "@/lib/chatApi";
+import { useCurrentAccount } from "./SessionGate";
+import { EmptyState, ErrorState, LoadingState } from "./ui";
 
-interface VideoRoomProps {
-  callId: string;
+interface RoomCredentials {
+  token: string;
+  livekit_url: string;
+  call: { host_id: string; conversation_id: string; status: string };
 }
 
-export function VideoRoom({ callId }: VideoRoomProps) {
-  const [token, setToken] = useState("");
-  const [serverUrl, setServerUrl] = useState("");
+export function VideoRoom({ callId }: { callId: string }) {
+  const account = useCurrentAccount();
+  const [credentials, setCredentials] = useState<RoomCredentials | null>(null);
   const [error, setError] = useState("");
   const [disconnected, setDisconnected] = useState(false);
-  
-  const searchParams = useSearchParams();
-  const chatId = searchParams ? searchParams.get("chat") : null;
+  const [ending, setEnding] = useState(false);
+  const [ended, setEnded] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const endingRef = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   useEffect(() => {
-    let mounted = true;
-
-    async function joinRoom() {
-      try {
-        const res = await requestApi<{ token: string, livekit_url: string }>(`/calls/${callId}/join`, {
-          method: "POST",
-          privateData: true,
-        });
-        
-        if (mounted) {
-          setToken(res.data.token);
-          setServerUrl(res.data.livekit_url);
-        }
-      } catch (err: any) {
-        if (mounted) {
-          setError(err.message || "Failed to join video room");
-        }
-      }
-    }
-
-    joinRoom();
-
-    const handleCallRejected = (e: any) => {
-      if (e.detail?.callId === callId) {
-        if (mounted) {
-          setError("Cuộc gọi đã bị từ chối hoặc người dùng không khả dụng.");
-          setDisconnected(true);
-        }
-      }
+    const controller = new AbortController();
+    setCredentials(null); setError(""); setDisconnected(false); setEnded(false);
+    requestApi<RoomCredentials>(`/calls/${encodeURIComponent(callId)}/join`, {
+      method: "POST", privateData: true, signal: controller.signal, maxRetries: 0,
+    }).then(response => { if (!controller.signal.aborted) setCredentials(response.data); })
+      .catch(failure => { if (!controller.signal.aborted) setError(toUserMessage(failure)); });
+    const handleEnded = (event: Event) => {
+      if ((event as CustomEvent<{ callId: string }>).detail?.callId !== callId) return;
+      setEnded(true); setDisconnected(true);
     };
-    
-    const handleCallEnded = (e: any) => {
-      if (e.detail?.callId === callId) {
-        if (mounted) {
-          setDisconnected(true);
-        }
-      }
+    const handleOffline = (event: Event) => {
+      if ((event as CustomEvent<{ callId: string }>).detail?.callId !== callId) return;
+      setError("Người nhận hiện chưa trực tuyến. Bạn có thể nhắn tin để hẹn lại.");
     };
-
-    window.addEventListener('video_call_rejected', handleCallRejected);
-    window.addEventListener('video_call_offline', handleCallRejected);
-    window.addEventListener('video_call_ended', handleCallEnded);
-
+    window.addEventListener("video_call_rejected", handleEnded);
+    window.addEventListener("video_call_ended", handleEnded);
+    window.addEventListener("video_call_offline", handleOffline);
     return () => {
-      mounted = false;
-      window.removeEventListener('video_call_rejected', handleCallRejected);
-      window.removeEventListener('video_call_offline', handleCallRejected);
-      window.removeEventListener('video_call_ended', handleCallEnded);
+      controller.abort();
+      window.removeEventListener("video_call_rejected", handleEnded);
+      window.removeEventListener("video_call_ended", handleEnded);
+      window.removeEventListener("video_call_offline", handleOffline);
     };
-  }, [callId]);
+  }, [callId, revision]);
 
-  if (error) {
-    return (
-      <div className="empty-state">
-        <div className="empty-mark" style={{ backgroundColor: "var(--danger-soft)", color: "var(--danger)" }}>
-          ×
-        </div>
-        <h3>Lỗi kết nối phòng phỏng vấn</h3>
-        <p className="form-error">{error}</p>
-      </div>
-    );
+  async function endCall() {
+    if (endingRef.current || !credentials || account?.id !== credentials.call.host_id) return;
+    endingRef.current = true; setEnding(true); setError("");
+    try {
+      await requestApi(`/calls/${encodeURIComponent(callId)}/end`, { method: "POST", privateData: true, maxRetries: 0 });
+      if (mounted.current) { setEnded(true); setDisconnected(true); }
+      const conversationId = credentials.call.conversation_id;
+      if (conversationId) {
+        try { await sendChatMessage(conversationId, `[CALL_ENDED] ${callId}`, crypto.randomUUID()); } catch { /* Ending the room already succeeded. */ }
+      }
+    } catch (failure) { if (mounted.current) setError(toUserMessage(failure)); }
+    finally { endingRef.current = false; if (mounted.current) setEnding(false); }
   }
 
-  if (!token || !serverUrl) {
-    return (
-      <div className="loading-state">
-        <div className="spinner"></div>
-        <p>Đang chuẩn bị phòng phỏng vấn...</p>
-      </div>
-    );
-  }
-
-  if (disconnected) {
-    return (
-      <div className="empty-state" style={{ padding: "40px 20px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", minHeight: "500px", background: "var(--surface)", borderRadius: "16px", border: "1px solid var(--line)" }}>
-        <div style={{ width: 64, height: 64, borderRadius: "50%", background: "var(--line)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "16px", color: "var(--muted)" }}>
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"></path>
-            <line x1="23" y1="1" x2="1" y2="23"></line>
-          </svg>
-        </div>
-        <h3 style={{ margin: "0 0 8px 0" }}>Cuộc gọi đã kết thúc</h3>
-        <p style={{ color: "var(--muted)", margin: "0 0 24px 0" }}>Cảm ơn bạn đã tham gia.</p>
-        <button className="btn btn-primary" onClick={() => window.location.href = "/"}>Về trang chủ</button>
-      </div>
-    );
-  }
-
-  return (
-    <LiveKitRoom
-      video={true}
-      audio={true}
-      token={token}
-      serverUrl={serverUrl}
-      data-lk-theme="default"
-      style={{ height: "100%", width: "100%", minHeight: "500px", borderRadius: "16px", overflow: "hidden", border: "1px solid var(--line)" }}
-      onDisconnected={() => {
-        setDisconnected(true);
-        
-        // Chạy ngầm các request dọn dẹp API để không block UI unmount
-        (async () => {
-          try {
-            await requestApi(`/calls/${callId}/end`, { method: "POST", privateData: true });
-            if (chatId) {
-              await requestApi(`/chat/chats/${chatId}/messages`, {
-                method: "POST",
-                body: { 
-                  content: `[CALL_ENDED] ${callId}`, 
-                  client_message_id: globalThis.crypto?.randomUUID?.() || Date.now().toString() 
-                },
-                privateData: true
-              });
-            }
-          } catch (e) {
-            // ignore error if not host
-          }
-        })();
-      }}
-    >
-      <VideoConference />
-      <RoomAudioRenderer />
-    </LiveKitRoom>
-  );
+  const backHref = credentials?.call.conversation_id ? `/messages?chat=${encodeURIComponent(credentials.call.conversation_id)}` : "/messages";
+  return <section className="stack">
+    {error && <ErrorState message={error} onRetry={!credentials ? () => setRevision(value => value + 1) : undefined} />}
+    {!credentials && !error && <LoadingState label="Đang chuẩn bị cuộc gọi…" />}
+    {credentials && !disconnected && <LiveKitRoom video={false} audio={false} token={credentials.token} serverUrl={credentials.livekit_url}
+      data-lk-theme="default" style={{ minHeight: 500, width: "100%" }}
+      onError={() => setError("Không thể kết nối camera, micro hoặc phòng gọi. Hãy kiểm tra quyền thiết bị và kết nối mạng.")}
+      onDisconnected={() => setDisconnected(true)}>
+      <VideoConference /><RoomAudioRenderer />
+    </LiveKitRoom>}
+    {disconnected && <EmptyState title={ended ? "Cuộc gọi đã kết thúc" : "Bạn đã rời cuộc gọi"}
+      description={ended ? "Bạn có thể tiếp tục trao đổi trong tin nhắn." : "Bạn có thể kết nối lại nếu cuộc gọi vẫn đang mở."} />}
+    <div className="btn-group">
+      <Link className="btn" href={backHref}>Về cuộc trò chuyện</Link>
+      {disconnected && !ended && <button className="btn" onClick={() => setRevision(value => value + 1)}>Kết nối lại</button>}
+      {credentials?.call.host_id === account?.id && credentials && !ended && <button className="btn btn-warning" disabled={ending} onClick={() => void endCall()}>{ending ? "Đang kết thúc…" : "Kết thúc cuộc gọi cho mọi người"}</button>}
+    </div>
+  </section>;
 }

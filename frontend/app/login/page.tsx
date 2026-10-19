@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { type FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -17,8 +17,14 @@ export default function LoginPage() {
   const [visible, setVisible] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const [registerHref, setRegisterHref] = useState("/register");
 
   useEffect(() => {
+    const returnTo = new URLSearchParams(window.location.search).get("returnTo");
+    if (returnTo) setRegisterHref(`/register?returnTo=${encodeURIComponent(loginDestination("CANDIDATE", returnTo))}`);
+    if (new URLSearchParams(window.location.search).get("logout") === "unconfirmed") {
+      setError("Đã xóa phiên trên trình duyệt; máy chủ chưa xác nhận thu hồi phiên cũ. Bạn có thể đăng nhập lại.");
+    }
     try {
       const savedEmail = window.localStorage.getItem(rememberedEmailKey);
       if (savedEmail) {
@@ -161,7 +167,7 @@ export default function LoginPage() {
             </button>
           )}
 
-          <p className="auth-signup">Chưa có tài khoản? <Link href="/register">Đăng ký ngay</Link></p>
+          <p className="auth-signup">Chưa có tài khoản? <Link href={registerHref}>Đăng ký ngay</Link></p>
           <footer className="auth-login-footer">
             <Link href="/" aria-label="CareerHub - Trang chủ">
               <img src="/figma/login/7544b.png" alt="CareerHub" width="73" height="20" />

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -33,8 +33,11 @@ export default function RoleLoginPage({ portal }: { portal: Portal }) {
   const [remember, setRemember] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const [registerHref, setRegisterHref] = useState("/recruiter/register");
 
   useEffect(() => {
+    const returnTo = new URLSearchParams(window.location.search).get("returnTo");
+    if (portal === "RECRUITER" && returnTo) setRegisterHref(`/recruiter/register?returnTo=${encodeURIComponent(loginDestination(portal, returnTo))}`);
     if (new URLSearchParams(window.location.search).get("logout") === "unconfirmed") {
       setError("Đã xóa phiên trên trình duyệt; máy chủ chưa xác nhận thu hồi phiên cũ. Bạn có thể đăng nhập lại.");
     }
@@ -98,7 +101,7 @@ export default function RoleLoginPage({ portal }: { portal: Portal }) {
         <form className="auth-admin-form" noValidate onSubmit={submit}>
           <div className="auth-admin-field"><label htmlFor="ADMIN-email">Email quản trị</label><div className="auth-admin-input-wrap"><img src="/figma/login/3d505.svg" alt="" aria-hidden="true"/><input id="ADMIN-email" type="email" autoComplete="username" maxLength={320} placeholder="Nhập email quản trị của bạn" value={email} onChange={event => setEmail(event.target.value)} disabled={pending}/></div></div>
           <div className="auth-admin-field"><label htmlFor="ADMIN-password">Mật khẩu</label><div className="auth-admin-input-wrap"><img src="/figma/login/8e7a1.svg" alt="" aria-hidden="true"/><input id="ADMIN-password" type={visible ? "text" : "password"} autoComplete="current-password" maxLength={128} placeholder="Nhập mật khẩu" value={password} onChange={event => setPassword(event.target.value)} disabled={pending}/><button type="button" className="auth-admin-eye" onClick={() => setVisible(value => !value)} aria-label={visible ? "Ẩn mật khẩu" : "Hiện mật khẩu"} aria-pressed={visible}><img src="/figma/login/a44df.svg" alt=""/></button></div></div>
-          <div className="auth-admin-options"><label><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)}/><span>Ghi nhớ đăng nhập</span></label><Link href="/forgot-password">Quên mật khẩu?</Link></div>
+          <div className="auth-admin-options"><label><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)}/><span>Ghi nhớ đăng nhập</span></label><Link href={`/forgot-password?role=${portal}`}>Quên mật khẩu?</Link></div>
           {error ? <p className="auth-error" role="alert">{error}</p> : null}
           <button className="auth-submit" type="submit" disabled={pending} aria-busy={pending}>{pending ? "Đang đăng nhập…" : <>Đăng nhập <span aria-hidden="true">→</span></>}</button>
         </form>
@@ -139,7 +142,7 @@ export default function RoleLoginPage({ portal }: { portal: Portal }) {
             </div>
             <div className="auth-portal-options">
               <label><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} /><span>Ghi nhớ đăng nhập</span></label>
-              <Link href="/forgot-password">Quên mật khẩu?</Link>
+              <Link href={`/forgot-password?role=${portal}`}>Quên mật khẩu?</Link>
             </div>
             {error ? <p className="auth-error" role="alert">{error}</p> : null}
             <button className="auth-submit" type="submit" disabled={pending} aria-busy={pending}>{pending ? "Đang đăng nhập…" : "Đăng nhập"}</button>
@@ -151,7 +154,7 @@ export default function RoleLoginPage({ portal }: { portal: Portal }) {
             ) : (
               <button className="auth-google" type="button" onClick={() => setError("Đăng nhập Google chưa được cấu hình cho môi trường local.")}><img src="/figma/login/bc562.svg" alt="" aria-hidden="true" /><span>Đăng nhập với Google</span></button>
             )}
-            <p className="auth-portal-signup">Chưa có tài khoản? <Link href="/recruiter/register">Đăng ký ngay</Link></p>
+            <p className="auth-portal-signup">Chưa có tài khoản? <Link href={registerHref}>Đăng ký ngay</Link></p>
           </>
         </div>
       </section>

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { requestApi } from "../../lib/apiClient";
-import { publicAuth, passwordError, person1Error } from "../../lib/person1Api";
+import { publicAuth, passwordError, person1Error, person1FormError } from "../../lib/person1Api";
 export default function ResetPasswordPage() {
   const token = useRef("");
   const read = useRef(false);
@@ -22,9 +22,11 @@ export default function ResetPasswordPage() {
     if (!token.current)
       setError("Liên kết không hợp lệ. Hãy yêu cầu đặt lại mật khẩu.");
   }, []);
-  async function submit(e: FormEvent) {
+  async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (pending) return;
+    if (pending || !token.current) return;
+    const formIssue = person1FormError(e.currentTarget);
+    if (formIssue) { setError(formIssue); return; }
     const problem = passwordError(password);
     if (problem || password !== confirm) {
       setError(problem ?? "Hai mật khẩu chưa trùng nhau.");
@@ -51,7 +53,7 @@ export default function ResetPasswordPage() {
   return (
     <section className="page-section">
       <h1>Đặt lại mật khẩu</h1>
-      <form className="card form-stack" onSubmit={submit}>
+      <form className="card form-stack" noValidate onSubmit={submit}>
         {done ? (
           <p role="status">Mật khẩu đã được cập nhật. Hãy đăng nhập lại.</p>
         ) : (

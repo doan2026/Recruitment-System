@@ -5,7 +5,7 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import { PageHeader, ErrorState, LoadingState } from "@/components/ui";
 import { getApplicationDetail, type CandidateApplication } from "@/lib/person2Api";
 import { toUserMessage } from "@/lib/apiClient";
-import { interviewStartGmt7, scheduleInterview, type Interview } from "@/lib/interviewApi";
+import { interviewStartGmt7, interviewScheduleError, scheduleInterview, schedulingRequestIdentity, type Interview, type ScheduleInterview } from "@/lib/interviewApi";
 
 export default function ScheduleInterviewPage({ params }: { params: { applicationId: string } }) {
   const [application, setApplication] = useState<CandidateApplication | null>(null);
@@ -14,7 +14,8 @@ export default function ScheduleInterviewPage({ params }: { params: { applicatio
   const [reload, setReload] = useState(0), [created, setCreated] = useState<Interview | null>(null);
   const [start, setStart] = useState(""), [location, setLocation] = useState(""), [notes, setNotes] = useState("");
   const [round, setRound] = useState(1), [duration, setDuration] = useState(45);
-  const requestId = useRef<string | null>(null);
+  const requestIdentity = useRef<{ fingerprint: string; id: string } | null>(null);
+  const submitLock = useRef(false);
   useEffect(() => {
     const controller = new AbortController(); setLoading(true); setLoadError("");
     getApplicationDetail(params.applicationId, controller.signal).then(r => setApplication(r.data))
@@ -23,19 +24,22 @@ export default function ScheduleInterviewPage({ params }: { params: { applicatio
     return () => controller.abort();
   }, [params.applicationId, reload]);
   async function submit(e: FormEvent) {
-    e.preventDefault(); if (pending || created) return; setError("");
+    e.preventDefault(); if (submitLock.current || created) return; setError("");
     try {
       const scheduledStart = interviewStartGmt7(start);
       if (Date.parse(scheduledStart) <= Date.now()) throw new Error("Chọn thời gian trong tương lai.");
       if (!location.trim()) throw new Error("Nhập địa điểm phỏng vấn.");
-      requestId.current ??= crypto.randomUUID(); setPending(true);
-      const response = await scheduleInterview({ applicationId: params.applicationId,
-        requestId: requestId.current, roundNumber: round, scheduledStart,
+      if (!Number.isInteger(round) || round < 1 || round > 20) throw new Error("Vòng phỏng vấn phải là số nguyên từ 1 đến 20.");
+      if (/[\u0000-\u001f\u007f-\u009f]/.test(location + notes)) throw new Error("Địa điểm và ghi chú cần viết trên một dòng, không chứa ký tự điều khiển.");
+      const payload: Omit<ScheduleInterview, "requestId"> = { applicationId: params.applicationId, roundNumber: round, scheduledStart,
         timeZone: "Asia/Ho_Chi_Minh", durationMinutes: duration, mode: "OFFLINE",
-        location: location.trim(), notes: notes.trim() || null });
+        location: location.trim(), notes: notes.trim() || null };
+      requestIdentity.current = schedulingRequestIdentity(requestIdentity.current, payload, () => crypto.randomUUID());
+      submitLock.current = true; setPending(true);
+      const response = await scheduleInterview({ ...payload, requestId: requestIdentity.current.id });
       setCreated(response.data);
-    } catch (e) { setError(e instanceof Error ? e.message : toUserMessage(e)); }
-    finally { setPending(false); }
+    } catch (e) { setError(interviewScheduleError(e)); }
+    finally { submitLock.current = false; setPending(false); }
   }
   if (loading) return <main><LoadingState /></main>;
   if (loadError || !application) return <main><ErrorState message={loadError || "Không tìm thấy hồ sơ."} onRetry={() => setReload(v => v + 1)} /></main>;
@@ -43,15 +47,15 @@ export default function ScheduleInterviewPage({ params }: { params: { applicatio
   return <main style={{ maxWidth: 650, margin: "0 auto" }}>
     <PageHeader eyebrow="ĐẶT LỊCH PHỎNG VẤN" title="Tạo lịch phỏng vấn mới" description={application.jobTitle} />
     {created ? <section className="card stack"><p role="status">Đã gửi lịch phỏng vấn thành công.</p>
-      <p>{new Date(created.scheduledStart).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })} (GMT+7) · {created.location}</p></section>
+      <p>{new Date(created.scheduledStart).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })} (GMT+7) · {created.location}</p>{application.status === "REVIEWING" && <p>Tiếp tục về hồ sơ để chuyển sang bước phỏng vấn.</p>}</section>
       : !eligible ? <p role="alert">Chỉ hồ sơ đang xét duyệt hoặc phỏng vấn mới có thể đặt lịch.</p>
-      : <form className="card stack" onSubmit={submit}>
+      : <form className="card stack" noValidate onSubmit={submit}>
         <p>Phỏng vấn trực tiếp · Múi giờ Việt Nam (GMT+7)</p>
         <label className="field">Vòng phỏng vấn<input className="input" type="number" min={1} max={20} required value={round} onChange={e => setRound(Number(e.target.value))} disabled={pending} /></label>
         <label className="field">Thời gian dự kiến<input className="input" type="datetime-local" required value={start} onChange={e => setStart(e.target.value)} disabled={pending} /></label>
         <label className="field">Thời lượng<select className="input" value={duration} onChange={e => setDuration(Number(e.target.value))} disabled={pending}>{[30, 45, 60].map(v => <option key={v} value={v}>{v} phút</option>)}</select></label>
         <label className="field">Địa điểm<input className="input" required maxLength={500} value={location} onChange={e => setLocation(e.target.value)} disabled={pending} /></label>
-        <label className="field">Lời nhắn / Ghi chú<textarea className="input" rows={4} maxLength={2000} value={notes} onChange={e => setNotes(e.target.value)} disabled={pending} /></label>
+        <label className="field">Lời nhắn / Ghi chú<textarea className="input resize-none" rows={4} maxLength={2000} value={notes} onChange={e => setNotes(e.target.value)} disabled={pending} /></label>
         {error && <p role="alert">{error}</p>}
         <button className="btn btn-primary" type="submit" disabled={pending}>{pending ? "Đang gửi…" : "Gửi lịch phỏng vấn"}</button>
       </form>}

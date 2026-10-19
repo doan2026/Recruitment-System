@@ -1,76 +1,48 @@
 "use client";
 
-import { useCurrentAccount } from "@/components/SessionGate";
+import Link from "next/link";
+import { SessionGate, useCurrentAccount } from "@/components/SessionGate";
 import { CandidateShell } from "@/components/CandidateShell";
 import { RecruiterShell } from "@/components/RecruiterShell";
 import { AdminShell } from "@/components/AdminShell";
+import { PublicShell } from "@/components/PublicShell";
 import { useNotifications } from "@/components/NotificationProvider";
-import { PageHeader, EmptyState } from "@/components/ui";
-function NotificationsList() {
-  const { notifications, loading, hasMore, loadMore, markAsRead, markAllAsRead, unreadCount } = useNotifications();
+import { PageHeader, EmptyState, ErrorState, LoadingState } from "@/components/ui";
+import { notificationDestination } from "@/lib/notificationState";
 
-  return (
-    <main>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "16px", marginBottom: "24px" }}>
-        <PageHeader
-          title="Thông báo"
-          description={`Cập nhật các hoạt động mới nhất liên quan đến bạn. (${unreadCount} chưa đọc)`}
-        />
-        <button className="btn" onClick={markAllAsRead} disabled={unreadCount === 0 || loading}>
-          Đánh dấu tất cả là đã đọc
-        </button>
-      </div>
-
-      <div className="card stack" style={{ padding: "16px 24px" }}>
-        {notifications.length === 0 && !loading && (
-          <EmptyState title="Chưa có thông báo" description="Bạn hiện không có thông báo nào mới." />
-        )}
-        
-        {notifications.map(n => (
-          <div 
-            key={n.id} 
-            style={{ display: "flex", gap: "16px", padding: "16px 0", borderBottom: "1px solid var(--line)", cursor: n.is_read ? "default" : "pointer" }}
-            onClick={() => !n.is_read && markAsRead(n.id)}
-          >
-            <div style={{ width: 8, height: 8, borderRadius: 4, background: n.is_read ? "transparent" : "var(--primary)", marginTop: 6, flexShrink: 0 }} />
-            <div>
-              <p style={{ margin: "0 0 4px", color: n.is_read ? "var(--muted)" : "var(--text)", fontWeight: n.is_read ? "normal" : "500" }}>{n.title}: {n.body}</p>
-              <small className="muted">{new Date(n.created_at).toLocaleString()}</small>
-            </div>
+function NotificationsList({ role }: { role: string }) {
+  const { notifications, loading, error, marking, refresh, hasMore, loadMore, markAsRead, markAllAsRead, unreadCount } = useNotifications();
+  return <main>
+    <PageHeader title="Thông báo" description={`Theo dõi hồ sơ, lịch phỏng vấn và tin nhắn. ${unreadCount} thông báo chưa đọc.`} />
+    <div className="btn-group" style={{ marginBottom: 20 }}>
+      <button className="btn" onClick={() => void refresh()} disabled={loading}>Tải lại thông báo</button>
+      <button className="btn" onClick={() => void markAllAsRead()} disabled={!unreadCount || loading || marking}>{marking ? "Đang cập nhật…" : "Đánh dấu tất cả là đã đọc"}</button>
+    </div>
+    <section className="card stack" aria-label="Danh sách thông báo">
+      {error && <ErrorState message={error} onRetry={() => void refresh()} />}
+      {loading && <LoadingState />}
+      {!notifications.length && !loading && !error && <EmptyState title="Chưa có thông báo" description="Các cập nhật mới sẽ hiển thị tại đây." />}
+      {notifications.map(notification => {
+        const destination = notificationDestination(notification, role);
+        return <article key={notification.id} style={{ padding: "16px 0", borderBottom: "1px solid var(--line)", overflowWrap: "anywhere" }}>
+          <h2 style={{ fontSize: "1rem", margin: "0 0 8px" }}>{notification.title}</h2>
+          <p>{notification.body}</p>
+          <p className="muted"><time dateTime={notification.created_at}>{new Date(notification.created_at).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })}</time> · {notification.is_read ? "Đã đọc" : "Chưa đọc"}</p>
+          <div className="btn-group">
+            {destination && <Link className="btn" href={destination} onClick={() => { if (!notification.is_read) void markAsRead(notification.id); }}>Xem chi tiết</Link>}
+            {!notification.is_read && <button className="btn" disabled={marking} onClick={() => void markAsRead(notification.id)}>Đánh dấu đã đọc</button>}
           </div>
-        ))}
-
-        {hasMore && (
-          <button className="btn" style={{ marginTop: 16 }} onClick={loadMore} disabled={loading}>
-            {loading ? "Đang tải..." : "Tải thêm"}
-          </button>
-        )}
-      </div>
-    </main>
-  );
+        </article>;
+      })}
+      {hasMore && <button className="btn" disabled={loading} onClick={() => void loadMore()}>Tải thêm thông báo</button>}
+    </section>
+  </main>;
 }
 
 export default function NotificationsPage() {
   const account = useCurrentAccount();
-
-  if (!account) return null;
-
-  if (account.role === "CANDIDATE") {
-    return <CandidateShell><NotificationsList /></CandidateShell>;
-  }
-
-  if (account.role === "RECRUITER") {
-    return <RecruiterShell><NotificationsList /></RecruiterShell>;
-  }
-  
-  if (account.role === "ADMIN") {
-    return <AdminShell><NotificationsList /></AdminShell>;
-  }
-
-  return (
-    <main>
-      <PageHeader title="Lỗi quyền truy cập" />
-      <EmptyState title="Không hỗ trợ" description="Tính năng thông báo không dành cho vai trò của bạn." />
-    </main>
-  );
+  if (account?.role === "CANDIDATE") return <CandidateShell><NotificationsList role={account.role} /></CandidateShell>;
+  if (account?.role === "RECRUITER") return <RecruiterShell><NotificationsList role={account.role} /></RecruiterShell>;
+  if (account?.role === "ADMIN") return <AdminShell><NotificationsList role={account.role} /></AdminShell>;
+  return <PublicShell><SessionGate role="CANDIDATE"><EmptyState title="Thông báo" description="Đăng nhập để xem thông báo của bạn." /></SessionGate></PublicShell>;
 }

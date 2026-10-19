@@ -13,8 +13,7 @@ export default function CandidateInterviewRoomPage({
   return (
     <div style={{ height: "100%", width: "100%", background: "var(--surface)" }}>
       <InterviewVideoRoom
-        interviewId={params.interviewId}
-        role="CANDIDATE"
+        returnLabel="Về lịch phỏng vấn"
         onLeave={() => router.push("/candidate/interviews")}
       />
     </div>

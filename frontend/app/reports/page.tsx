@@ -3,8 +3,19 @@ import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useCurrentAccount } from "../../components/SessionGate";
 import { requestApi } from "../../lib/apiClient";
-import { person1Error } from "../../lib/person1Api";
+import { person1Error, person1FormError } from "../../lib/person1Api";
+import { CandidateShell } from "../../components/CandidateShell";
+import { RecruiterShell } from "../../components/RecruiterShell";
+import { PublicShell } from "../../components/PublicShell";
+import { LoadingState } from "../../components/ui";
+
 export default function ReportPage() {
+  const account = useCurrentAccount();
+  const Shell = account?.role === "CANDIDATE" ? CandidateShell : account?.role === "RECRUITER" ? RecruiterShell : PublicShell;
+  return <Shell><ReportForm /></Shell>;
+}
+
+function ReportForm() {
   const account = useCurrentAccount();
   const [targetType, setType] = useState("JOB");
   const [targetId, setId] = useState("");
@@ -20,9 +31,11 @@ export default function ReportPage() {
     if (type && ["JOB", "COMPANY", "USER"].includes(type)) setType(type);
     if (id) setId(id);
   }, []);
-  async function submit(e: FormEvent) {
+  async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (pending) return;
+    const validation = person1FormError(e.currentTarget);
+    if (validation) { setError(validation); return; }
     setPending(true);
     setError("");
     setDone(false);
@@ -41,17 +54,18 @@ export default function ReportPage() {
       setPending(false);
     }
   }
+  if (account === undefined) return <LoadingState label="Đang kiểm tra phiên đăng nhập" />;
   if (!account)
     return (
       <section className="card">
         <h1>Đăng nhập để báo cáo vi phạm</h1>
-        <Link href="/login">Đăng nhập</Link>
+        <Link className="btn btn-primary" href={`/login?returnTo=${encodeURIComponent("/reports" + (typeof window !== "undefined" ? window.location.search : ""))}`}>Đăng nhập</Link>
       </section>
     );
   return (
     <section className="form-stack">
       <h1>Báo cáo vi phạm</h1>
-      <form className="card form-stack" onSubmit={submit}>
+      <form className="card form-stack" onSubmit={submit} noValidate>
         <fieldset className="person1-fieldset form-stack" disabled={pending}>
           <label className="field">
             Loại đối tượng
@@ -78,7 +92,7 @@ export default function ReportPage() {
           <label className="field">
             Lý do
             <textarea
-              className="textarea"
+              className="textarea resize-none"
               required
               minLength={3}
               maxLength={1000}
@@ -89,7 +103,7 @@ export default function ReportPage() {
           <label className="field">
             Mô tả bổ sung
             <textarea
-              className="textarea"
+              className="textarea resize-none"
               maxLength={5000}
               value={description}
               onChange={(e) => setDescription(e.target.value)}

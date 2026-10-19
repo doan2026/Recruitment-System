@@ -1256,6 +1256,53 @@ Artifacts local: `/tmp/recruitment-fixes-20261013/` chứa log Go JSON, frontend
 
 ---
 
+## 2.61. Đồng bộ frontend ba người và cấu hình env — 19/10/2026
+
+Phạm vi: đối chiếu §II/§VI của `Phan-cong-cong-viec-He-thong-tuyen-dung.md`, hợp đồng backend hiện tại và các màn FE của cả ba người. Các sửa đổi dưới đây là frontend/cấu hình local; không đánh dấu hoàn thành các phần backend hoặc vận hành còn pending.
+
+### Cấu hình môi trường
+
+- Đã đưa bộ cấu hình người dùng cung cấp trong `env/` vào **14 file runtime**: `.env`, `frontend/.env` và `.env` của **12 service** (Auth, Profile, Media, Admin, Company, Job/Search, Application, AI, Interview, Video, Chat, Notification).
+- Phát hiện `env/services/admin-service/.env` bị chép nhầm nội dung AI; tạo runtime Admin đúng template/config backend và dùng lại giá trị phù hợp từ root. Bổ sung database Chat, Cloudinary Media, scoped internal keys và đồng bộ JWT issuer/audience, Kafka, cổng các service Go.
+- Giữ nguyên bộ file nguồn `env/`. File runtime được Git bỏ qua và đặt quyền `0600`; không ghi giá trị secret vào báo cáo hoặc Git.
+- Frontend dùng API Gateway qua `/api` cùng origin; proxy nội bộ local đến gateway `localhost:8080`.
+
+### Các luồng đã sửa
+
+| Nhóm | Thay đổi FE và điểm nối |
+| --- | --- |
+| Người 1 — Auth/Profile/Media/Admin | Giữ đích quay lại qua login/register/OTP; phục hồi đúng cổng khi quên mật khẩu; trạng thái hydrate không nhấp nháy thông báo hết phiên; kiểm tra email/ngày hồ sơ và lỗi form nội tuyến; bảo vệ Settings và bỏ các control không hoạt động; chuyển hướng CV cũ chạy đúng trên production. |
+| Người 2 — Company/Job/Application/AI | Việc làm công khai dùng khung public khi khách hoặc vai trò khác truy cập; nhà tuyển dụng đăng nhập/đăng ký không bị bọc sidebar nghiệp vụ; lỗi mở chat từ job/pipeline hiển thị tại chỗ, khóa thao tác lặp; rút hồ sơ có xác nhận, chỉ đọc version và gửi mutation sau khi xác nhận. Đã đối chiếu ID CV/account và payload moderation với controller backend. |
+| Người 3 — Interview/Chat/Notification/Video | Chat tách đúng hội thoại, khử trùng WS/API, phân trang đúng `cursor`, giữ draft/client_message_id khi gửi lỗi, tự cập nhật hội thoại mới; thông báo khử trùng SSE, không bị GET cũ ghi đè nội dung/trạng thái đã đọc, đếm chưa đọc từ server, thao tác bằng bàn phím và mở đúng lịch phỏng vấn; requestId đặt lịch chỉ giữ khi payload không đổi; rời/mất kết nối video không tự kết thúc cuộc gọi cho mọi người; marker chat phải được đối chiếu Video trước khi đóng phòng. |
+| Dùng chung | CandidateShell dùng lại CandidateWorkspace, không lồng khung; sidebar responsive có trạng thái đang chọn; cùng cỡ tiêu đề/màu menu/chuông thông báo; trang riêng tư chưa có phiên có CTA và giữ query; WebSocket/SSE đi qua cookie cùng origin. Middleware chỉ chuyển header cho HTTP, nhường riêng endpoint WebSocket để Next chuyển tiếp upgrade; Chat vẫn xác thực JWT trước khi upgrade. |
+
+### Kiểm chứng của lượt này
+
+| Kiểm tra | Kết quả |
+| --- | --- |
+| Frontend `npm test` | **151/151 PASS**, gồm đối chiếu cursor chat, khử trùng dữ liệu, chuẩn hóa UUID call marker, notification destination và auth returnTo. |
+| TypeScript / production build | `npm run typecheck` và production build PASS; bản E2E dùng thư mục riêng `.next-e2e`. |
+| Chrome desktop + mobile | **186/186 PASS** (93 desktop + 93 mobile), một lượt đầy đủ trên production build. Sau sửa nhỏ việc giữ menu trong vùng nhìn khi web font tải xong, build lại và kiểm riêng nhóm điều hướng: **10/10 PASS** trên source cuối. |
+| Next proxy thực + gateway stub | WebSocket upgrade/echo hai chiều và SSE streaming PASS; cookie được chuyển tiếp, HTTP SSE nhận Authorization. Chrome xác nhận có cookie thì kết nối WS và thiếu cookie bị từ chối. |
+| Runtime env / Compose | Đủ 14 file runtime, quyền `0600`, đều gitignored. `docker compose config --quiet` PASS. |
+| Strict UI audit | **0 errors / 0 warnings / 0 violations**; artifact `premium-audit.json`. |
+| DESIGN lint | **0 errors**, 12 cảnh báo token chưa được component tham chiếu trong tài liệu; không phải lỗi build/runtime. |
+| Whitespace | `git diff --check` PASS. |
+
+Browser tests dùng API fixture hoặc gateway stub; không coi đó là E2E của toàn bộ backend thật. Đã kiểm tra ảnh desktop/mobile và assertion không tràn ngang. Lệnh browser: `PLAYWRIGHT_USE_BUILD=1 npm run test:e2e -- --max-failures=4`.
+
+Log local: `/tmp/recruitment-fe-unit-final.log`, `/tmp/recruitment-fe-build-final.log`, `/tmp/recruitment-fe-e2e-build.log`, `/tmp/recruitment-fe-e2e-final.log`, `/tmp/recruitment-fe-navigation-final.log`. Báo cáo browser tại `frontend/playwright-report/` (ignored). Các lần thử trung gian không cộng vào số PASS của lượt cuối.
+
+### Giới hạn còn lại
+
+- Chưa có cặp khóa JWT `.pem/.key` trong repository; chưa khởi động và nghiệm thu ba hành trình xuyên toàn bộ service thật với bộ env này.
+- Lịch Interview hiện hỗ trợ OFFLINE; lịch phỏng vấn ↔ phòng LiveKit và lifecycle/consumer kết thúc cuộc gọi vẫn là phần backend còn thiếu. UI không tạo ID/phòng lịch giả.
+- Không chạy live SMTP/Cloudinary/Claude/FCM/Kafka/LiveKit. Các khóa AI tùy chọn vẫn là placeholder sau những feature flag đang tắt; cần giá trị thật khi bật các tính năng đó.
+- Production Compose đang dùng layout `env/<service>.env`, khác bộ nguồn `env/services/<service>/.env`; lượt này điền runtime env và kiểm tra Compose local, chưa deploy production.
+- `/terms` và `/privacy` vẫn thiếu nội dung chính sách có thẩm quyền; chưa tự soạn chính sách pháp lý. Google OAuth callback vẫn về trang mặc định của vai trò, chưa giữ `returnTo` xuyên provider.
+
+---
+
 # 3. Danh sách task CHƯA làm (Pending)
 
 ## P01 — Hoàn tất và bàn giao Application Pipeline

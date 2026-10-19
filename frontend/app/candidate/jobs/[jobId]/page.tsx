@@ -32,20 +32,21 @@ export default function CandidateJobDetailPage({ params, searchParams }: {
   const [recommendationError, setRecommendationError] = useState("");
   const [recommendationLoading, setRecommendationLoading] = useState(false);
   const [chatting, setChatting] = useState(false);
+  const [chatError, setChatError] = useState("");
   const canRecommend = isDemoPerson2Api || account?.role === "CANDIDATE";
   const source = SOURCES.includes(searchParams.source as ApplicationSource)
     ? searchParams.source as ApplicationSource
     : "SEARCH";
 
   async function handleStartChat() {
-    if (!job?.createdBy) return;
+    if (!job?.createdBy || chatting || account?.role !== "CANDIDATE") return;
+    setChatError("");
     setChatting(true);
     try {
       const response = await createConversation(`Chat với ${job.ownerName}`, [job.createdBy], false);
       router.push(`/messages?chat=${response.data.id}`);
     } catch (e) {
-      console.error(e);
-      alert("Không thể tạo cuộc trò chuyện: " + toUserMessage(e));
+      setChatError("Không thể mở cuộc trò chuyện. " + toUserMessage(e));
     } finally {
       setChatting(false);
     }
@@ -106,12 +107,13 @@ export default function CandidateJobDetailPage({ params, searchParams }: {
           <div className="btn-group">
             <Link className="btn" href={`/companies/${job.companyId}`}>Xem công ty</Link>
             {job.createdBy && account?.role === "CANDIDATE" && (
-              <button className="btn" onClick={handleStartChat} disabled={chatting}>
+              <button className="btn" type="button" onClick={handleStartChat} disabled={chatting} aria-busy={chatting}>
                 {chatting ? "Đang tạo..." : "Chat ngay"}
               </button>
             )}
             <BookmarkButton jobId={job.id} />
           </div>
+          {chatError ? <p className="notice notice-danger" role="alert">{chatError}</p> : null}
         </section>
         <section className="panel">
           <h2>Ứng tuyển</h2>

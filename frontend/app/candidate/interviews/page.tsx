@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { PageHeader, StatusBadge, EmptyState, ErrorState, LoadingState } from "@/components/ui";
-import { listMyInterviews, type Interview } from "@/lib/interviewApi";
+import { interviewStatusLabel, listMyInterviews, type Interview } from "@/lib/interviewApi";
 import { toUserMessage } from "@/lib/apiClient";
 
 export default function CandidateInterviewsPage() {
@@ -23,7 +23,7 @@ export default function CandidateInterviewsPage() {
     <PageHeader title="Lịch phỏng vấn" eyebrow="CANDIDATE" description="Theo dõi lịch và địa điểm phỏng vấn của bạn. Thời gian hiển thị theo GMT+7." />
     {error && <ErrorState message={error} onRetry={() => setReload(v => v + 1)} />}
     {items.map(iv => <article className="card stack" key={iv.id}>
-      <h2>Phỏng vấn vòng {iv.roundNumber}</h2><StatusBadge tone="info">{iv.status}</StatusBadge>
+      <h2>Phỏng vấn vòng {iv.roundNumber}</h2><StatusBadge tone="info">{interviewStatusLabel(iv.status)}</StatusBadge>
       <p><time dateTime={iv.scheduledStart}>{new Date(iv.scheduledStart).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })}</time> (GMT+7) · {iv.durationMinutes} phút</p>
       <p>{iv.mode === "OFFLINE" ? "Phỏng vấn trực tiếp" : "Phỏng vấn trực tuyến"}{iv.location ? ` · ${iv.location}` : ""}</p>
       <Link className="btn" href={`/candidate/applications/${iv.applicationId}`}>Xem đơn ứng tuyển</Link>

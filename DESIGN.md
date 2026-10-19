@@ -12,7 +12,7 @@ colors:
   text: "#151c27"
   text-muted: "#3d4a3d"
   border: "#dce2f3"
-  danger: "#ba1a1a"
+  danger: "#d32f2f"
   warning: "#f59e0b"
 typography:
   display:
@@ -72,7 +72,7 @@ Nội dung tối đa 1280px với gutter 24px; mobile dùng lề 16px. Desktop d
 
 ## Elevation & Depth
 
-Card dùng nền trắng, viền tonal và shadow môi trường `0 4px 20px rgba(0,0,0,.05)`. Hover nâng tối đa 3px. Header sticky có nền bán trong suốt; không dùng shadow lớn trên form và bảng.
+Card dùng nền trắng, viền tonal và shadow môi trường `var(--shadow)` (`0 8px 24px rgba(0,0,0,.08)` theo runtime hiện tại). Hover nâng tối đa 3px. Header sticky có nền bán trong suốt; không dùng shadow lớn trên form và bảng.
 
 ## Shapes
 
@@ -91,6 +91,12 @@ Primary solid xanh, secondary viền xanh, neutral viền xám, warning hổ ph�
 ### Navigation and data display
 
 Top navigation sticky, cuộn ngang trên màn hẹp. Bảng dùng HTML semantic và vùng overflow riêng. Badge hiển thị trạng thái bằng màu cộng với văn bản đầy đủ.
+
+### Workspace consistency
+
+`CandidateWorkspace` là khung duy nhất cho ứng viên đã đăng nhập; `CandidateShell` dùng lại khung này, kể cả Tin nhắn và Thông báo. Khách và tài khoản khác xem việc làm công khai qua `PublicShell`. `RecruiterShell` và `AdminShell` dùng chung geometry `.shell-body`/`.sidebar`/`.content`, token nền/viền và nhãn trạng thái điều hướng `aria-current`. Trang đăng nhập/đăng ký tách khỏi khung nghiệp vụ. Tiêu đề trang nghiệp vụ dùng chung 26px/1.3, menu đang chọn dùng `--primary` trên chữ trắng; chuông thông báo dùng chung `NotificationBell` với số chưa đọc.
+
+Sidebar Recruiter/Admin chuyển thành thanh cuộn ngang ở 980px; khung Candidate giữ breakpoint 680px hiện có. Form cuộn theo trang. Chỉ vùng chat giới hạn chiều cao để tin nhắn cuộn độc lập; ở mobile danh sách hội thoại nằm trên nội dung.
 
 ### Forms and overlays
 

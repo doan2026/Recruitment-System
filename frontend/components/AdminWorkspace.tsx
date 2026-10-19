@@ -363,6 +363,7 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
       {tab === "users" ? (
         <form
           className="card btn-group"
+          noValidate
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
             setPage(1);
@@ -455,7 +456,7 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
         <label className="field">
           Lý do / kết quả xử lý
           <textarea
-            className="textarea"
+            className="textarea resize-none"
             maxLength={500}
             value={reason}
             disabled={pending}

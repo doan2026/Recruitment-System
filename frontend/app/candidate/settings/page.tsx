@@ -1,32 +1,25 @@
 "use client";
 
+import Link from "next/link";
 import { PageHeader } from "@/components/ui";
+import { Person1Gate } from "@/components/Person1Gate";
 
 export default function CandidateSettingsPage() {
-  return (
-    <main>
-      <PageHeader
-        eyebrow="CANDIDATE"
-        title="Cài đặt tài khoản"
-        description="Quản lý thông báo và bảo mật."
-      />
-      <div className="card stack" style={{ padding: "24px", maxWidth: 600 }}>
-        <h3>Thông báo (Email)</h3>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          <input type="checkbox" id="notif-job" defaultChecked />
-          <label htmlFor="notif-job">Gợi ý việc làm phù hợp hàng tuần</label>
-        </div>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          <input type="checkbox" id="notif-status" defaultChecked />
-          <label htmlFor="notif-status">Cập nhật trạng thái hồ sơ ứng tuyển</label>
-        </div>
-        
-        <hr style={{ margin: "24px 0", borderTop: "1px solid var(--line)" }} />
-        
-        <h3>Bảo mật</h3>
-        <button className="btn btn-secondary" style={{ width: "fit-content" }}>Đổi mật khẩu</button>
-        <button className="btn btn-danger" style={{ width: "fit-content", marginTop: "8px" }}>Xoá tài khoản</button>
-      </div>
+  return <Person1Gate role="CANDIDATE">
+    <main className="form-stack">
+      <PageHeader eyebrow="ỨNG VIÊN" title="Cài đặt tài khoản" description="Quản lý thông báo và bảo mật tài khoản." />
+      <section className="card form-stack">
+        <h2>Thông báo</h2>
+        <p>Xem cập nhật về hồ sơ ứng tuyển và lịch phỏng vấn của bạn.</p>
+        <Link className="btn" href="/notifications">Xem thông báo</Link>
+        <p className="help">Tùy chỉnh nhận email chưa khả dụng.</p>
+      </section>
+      <section className="card form-stack">
+        <h2>Bảo mật</h2>
+        <p>Yêu cầu liên kết qua email đăng nhập để đặt lại mật khẩu.</p>
+        <Link className="btn btn-secondary" href="/forgot-password">Đặt lại mật khẩu</Link>
+        <p className="help">Tự xóa tài khoản chưa được hỗ trợ.</p>
+      </section>
     </main>
-  );
+  </Person1Gate>;
 }

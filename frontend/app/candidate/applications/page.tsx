@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { ConfirmationDialog } from "@/components/ConfirmationDialog";
 import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import { candidateApplicationActions, type CandidateApplicationAction } from "../../../lib/applicationStateMachine";
@@ -15,6 +16,7 @@ function fmtDate(value?: string) {
 
 export default function CandidateApplicationsPage() {
   const router = useRouter();
+  const [withdrawTarget, setWithdrawTarget] = useState<CandidateApplication | null>(null);
   const [applications, setApplications] = useState<CandidateApplication[]>([]);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -65,6 +67,7 @@ export default function CandidateApplicationsPage() {
         notes: "Ứng viên chủ động rút hồ sơ",
       } : item));
       setActionStatus(`Đã rút hồ sơ ứng tuyển ${application.jobTitle}.`);
+      setWithdrawTarget(null);
     } catch (reason: unknown) {
       setActionError(toUserMessage(reason));
     } finally {
@@ -74,7 +77,8 @@ export default function CandidateApplicationsPage() {
 
   function runAction(application: CandidateApplication, action: CandidateApplicationAction) {
     if (action.kind === "WITHDRAW") {
-      void withdraw(application);
+      setActionError("");
+      setWithdrawTarget(application);
       return;
     }
     setActionError("");
@@ -114,6 +118,16 @@ export default function CandidateApplicationsPage() {
           );
         })}
       </section>
+      <ConfirmationDialog
+        open={withdrawTarget !== null}
+        title="Rút hồ sơ ứng tuyển?"
+        description={`Bạn sẽ rút hồ sơ cho vị trí ${withdrawTarget?.jobTitle ?? ""}. Nhà tuyển dụng sẽ không tiếp tục xử lý hồ sơ này.`}
+        confirmLabel="Xác nhận rút hồ sơ"
+        pending={pendingApplicationId !== null}
+        onConfirm={() => { if (withdrawTarget) void withdraw(withdrawTarget); }}
+        onCancel={() => setWithdrawTarget(null)}
+        error={actionError}
+      />
     </main>
   );
 }

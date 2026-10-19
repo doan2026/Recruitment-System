@@ -11,6 +11,7 @@ import {
 } from "../../../../../lib/cvPdf";
 import {
   person1Error,
+  person1FormError,
   saveBlob,
   uploadPersonalFile,
   type BuilderContent,
@@ -104,8 +105,10 @@ export default function BuilderPage() {
       setPending(false);
     }
   }
-  async function save(e: FormEvent) {
+  async function save(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const formIssue = person1FormError(e.currentTarget);
+    if (formIssue) { setError(formIssue); return; }
     if (pending) return;
     setPending(true);
     setError("");
@@ -167,7 +170,7 @@ export default function BuilderPage() {
       {loading ? (
         <p role="status">Đang tải nội dung…</p>
       ) : (
-        <form className="card form-stack" onSubmit={save}>
+        <form className="card form-stack" noValidate onSubmit={save}>
           <fieldset
             disabled={pending || loadFailed}
             className="person1-fieldset form-stack"
@@ -205,7 +208,7 @@ export default function BuilderPage() {
                     ][index]
                   }
                   <textarea
-                    className="textarea"
+                    className="textarea resize-none"
                     required={key === "fullName"}
                     maxLength={key === "summary" ? 5000 : 1000}
                     value={content[key]}
@@ -236,7 +239,7 @@ export default function BuilderPage() {
                 <label className="field">
                   Nội dung
                   <textarea
-                    className="textarea"
+                    className="textarea resize-none"
                     rows={5}
                     maxLength={5000}
                     value={section.text}

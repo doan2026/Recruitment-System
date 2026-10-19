@@ -2,7 +2,7 @@
 
 ## Product context
 
-- Audience: Candidate và Recruiter trong phạm vi bốn service Người 2.
+- Audience: Candidate, Recruiter và Admin; các luồng FE của cả ba người theo tài liệu phân công.
 - Primary jobs: tìm việc, ứng tuyển, theo dõi hồ sơ; quản lý công ty, tin, pipeline và offer.
 - Target market: Việt Nam.
 - Active locales: `vi-VN`.
@@ -151,3 +151,19 @@
 - **Bookmark:** POST lưu, DELETE bỏ lưu (204 không yêu cầu JSON), thao tác lỗi phải đọc lại hoặc cho retry; không suy đoán trạng thái đã lưu.
 - **Offer:** vào từ offerId của Application → GET Offer có quyền → phản hồi với cả hai phiên bản. Dialog xác nhận kiểm lại hạn và trạng thái ngay trước POST; BE là quyết định cuối. Evaluation đọc lại bằng GET được cấp quyền, không chỉ giữ flag cục bộ.
 - **Visual reconciliation:** giữ nguyên DESIGN.md, token CSS, native select/date và ngôn ngữ vi-VN. Chỉ mở rộng shared confirmation/session/API primitives; không thay palette hoặc typography.
+
+
+## Đồng bộ luồng ba người — 19/10/2026
+
+- Nguồn nghiệp vụ: `Phan-cong-cong-viec-He-thong-tuyen-dung.md` §II và §VI (ba hành trình Candidate/Recruiter/Admin); trạng thái triển khai và giới hạn ghi tại `TIEN_DO_DU_AN.md` §2.61.
+- Owner khung Candidate là `CandidateWorkspace`; `CandidateShell` là adapter dùng lại, tự tránh bọc hai lần. Khung chỉ hiện identity/sidebar Candidate với tài khoản CANDIDATE; public jobs vẫn đọc được khi anonymous hoặc vai trò khác.
+- Recruiter login/register không dùng sidebar riêng tư. Khi chưa có phiên/không đủ quyền, giữ khung điều hướng và hiển thị gate có CTA. Mọi sidebar đánh dấu vị trí hiện tại và có đường đến tin nhắn/thông báo; trên mobile, thanh menu cuộn ngang tới mục đang mở mà không cuộn trang. Header Candidate dành một hàng riêng cho menu công khai.
+- `loginDestination` kiểm tra đích cùng origin và role, giữ query/hash qua login/register/OTP, hỗ trợ `/messages`, `/notifications`, `/reports` và phòng gọi `/interviews/:id/room` theo role. Google callback hiện vẫn về trang mặc định; không coi đây là hỗ trợ returnTo qua OAuth.
+- `SessionGate`/`Person1Gate` dùng `LoadingState` trong lúc hydrate và giữ query của đích khi yêu cầu đăng nhập lại.
+- `person1FormError` giữ ràng buộc native để kiểm tra nhưng hiển thị lỗi trong trang và focus ô đầu tiên; form khai báo `noValidate`. Ngày hồ sơ được kiểm tra trước khi gửi, không lưu khoảng thời gian ngược.
+- Rút hồ sơ: mở `ConfirmationDialog`, hủy không gọi API, xác nhận mới tải version rồi gửi mutation. Lỗi nằm trong dialog để có thể thử lại; không bỏ draft khi lỗi.
+- Mở chat từ job/pipeline: khóa nút khi đang tạo hội thoại, báo lỗi tại chỗ; chỉ điều hướng khi API trả thành công. Không dùng browser alert.
+- Chat history dùng `cursor` timestamp đúng contract Go. Gộp tin theo id/client_message_id và conversation_id; không đưa tin của hội thoại khác vào khung hiện tại. Gửi lỗi giữ draft và client_message_id cho lần thử lại cùng nội dung.
+- WebSocket và SSE đi qua `/api` cùng origin với cookie đăng nhập. Chat có reconnect/catch-up HTTP. Inbox gộp SSE theo id và đọc lại unread-count từ API; GET đang chạy không được ghi đè SSE hoặc trạng thái đã đọc vừa lưu; lỗi tải/đánh dấu có phản hồi và nút thử lại. Nội dung thông báo có liên kết đến luồng ứng tuyển/chat khi metadata có đủ thông tin.
+- Ngắt kết nối hoặc người tham gia rời LiveKit không tự kết thúc cuộc gọi cho mọi người. Chỉ chủ cuộc gọi có thao tác kết thúc; quyền cuối cùng do Video service kiểm tra. Marker chat không tự đóng phòng: chỉ phát sự kiện sau khi Video xác nhận ID không có trong danh sách đầy đủ dưới 50 cuộc gọi đang mở; dữ liệu lỗi hoặc danh sách bị giới hạn thì giữ phòng/lời mời. UUID marker được chuẩn hóa trước khi đối chiếu.
+- Bằng chứng mới: `frontend/tests/e2e/cross-team-navigation.spec.ts`, `communication-flows.spec.ts`, các regression bổ sung trong `person1-flows.spec.ts` và `person2-gateway.spec.ts`. Đây là browser/API-mock tests; không thay thế E2E với Kafka, SMTP, Cloudinary và LiveKit thật.

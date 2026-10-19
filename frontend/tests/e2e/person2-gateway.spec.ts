@@ -276,7 +276,12 @@ test("Application tracking reloads authoritative version before withdraw", async
 
   await login(page, "CANDIDATE", "/candidate/applications");
   await expect(page.getByText("Phiên bản tải khi thao tác", { exact: false })).toBeVisible();
-  await page.getByRole("button", { name: "Rút hồ sơ" }).click();
+  await page.getByRole("button", { name: "Rút hồ sơ", exact: true }).click();
+  expect(withdrawBody).toBeNull();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Quay lại", exact: true }).click();
+  expect(withdrawBody).toBeNull();
+  await page.getByRole("button", { name: "Rút hồ sơ", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Xác nhận rút hồ sơ", exact: true }).click();
 
   await expect(page.getByText("Đã rút hồ sơ ứng tuyển Backend Engineer.")).toBeVisible();
   await expect(page.getByText("WITHDRAWN", { exact: true })).toBeVisible();

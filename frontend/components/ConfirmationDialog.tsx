@@ -8,6 +8,7 @@ export function ConfirmationDialog({
   description,
   confirmLabel,
   pending = false,
+  error,
   onConfirm,
   onCancel,
 }: {
@@ -16,6 +17,7 @@ export function ConfirmationDialog({
   description: string;
   confirmLabel: string;
   pending?: boolean;
+  error?: string;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -63,6 +65,7 @@ export function ConfirmationDialog({
         <p className="eyebrow">CẦN BẠN XÁC NHẬN</p>
         <h2 id={titleId}>{title}</h2>
         <p id={descriptionId}>{description}</p>
+        {error ? <p className="notice notice-danger" role="alert">{error}</p> : null}
         <div className="btn-group confirmation-dialog-actions">
           <button
             className="btn btn-primary"

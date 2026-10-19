@@ -1,11 +1,12 @@
+"use client";
+
 import { type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { SessionGate } from "@/components/SessionGate";
 import { RecruiterShell } from "@/components/RecruiterShell";
 
 export default function PrivateLayout({ children }: { children: ReactNode }) {
-  return (
-    <SessionGate role="RECRUITER">
-      <RecruiterShell>{children}</RecruiterShell>
-    </SessionGate>
-  );
+  const pathname = usePathname();
+  if (pathname === "/recruiter/login" || pathname === "/recruiter/register") return <>{children}</>;
+  return <RecruiterShell><SessionGate role="RECRUITER">{children}</SessionGate></RecruiterShell>;
 }
