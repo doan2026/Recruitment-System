@@ -137,3 +137,30 @@ trực tiếp với tài khoản người dùng trên production trong lần aud
   setup TLS thất bại trên 2 project và 8 ca còn lại không chạy. Đây không phải kết
   quả TLS đạt cho bản frontend mới; kết quả 28/28 phía trên thuộc lượt kiểm tra
   nginx trước đó. Không tự bật toàn bộ stack Docker trong lần audit bổ sung.
+
+### Chạy lại trên Docker local sau khi người dùng bật Docker
+
+- **30/30 ca đạt** trong `production-google-proxy.spec.ts` và
+  `auth-cookie-proxy.spec.ts`, gồm Nginx production/TLS thật, Next thật và Auth
+  fixture; cookie Secure/HttpOnly, user-only response, Candidate/Recruiter identity,
+  callback và reload giữ phiên. Container fixture được dọn sau kiểm tra.
+- Đã build lại image `recruitment-system-frontend` từ commit `bc6528b`, recreate
+  riêng frontend bằng Compose chính và chờ healthy tại `http://localhost:3000`.
+  Không thay image/source các backend hoặc xóa volume.
+- Bộ fixture hệ thống cũ không còn trong DB local hiện tại. Đã tạo ba tài khoản
+  fixture mới, mật khẩu ngẫu nhiên bcrypt cost 10; không đổi tài khoản có sẵn.
+  Credential chỉ nằm trong file ignored `.cache/google-local-accounts-20261020.json`.
+- Smoke Chrome với **backend Compose thật đạt 15 bước**: login UI ba vai trò,
+  JSON chỉ có user, HttpOnly cookies, reload, khôi phục access cookie bằng refresh,
+  logout và `/api/auth/me` trả 401 sau logout; exchange code rỗng đi qua Next;
+  Candidate/Recruiter redirect tới Google với callback localhost đúng.
+- Smoke chờ trang tải xong trước khi chủ động xóa access cookie để thử refresh;
+  không kiểm chứng phối hợp refresh giữa nhiều tab hoặc reload giữa request đang
+  xoay refresh token.
+- Kiểm tra cuối: frontend, gateway và các HTTP backend có healthcheck đều healthy.
+  Hai worker AI embedding đang restarting; không thuộc luồng đăng nhập đang kiểm
+  thử, chưa xử lý hoặc xác nhận chức năng embedding trong lượt này.
+- Chưa tự thực hiện bước chọn tài khoản/chấp thuận tại Google bằng tài khoản thật.
+  Người dùng có thể thử tại `/login` hoặc `/recruiter/login` trên cổng 3000, rồi
+  reload trang sau khi đăng nhập. Kết quả local không xác nhận cấu hình trên domain
+  production đã được cập nhật.
