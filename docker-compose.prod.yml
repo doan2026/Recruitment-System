@@ -77,6 +77,8 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
+    ports:
+      - "5432:5432"
     logging: *logging
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
