@@ -71,25 +71,97 @@ có thể đặt `OPENSSL_BIN` nếu cài ở vị trí khác.
 
 ## Áp dụng lên server
 
-Bản sửa repo **chưa tự động được áp dụng lên server**. Chép file
-`infra/nginx/nginx.prod.conf` mới vào đường dẫn tương ứng của thư mục triển khai
-`/home/ubuntu/careerhub` (theo workflow hiện tại), rồi chạy trên server:
+Release `v1.0.9` (`56b4988`, chứa commit `91b69ea`) đã được workflow deploy báo
+thành công: https://github.com/vuongptit/Recruitment-System/actions/runs/39372046817.
+Tuy nhiên, lần kiểm tra domain sau đó vẫn nhận callback có
+`Cache-Control: s-maxage=31536000, stale-while-revalidate` và exchange lỗi có đủ
+`code/message/details`. Đây là dấu hiệu cấu hình đang phục vụ chưa dùng location
+mới. Chưa có SSH để xác định chắc chắn là mount/master nginx cũ hay domain đang
+trỏ tới instance khác; không thể kết luận chỉ từ trạng thái xanh của workflow.
+
+Trên server, xác nhận file `infra/nginx/nginx.prod.conf` đã chứa location exchange
+và map theo cổng của bản sửa, sau đó kiểm tra cấu hình từ mount mới:
 
 ```sh
 cd /home/ubuntu/careerhub
-docker compose -f docker-compose.prod.yml exec -T api-gateway nginx -t
-# Chỉ chạy reload khi kiểm tra cú pháp phía trên thành công.
-docker compose -f docker-compose.prod.yml exec -T api-gateway nginx -s reload
+docker compose -f docker-compose.prod.yml run --rm --no-deps -T api-gateway nginx -t
 ```
 
-Nếu thay file bằng công cụ tạo inode mới, bind mount file cũ có thể chưa đổi;
-khi đó recreate riêng gateway sau khi đã cập nhật file trên host:
+Nếu kiểm tra đạt, recreate riêng gateway để dùng file cấu hình trên host và master
+nginx mới. Thao tác này có thể làm gián đoạn web ngắn; không xóa volume hoặc DB:
 
 ```sh
 docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate api-gateway
+docker compose -f docker-compose.prod.yml exec -T api-gateway nginx -t
 ```
 
-Không cần build lại các image ứng dụng cho bản sửa định tuyến này. Sau khi áp
-dụng, bắt đầu đăng nhập Google mới từ đúng cổng Candidate/Recruiter; code cũ đã
+Riêng bản sửa nginx không cần build image ứng dụng. Phần bảo vệ frontend bổ sung
+bên dưới cần build và triển khai image frontend mới. Sau khi áp dụng, bắt đầu
+đăng nhập Google mới từ đúng cổng Candidate/Recruiter; code cũ đã
 đổi không thể dùng lại. Kiểm tra trang hồ sơ vẫn đăng nhập sau reload. Không gửi
 giá trị cookie/token hoặc OAuth code khi báo kết quả.
+
+## Kiểm tra hợp đồng token và cookie ở frontend
+
+- Spring `GoogleOAuthController` trả `AuthTokenResponse` gồm access/refresh token
+  và user cho chặng nội bộ. Auth vẫn là nơi duy nhất phát hành JWT.
+- Next route `/auth/google/exchange` gọi `proxyAuthCookie`, nhận token phía server
+  rồi trả JSON `{data:{user},meta:null}`. JavaScript không cần nhận JWT.
+- `careerhub_token`: HttpOnly, SameSite=Lax, Path=/, Secure khi HTTPS.
+- `careerhub_refresh`: HttpOnly, SameSite=Lax, Path=/api/auth-cookie, Secure khi
+  HTTPS. Refresh/logout đọc cookie phía server. Không lưu token ở localStorage
+  hoặc sessionStorage; tùy chọn nhớ email chỉ lưu email.
+- Request dùng `credentials: include`; Next middleware chuyển access cookie thành
+  Authorization nội bộ khi gọi `/api/*`.
+- Trước đây callback chỉ đọc được user là chuyển trang, kể cả response Auth trả
+  token trực tiếp vì gateway route sai. Nay `exchangeGoogle` từ chối response chứa
+  token; sau response user-only, nó gọi cùng origin `/api/auth/me` để xác nhận
+  cookie hoạt động và id/role khớp rồi mới tạo trạng thái đăng nhập và chuyển trang.
+- Không tự refresh hoặc gửi lại exchange code đã dùng. Cookie không dùng được,
+  account/role không khớp hoặc gateway route sai đều giữ callback và báo lỗi.
+
+Đây là kiểm tra bổ sung để không báo thành công giả. Nó không thay thế việc áp
+dụng cấu hình gateway đúng trên domain production. Chưa kiểm tra đăng nhập Google
+trực tiếp với tài khoản người dùng trên production trong lần audit này.
+
+### Kết quả kiểm tra bổ sung
+
+- `npm.cmd test`: **151/151 đạt**; `npm.cmd run typecheck`: đạt.
+- **54 ca trình duyệt đạt** trên desktop/mobile, gồm các ca callback Google và
+  cookie proxy. Test mới dùng Next thật, Auth fixture: exchange đúng một lần,
+  cookie HttpOnly, `/api/auth/me` qua middleware, vào hồ sơ và reload giữ phiên.
+- Các ca lỗi mới xác nhận không chuyển trang khi nhận raw token response, không
+  có cookie hợp lệ, sai account/role hoặc chưa xác nhận xong phiên.
+- Lượt chạy có bật `PRODUCTION_PROXY_TEST=1` không hoàn tất nhóm TLS: Docker
+  Desktop daemon không khả dụng (`dockerDesktopLinuxEngine` không tồn tại), khiến
+  setup TLS thất bại trên 2 project và 8 ca còn lại không chạy. Đây không phải kết
+  quả TLS đạt cho bản frontend mới; kết quả 28/28 phía trên thuộc lượt kiểm tra
+  nginx trước đó. Không tự bật toàn bộ stack Docker trong lần audit bổ sung.
+
+### Chạy lại trên Docker local sau khi người dùng bật Docker
+
+- **30/30 ca đạt** trong `production-google-proxy.spec.ts` và
+  `auth-cookie-proxy.spec.ts`, gồm Nginx production/TLS thật, Next thật và Auth
+  fixture; cookie Secure/HttpOnly, user-only response, Candidate/Recruiter identity,
+  callback và reload giữ phiên. Container fixture được dọn sau kiểm tra.
+- Đã build lại image `recruitment-system-frontend` từ commit `bc6528b`, recreate
+  riêng frontend bằng Compose chính và chờ healthy tại `http://localhost:3000`.
+  Không thay image/source các backend hoặc xóa volume.
+- Bộ fixture hệ thống cũ không còn trong DB local hiện tại. Đã tạo ba tài khoản
+  fixture mới, mật khẩu ngẫu nhiên bcrypt cost 10; không đổi tài khoản có sẵn.
+  Credential chỉ nằm trong file ignored `.cache/google-local-accounts-20261020.json`.
+- Smoke Chrome với **backend Compose thật đạt 15 bước**: login UI ba vai trò,
+  JSON chỉ có user, HttpOnly cookies, reload, khôi phục access cookie bằng refresh,
+  logout và `/api/auth/me` trả 401 sau logout; exchange code rỗng đi qua Next;
+  Candidate/Recruiter redirect tới Google với callback localhost đúng.
+- Smoke chờ trang tải xong trước khi chủ động xóa access cookie để thử refresh;
+  không kiểm chứng phối hợp refresh giữa nhiều tab hoặc reload giữa request đang
+  xoay refresh token.
+- Kiểm tra cuối: frontend, gateway và các HTTP backend có healthcheck đều healthy.
+  Hai worker AI embedding đang restarting; không thuộc luồng đăng nhập đang kiểm
+  thử, chưa xử lý hoặc xác nhận chức năng embedding trong lượt này.
+- Sau khi frontend mới chạy trên cổng 3000, người dùng đã trực tiếp thử đăng nhập
+  Google và xác nhận: **“Đăng nhập và reload vẫn giữ phiên”**. Đây là xác nhận
+  thủ công với Google thật trên localhost, bổ sung cho các kiểm tra tự động ở
+  trên; chưa có xác nhận riêng cho từng vai trò từ bước thủ công này.
+- Kết quả local không xác nhận cấu hình trên domain production đã được cập nhật.

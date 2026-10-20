@@ -169,6 +169,13 @@ test(`Google automatically signs in to ${role} with the HttpOnly binder exactly 
     secure: false,
   }]);
   let count = 0;
+  let confirmed = false;
+  await page.route(api + "/auth/me", route => {
+    expect(count).toBe(1);
+    expect(route.request().headers().authorization).toBeUndefined();
+    confirmed = true;
+    return reply(route, tokens(role).user);
+  });
   await page.route("http://127.0.0.1:4173/auth/google/exchange", async (route) => {
     count++;
     expect(await route.request().headerValue("cookie")).toContain("oauth2_exchange_binder=test-browser-binder");
@@ -176,7 +183,7 @@ test(`Google automatically signs in to ${role} with the HttpOnly binder exactly 
       code: "one-time-google",
       role,
     });
-    return reply(route, tokens(role));
+    return reply(route, { user: tokens(role).user });
   });
   await page.goto("/auth/callback#code=one-time-google&role=" + role);
   await expect(page).toHaveURL(role === "CANDIDATE" ? /\/candidate\/profile$/ : /\/recruiter\/jobs$/);
@@ -184,10 +191,66 @@ test(`Google automatically signs in to ${role} with the HttpOnly binder exactly 
     page.getByRole("heading", { name: "Hồ sơ cá nhân", exact: true }),
   ).toBeVisible();
   expect(count).toBe(1);
+  expect(confirmed).toBe(true);
+  expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
   expect(page.url()).not.toContain("code=");
   await expect(page.getByRole("combobox", { name: "Vai trò", exact: true })).toHaveCount(0);
 });
 }
+
+for (const failure of ["raw-tokens", "missing-cookie", "wrong-account", "wrong-role"] as const) {
+test(`Google callback refuses false login success: ${failure}`, async ({ page }) => {
+  await base(page);
+  let exchanges = 0;
+  let confirmations = 0;
+  await page.route("http://127.0.0.1:4173/auth/google/exchange", route => {
+    exchanges++;
+    return reply(route, failure === "raw-tokens" ? tokens() : { user: tokens().user });
+  });
+  await page.route(api + "/auth/me", route => {
+    confirmations++;
+    if (failure === "missing-cookie") return reply(route, { code: "AUTHENTICATION_REQUIRED" }, 401);
+    return reply(route, { ...tokens().user,
+      ...(failure === "wrong-account" ? { id: cvId } : {}),
+      ...(failure === "wrong-role" ? { role: "RECRUITER" } : {}),
+    });
+  });
+  await page.goto("/auth/callback#code=one-time-google&role=CANDIDATE");
+  const message = failure === "raw-tokens" ? "chưa được cấu hình đúng"
+    : failure === "missing-cookie" ? "Chưa xác nhận được phiên" : "không khớp tài khoản";
+  await expect(page.locator("p[role=alert]")).toContainText(message);
+  await expect(page).toHaveURL("http://127.0.0.1:4173/auth/callback");
+  await expect(page.getByRole("link", { name: "Quay lại đăng nhập", exact: true })).toHaveAttribute("href", "/login");
+  expect(exchanges).toBe(1);
+  expect(confirmations).toBe(failure === "raw-tokens" ? 0 : 1);
+  expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
+});
+}
+
+test("Google waits for the cookie-backed account before navigating away from callback", async ({ page }) => {
+  await base(page);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let confirming = false;
+  let exchanges = 0;
+  await page.route("http://127.0.0.1:4173/auth/google/exchange", route => {
+    exchanges++;
+    return reply(route, { user: tokens().user });
+  });
+  await page.route(api + "/auth/me", async route => {
+    confirming = true;
+    await held;
+    await reply(route, tokens().user);
+  });
+  await page.goto("/auth/callback#code=one-time-google&role=CANDIDATE");
+  try {
+    await expect.poll(() => confirming).toBe(true);
+    await expect(page).toHaveURL("http://127.0.0.1:4173/auth/callback");
+    await expect(page.getByRole("status").filter({ hasText: "Đang hoàn tất" })).toBeVisible();
+  } finally { release(); }
+  await expect(page).toHaveURL(/\/candidate\/profile$/);
+  expect(exchanges).toBe(1);
+});
 
 for (const fragment of ["code=one-time-google", "code=one-time-google&role=ADMIN", "role=RECRUITER"]) {
 test(`Google callback rejects incomplete or invalid portal metadata: ${fragment}`, async ({ page }) => {

@@ -41,7 +41,11 @@ OTP verification and Google exchange alike. Browser JSON contains only `user`;
 the refresh credential stays under `/api/auth-cookie`. Google exchange preserves
 the canonical `/auth/google/exchange` path so the one-time HttpOnly binder reaches
 Auth. Session hydration cannot invalidate an in-flight Google exchange or replace
-a newer login with an earlier response.
+a newer login with an earlier response. Before publishing the Google account or
+navigating away from the callback, the browser verifies the cookie-backed identity
+through same-origin `/api/auth/me` with no JavaScript Bearer token, refresh or
+retry. The returned id and role must match the exchange account. A raw Auth token
+response is rejected as a gateway routing error, not accepted as a browser session.
 
 Production TLS terminates at nginx. Public HTTPS `/auth/google/exchange` must
 reach the Next cookie proxy, and `/auth/callback` must render the Next page.
