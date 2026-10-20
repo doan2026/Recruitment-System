@@ -122,6 +122,30 @@ test("Google exchange cannot skip the one-time binder", async ({ page }) => {
   expect((await response.json()).code).toBe("INVALID_EXCHANGE");
 });
 
+test("Google callback confirms the real Next HttpOnly session before landing and survives reload", async ({ page, context }) => {
+  await context.addCookies([{ name: "oauth2_exchange_binder", value: "binder-fixture", domain: "127.0.0.1", path: "/auth/google/exchange", httpOnly: true }]);
+  // Only page content is mocked. Exchange, Set-Cookie, identity lookup and
+  // cookie-to-Bearer middleware all use the real Next server and Auth fixture.
+  await page.route("**/api/profile/" + account.id, route => route.fulfill({ json: { data: {
+    userId: account.id, fullName: "Cookie Candidate", completionPercent: 0, missingSections: [],
+    educations: [], experiences: [], skills: [], certificates: [], projects: [],
+  }, meta: null } }));
+  await page.route("**/api/notifications**", route => route.fulfill({ json: { data:
+    route.request().url().includes("unread-count") ? { unread_count: 0 } : [], meta: null } }));
+  await page.goto("/auth/callback#code=fixture-code&role=CANDIDATE");
+  await expect(page).toHaveURL(/\/candidate\/profile$/);
+  await expect(page.getByRole("heading", { name: "Hồ sơ cá nhân", exact: true })).toBeVisible();
+  expect(calls.filter(call => call.path === "/auth/google/exchange")).toHaveLength(1);
+  expect(calls.find(call => call.path === "/auth/me")).toMatchObject({ authorization: "Bearer access-fixture" });
+  expect((await context.cookies()).find(cookie => cookie.name === "careerhub_token")).toMatchObject({ httpOnly: true, path: "/" });
+  expect((await context.cookies()).find(cookie => cookie.name === "careerhub_refresh")).toMatchObject({ httpOnly: true, path: "/api/auth-cookie" });
+  expect(await page.evaluate(() => document.cookie)).not.toContain("careerhub_");
+  expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Hồ sơ cá nhân", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Đăng nhập để tiếp tục", exact: true })).toHaveCount(0);
+});
+
 
 for (const authenticated of [true, false]) {
   test(`same-origin chat WebSocket preserves gateway authentication: cookie ${authenticated}`, async ({ page, context }) => {

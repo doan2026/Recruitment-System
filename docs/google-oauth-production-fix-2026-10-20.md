@@ -71,25 +71,69 @@ có thể đặt `OPENSSL_BIN` nếu cài ở vị trí khác.
 
 ## Áp dụng lên server
 
-Bản sửa repo **chưa tự động được áp dụng lên server**. Chép file
-`infra/nginx/nginx.prod.conf` mới vào đường dẫn tương ứng của thư mục triển khai
-`/home/ubuntu/careerhub` (theo workflow hiện tại), rồi chạy trên server:
+Release `v1.0.9` (`56b4988`, chứa commit `91b69ea`) đã được workflow deploy báo
+thành công: https://github.com/vuongptit/Recruitment-System/actions/runs/39372046817.
+Tuy nhiên, lần kiểm tra domain sau đó vẫn nhận callback có
+`Cache-Control: s-maxage=31536000, stale-while-revalidate` và exchange lỗi có đủ
+`code/message/details`. Đây là dấu hiệu cấu hình đang phục vụ chưa dùng location
+mới. Chưa có SSH để xác định chắc chắn là mount/master nginx cũ hay domain đang
+trỏ tới instance khác; không thể kết luận chỉ từ trạng thái xanh của workflow.
+
+Trên server, xác nhận file `infra/nginx/nginx.prod.conf` đã chứa location exchange
+và map theo cổng của bản sửa, sau đó kiểm tra cấu hình từ mount mới:
 
 ```sh
 cd /home/ubuntu/careerhub
-docker compose -f docker-compose.prod.yml exec -T api-gateway nginx -t
-# Chỉ chạy reload khi kiểm tra cú pháp phía trên thành công.
-docker compose -f docker-compose.prod.yml exec -T api-gateway nginx -s reload
+docker compose -f docker-compose.prod.yml run --rm --no-deps -T api-gateway nginx -t
 ```
 
-Nếu thay file bằng công cụ tạo inode mới, bind mount file cũ có thể chưa đổi;
-khi đó recreate riêng gateway sau khi đã cập nhật file trên host:
+Nếu kiểm tra đạt, recreate riêng gateway để dùng file cấu hình trên host và master
+nginx mới. Thao tác này có thể làm gián đoạn web ngắn; không xóa volume hoặc DB:
 
 ```sh
 docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate api-gateway
+docker compose -f docker-compose.prod.yml exec -T api-gateway nginx -t
 ```
 
-Không cần build lại các image ứng dụng cho bản sửa định tuyến này. Sau khi áp
-dụng, bắt đầu đăng nhập Google mới từ đúng cổng Candidate/Recruiter; code cũ đã
+Riêng bản sửa nginx không cần build image ứng dụng. Phần bảo vệ frontend bổ sung
+bên dưới cần build và triển khai image frontend mới. Sau khi áp dụng, bắt đầu
+đăng nhập Google mới từ đúng cổng Candidate/Recruiter; code cũ đã
 đổi không thể dùng lại. Kiểm tra trang hồ sơ vẫn đăng nhập sau reload. Không gửi
 giá trị cookie/token hoặc OAuth code khi báo kết quả.
+
+## Kiểm tra hợp đồng token và cookie ở frontend
+
+- Spring `GoogleOAuthController` trả `AuthTokenResponse` gồm access/refresh token
+  và user cho chặng nội bộ. Auth vẫn là nơi duy nhất phát hành JWT.
+- Next route `/auth/google/exchange` gọi `proxyAuthCookie`, nhận token phía server
+  rồi trả JSON `{data:{user},meta:null}`. JavaScript không cần nhận JWT.
+- `careerhub_token`: HttpOnly, SameSite=Lax, Path=/, Secure khi HTTPS.
+- `careerhub_refresh`: HttpOnly, SameSite=Lax, Path=/api/auth-cookie, Secure khi
+  HTTPS. Refresh/logout đọc cookie phía server. Không lưu token ở localStorage
+  hoặc sessionStorage; tùy chọn nhớ email chỉ lưu email.
+- Request dùng `credentials: include`; Next middleware chuyển access cookie thành
+  Authorization nội bộ khi gọi `/api/*`.
+- Trước đây callback chỉ đọc được user là chuyển trang, kể cả response Auth trả
+  token trực tiếp vì gateway route sai. Nay `exchangeGoogle` từ chối response chứa
+  token; sau response user-only, nó gọi cùng origin `/api/auth/me` để xác nhận
+  cookie hoạt động và id/role khớp rồi mới tạo trạng thái đăng nhập và chuyển trang.
+- Không tự refresh hoặc gửi lại exchange code đã dùng. Cookie không dùng được,
+  account/role không khớp hoặc gateway route sai đều giữ callback và báo lỗi.
+
+Đây là kiểm tra bổ sung để không báo thành công giả. Nó không thay thế việc áp
+dụng cấu hình gateway đúng trên domain production. Chưa kiểm tra đăng nhập Google
+trực tiếp với tài khoản người dùng trên production trong lần audit này.
+
+### Kết quả kiểm tra bổ sung
+
+- `npm.cmd test`: **151/151 đạt**; `npm.cmd run typecheck`: đạt.
+- **54 ca trình duyệt đạt** trên desktop/mobile, gồm các ca callback Google và
+  cookie proxy. Test mới dùng Next thật, Auth fixture: exchange đúng một lần,
+  cookie HttpOnly, `/api/auth/me` qua middleware, vào hồ sơ và reload giữ phiên.
+- Các ca lỗi mới xác nhận không chuyển trang khi nhận raw token response, không
+  có cookie hợp lệ, sai account/role hoặc chưa xác nhận xong phiên.
+- Lượt chạy có bật `PRODUCTION_PROXY_TEST=1` không hoàn tất nhóm TLS: Docker
+  Desktop daemon không khả dụng (`dockerDesktopLinuxEngine` không tồn tại), khiến
+  setup TLS thất bại trên 2 project và 8 ca còn lại không chạy. Đây không phải kết
+  quả TLS đạt cho bản frontend mới; kết quả 28/28 phía trên thuộc lượt kiểm tra
+  nginx trước đó. Không tự bật toàn bộ stack Docker trong lần audit bổ sung.

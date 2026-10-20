@@ -58,6 +58,9 @@ export function person1Error(error: unknown): string {
       ACCOUNT_LINK_REQUIRED:
         "Email này đã có tài khoản. Hãy đăng nhập bằng mật khẩu.",
       GOOGLE_OAUTH_DISABLED: "Đăng nhập Google chưa được cấu hình.",
+      AUTH_COOKIE_PROXY_BYPASSED: "Đường dẫn đăng nhập Google chưa được cấu hình đúng trên máy chủ. Vui lòng liên hệ quản trị viên.",
+      GOOGLE_SESSION_NOT_ESTABLISHED: "Chưa xác nhận được phiên đăng nhập. Hãy cho phép cookie của trang web và bắt đầu đăng nhập Google lại.",
+      AUTH_SESSION_MISMATCH: "Phiên đăng nhập không khớp tài khoản Google vừa xác thực. Hãy bắt đầu đăng nhập lại.",
       GOOGLE_ROLE_MISMATCH: "Tài khoản Google này thuộc vai trò khác. Hãy dùng đúng trang đăng nhập của tài khoản.",
       CV_VERSION_CONFLICT:
         "CV đã thay đổi. Tải lại danh sách trước khi thao tác tiếp.",
@@ -106,7 +109,34 @@ export async function exchangeGoogle(
     method: "POST",
     body: { code, role },
   });
-  return establishSession(result.data);
+  // A misrouted gateway can return Auth's token envelope directly, bypassing
+  // Next's Set-Cookie response. Never treat that as a browser session.
+  if (result.data && ("accessToken" in result.data || "refreshToken" in result.data)) {
+    throw new ApiClientError({ code: "AUTH_COOKIE_PROXY_BYPASSED" });
+  }
+  if (!result.data?.user?.id || result.data.user.role !== role) {
+    throw new ApiClientError({ code: "INVALID_API_RESPONSE" });
+  }
+  // HttpOnly cookies cannot be read by JS. Confirm they work through the
+  // same-origin middleware before publishing identity or leaving the callback.
+  // Do not refresh or retry a consumed Google exchange code on failure.
+  let current: CurrentAccount;
+  try {
+    const verified = await requestApi<CurrentAccount>("/auth/me", {
+      ...publicAuth,
+      fetcher: (_url, options) => fetch("/api/auth/me", options),
+    });
+    current = verified.data;
+  } catch (error) {
+    if (error instanceof ApiClientError && error.status === 401) {
+      throw new ApiClientError({ code: "GOOGLE_SESSION_NOT_ESTABLISHED" });
+    }
+    throw error;
+  }
+  if (current?.id !== result.data.user.id || current.role !== result.data.user.role) {
+    throw new ApiClientError({ code: "AUTH_SESSION_MISMATCH" });
+  }
+  return establishSession({ user: current });
 }
 export const profileSectionLabels: Record<string, string> = {
   fullName: "Họ tên", headline: "Vị trí mong muốn", summary: "Giới thiệu",
