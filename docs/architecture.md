@@ -43,6 +43,14 @@ the canonical `/auth/google/exchange` path so the one-time HttpOnly binder reach
 Auth. Session hydration cannot invalidate an in-flight Google exchange or replace
 a newer login with an earlier response.
 
+Production TLS terminates at nginx. Public HTTPS `/auth/google/exchange` must
+reach the Next cookie proxy, and `/auth/callback` must render the Next page.
+The cookie proxy calls `http://api-gateway:8080/auth/google/exchange`; this
+unpublished internal listener must reach Auth directly. `google_exchange_upstream`
+selects Next for port 443 and Auth for the internal hop to prevent recursion.
+Google authorization/provider callback routes remain owned by Auth. See
+[production Google session fix](google-oauth-production-fix-2026-10-20.md).
+
 The gateway serves both `/applications` and `/applications/` directly. This avoids
 an nginx slash redirect cycling with Next.js trailing-slash canonicalization.
 
