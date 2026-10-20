@@ -160,7 +160,8 @@ trực tiếp với tài khoản người dùng trên production trong lần aud
 - Kiểm tra cuối: frontend, gateway và các HTTP backend có healthcheck đều healthy.
   Hai worker AI embedding đang restarting; không thuộc luồng đăng nhập đang kiểm
   thử, chưa xử lý hoặc xác nhận chức năng embedding trong lượt này.
-- Chưa tự thực hiện bước chọn tài khoản/chấp thuận tại Google bằng tài khoản thật.
-  Người dùng có thể thử tại `/login` hoặc `/recruiter/login` trên cổng 3000, rồi
-  reload trang sau khi đăng nhập. Kết quả local không xác nhận cấu hình trên domain
-  production đã được cập nhật.
+- Sau khi frontend mới chạy trên cổng 3000, người dùng đã trực tiếp thử đăng nhập
+  Google và xác nhận: **“Đăng nhập và reload vẫn giữ phiên”**. Đây là xác nhận
+  thủ công với Google thật trên localhost, bổ sung cho các kiểm tra tự động ở
+  trên; chưa có xác nhận riêng cho từng vai trò từ bước thủ công này.
+- Kết quả local không xác nhận cấu hình trên domain production đã được cập nhật.
