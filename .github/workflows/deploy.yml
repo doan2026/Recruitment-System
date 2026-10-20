@@ -108,11 +108,19 @@ jobs:
           echo "IMAGE_PREFIX=$IMAGE_PREFIX" >> .env
 
           docker compose -f docker-compose.prod.yml pull
+
+          # Kiểm tra cú pháp nginx bằng container tạm: sai thì dừng, gateway cũ vẫn chạy
+          docker compose -f docker-compose.prod.yml run --rm --no-deps api-gateway nginx -t
+
           docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
-          # Kiểm tra cú pháp rồi nạp lại cấu hình nginx (sai cú pháp thì workflow báo đỏ)
-          docker compose -f docker-compose.prod.yml exec -T api-gateway nginx -t
-          docker compose -f docker-compose.prod.yml exec -T api-gateway nginx -s reload
+          # Tạo lại gateway để chắc chắn đọc đúng file mới
+          docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate api-gateway
+
+          # Đối chiếu file trong container với file vừa chép lên server
+          HOST_SUM=\$(sha256sum infra/nginx/nginx.prod.conf | cut -d' ' -f1)
+          CONT_SUM=\$(docker compose -f docker-compose.prod.yml exec -T api-gateway sha256sum /etc/nginx/nginx.conf | cut -d' ' -f1)
+          [ "\$HOST_SUM" = "\$CONT_SUM" ] || { echo "nginx.conf trong container KHÁC file vừa chép"; exit 1; }
 
           docker image prune -af --filter "until=168h"
           docker compose -f docker-compose.prod.yml ps
