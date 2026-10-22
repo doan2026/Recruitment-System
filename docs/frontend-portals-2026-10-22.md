@@ -140,3 +140,8 @@ Local: `http://localhost:3000`, `http://localhost:3000/recruiter`,
   công ty giả vào database hiện tại. Công ty được Admin duyệt sẽ xuất hiện qua
   API sẵn có, tin tuyển dụng được duyệt và còn hạn sẽ hiện trên hồ sơ công ty.
 - Không thay source backend, cấu hình secret hoặc tạo commit.
+
+Sau lượt kiểm tra trên, đã bổ sung dữ liệu Demo theo yêu cầu: 10 công ty VERIFIED,
+10 tài khoản nhà tuyển dụng OWNER và 40 tin PUBLISHED còn hạn. Danh sách Công ty
+local hiện có dữ liệu để kiểm thử trực tiếp. Xem
+[bộ dữ liệu và tài khoản nhà tuyển dụng Demo](recruiter-demo-data.md).
