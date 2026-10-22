@@ -12,7 +12,7 @@ export default function CandidateSettingsPage() {
       <section className="card form-stack">
         <div className="section-head"><h2>Thông báo</h2></div>
         <p>Xem cập nhật về hồ sơ ứng tuyển và lịch phỏng vấn của bạn.</p>
-        <Link className="btn" href="/notifications">Xem thông báo</Link>
+        <Link className="btn" href="/candidate/notifications">Xem thông báo</Link>
         <p className="help">Tùy chỉnh nhận email chưa khả dụng.</p>
       </section>
       <section className="card form-stack">

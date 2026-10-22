@@ -8,6 +8,7 @@ import { requestApi, toUserMessage } from "@/lib/apiClientCore";
 import { sendChatMessage } from "@/lib/chatApi";
 import { useCurrentAccount } from "./SessionGate";
 import { EmptyState, ErrorState, LoadingState } from "./ui";
+import { portalSection } from "@/lib/portalRoutes";
 
 interface RoomCredentials {
   token: string;
@@ -67,7 +68,8 @@ export function VideoRoom({ callId }: { callId: string }) {
     finally { endingRef.current = false; if (mounted.current) setEnding(false); }
   }
 
-  const backHref = credentials?.call.conversation_id ? `/messages?chat=${encodeURIComponent(credentials.call.conversation_id)}` : "/messages";
+  const messagePath = portalSection(account?.role ?? "CANDIDATE", "messages");
+  const backHref = credentials?.call.conversation_id ? `${messagePath}?chat=${encodeURIComponent(credentials.call.conversation_id)}` : messagePath;
   return <section className="stack">
     {error && <ErrorState message={error} onRetry={!credentials ? () => setRevision(value => value + 1) : undefined} />}
     {!credentials && !error && <LoadingState label="Đang chuẩn bị cuộc gọi…" />}

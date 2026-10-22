@@ -46,7 +46,7 @@ export default function CandidateJobDetailPage({ params, searchParams }: {
     setChatting(true);
     try {
       const response = await createConversation(`Chat với ${job.ownerName}`, [job.createdBy], false);
-      router.push(`/messages?chat=${response.data.id}`);
+      router.push(`/candidate/messages?chat=${encodeURIComponent(response.data.id)}`);
     } catch (e) {
       setChatError("Không thể mở cuộc trò chuyện. " + toUserMessage(e));
     } finally {
@@ -90,7 +90,7 @@ export default function CandidateJobDetailPage({ params, searchParams }: {
   const canApply = job.status === "PUBLISHED" && job.deadline.slice(0, 10) >= new Date().toISOString().slice(0, 10);
   return (
     <main>
-      <PageHeader title={job.title} description={`${job.location} · ${job.level}`} action={<div className="btn-group"><Link className="btn" href="/candidate/jobs">Quay về danh sách</Link><Link className="btn btn-ghost" href={`/reports?type=JOB&id=${encodeURIComponent(job.id)}`}>Báo cáo tin tuyển dụng</Link></div>} />
+      <PageHeader title={job.title} description={`${job.location} · ${job.level}`} action={<div className="btn-group"><Link className="btn" href="/candidate/jobs">Quay về danh sách</Link><Link className="btn btn-ghost" href={`/candidate/reports?type=JOB&id=${encodeURIComponent(job.id)}`}>Báo cáo tin tuyển dụng</Link></div>} />
       <section className="grid-2">
         <section className="panel">
           <div className="section-head"><h2>Chi tiết công việc</h2><StatusBadge tone={canApply ? "success" : "warning"}>{jobStatusLabel(job.status)}</StatusBadge></div>
@@ -106,7 +106,7 @@ export default function CandidateJobDetailPage({ params, searchParams }: {
           <p><strong>Kỹ năng:</strong> {job.skills.join(", ")}</p>
           <p><strong>Hạn nộp:</strong> <time dateTime={job.deadline.slice(0, 10)}>{job.deadline.slice(0, 10).split("-").reverse().join("/")}</time></p>
           <div className="btn-group">
-            <Link className="btn" href={`/companies/${job.companyId}`}>Xem công ty</Link>
+            <Link className="btn" href={`/candidate/companies/${job.companyId}`}>Xem công ty</Link>
             {job.createdBy && account?.role === "CANDIDATE" && (
               <button className="btn" type="button" onClick={handleStartChat} disabled={chatting} aria-busy={chatting}>
                 {chatting ? "Đang tạo..." : "Chat ngay"}

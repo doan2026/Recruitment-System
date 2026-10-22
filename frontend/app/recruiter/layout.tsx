@@ -7,6 +7,6 @@ import { RecruiterShell } from "@/components/RecruiterShell";
 
 export default function PrivateLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  if (pathname === "/recruiter/login" || pathname === "/recruiter/register") return <>{children}</>;
+  if (pathname === "/recruiter" || pathname === "/recruiter/login" || pathname === "/recruiter/register") return <>{children}</>;
   return <RecruiterShell><SessionGate role="RECRUITER">{children}</SessionGate></RecruiterShell>;
 }

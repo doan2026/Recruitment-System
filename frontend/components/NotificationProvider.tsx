@@ -1,11 +1,12 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useCurrentAccount } from "./SessionGate";
 import { requestApi, toUserMessage } from "@/lib/apiClientCore";
 import { parseCallMessage, sendChatMessage } from "@/lib/chatApi";
 import { mergeNotifications, type InboxNotification } from "@/lib/notificationState";
+import { portalCall } from "@/lib/portalRoutes";
 export type Notification = InboxNotification;
 
 interface NotificationContextValue {
@@ -30,6 +31,10 @@ export function useNotifications() {
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const account = useCurrentAccount();
   const accountId = account?.id;
+  const pathname = usePathname();
+  const inboxVisible = useRef(false);
+  inboxVisible.current = /^\/(candidate|recruiter|admin)\/notifications$/.test(pathname);
+  const [inboxOwner, setInboxOwner] = useState(accountId);
   const identity = useRef(accountId);
   identity.current = accountId;
   const router = useRouter();
@@ -141,9 +146,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     setNotifications([]); setUnreadCount(0); setNextCursor(null); setIncomingCall(null); setError("");
     loadLock.current = false; mutationLock.current = false; callLock.current = false;
     setMarking(false); setCallPending(false); setLoading(false); setCallError("");
-    if (accountId) void refresh();
+    setInboxOwner(accountId);
+    if (accountId) void fetchUnreadCount();
     return () => { identity.current = undefined; ++countRevision.current; };
-  }, [accountId, refresh]);
+  }, [accountId, fetchUnreadCount]);
 
   useEffect(() => {
     if (!accountId) return;
@@ -193,7 +199,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         }
       } catch { /* Ignore malformed stream data; the inbox can always be refreshed. */ }
     });
-    source.addEventListener("connected", () => { void refresh(); });
+    source.addEventListener("connected", () => {
+      // Reconcile missed events after reconnect only when the inbox is open.
+      if (inboxVisible.current) void refresh();
+      else void fetchUnreadCount();
+    });
     const poll = setInterval(() => { if (document.visibilityState === "visible") void fetchUnreadCount(); }, 30000);
     return () => { active = false; source.close(); clearInterval(poll); window.removeEventListener("video_call_signal", handleCallSignal); };
   }, [accountId, isCurrent, fetchUnreadCount, refresh, recordUpdates]);
@@ -207,14 +217,17 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       try { await sendChatMessage(call.conversationId, `[CALL_${accept ? "ACCEPTED" : "REJECTED"}] ${call.callId}`, crypto.randomUUID()); } catch { /* Call authorization stays in Video service. */ }
       if (!isCurrent()) return;
       setIncomingCall(null);
-      if (accept) router.push(`/interviews/${encodeURIComponent(call.callId)}/room?chat=${encodeURIComponent(call.conversationId)}`);
+      if (accept) router.push(`${portalCall(account?.role ?? "CANDIDATE", call.callId)}?chat=${encodeURIComponent(call.conversationId)}`);
     } catch (failure) { if (isCurrent()) setCallError(toUserMessage(failure)); }
     finally { if (isCurrent()) { callLock.current = false; setCallPending(false); } }
   }
 
-  return <NotificationContext.Provider value={{ unreadCount, notifications, hasMore: !!nextCursor, loading, error, marking, refresh, loadMore, markAsRead, markAllAsRead }}>
+  // The provider survives navigation. Hide the previous owner's state in the
+  // render that precedes the identity-reset effect, including incoming calls.
+  const ownsInbox = !!accountId && inboxOwner === accountId;
+  return <NotificationContext.Provider value={{ unreadCount: ownsInbox ? unreadCount : 0, notifications: ownsInbox ? notifications : [], hasMore: ownsInbox && !!nextCursor, loading: ownsInbox ? loading : !!accountId, error: ownsInbox ? error : "", marking: ownsInbox && marking, refresh, loadMore, markAsRead, markAllAsRead }}>
     {children}
-    {incomingCall && <aside className="card stack" role="region" aria-label="Cuộc gọi đến" style={{ position: "fixed", bottom: 20, right: 20, width: "min(340px, calc(100vw - 40px))", zIndex: 9999 }}>
+    {ownsInbox && incomingCall && <aside className="card stack" role="region" aria-label="Cuộc gọi đến" style={{ position: "fixed", bottom: 20, right: 20, width: "min(340px, calc(100vw - 40px))", zIndex: 9999 }}>
       <strong>{incomingCall.title}</strong><p role="status">Bạn có lời mời tham gia cuộc gọi video.</p>
       {callError && <p className="form-error" role="alert">{callError}</p>}
       <div className="btn-group"><button className="btn" disabled={callPending} onClick={() => void respondToCall(false)}>Từ chối</button>

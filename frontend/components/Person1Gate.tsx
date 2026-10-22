@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { LoadingState } from "./ui";
 import { useCurrentAccount } from "./SessionGate";
+import { portalHome } from "../lib/portalRoutes";
 export function Person1Gate({
   children,
   role,
@@ -33,7 +34,7 @@ export function Person1Gate({
     return (
       <section className="card" role="alert">
         <h1>Bạn không có quyền truy cập</h1>
-        <Link href="/">Trang chủ</Link>
+        <Link className="btn btn-primary" href={portalHome(account.role)}>Về không gian của tôi</Link>
       </section>
     );
   return <>{children}</>;

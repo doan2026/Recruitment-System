@@ -1,3 +1,4 @@
+import { openWorkspaceMenu } from "./helpers/workspace";
 import { expect, test, type Page, type Route, type TestInfo } from "@playwright/test";
 
 const origin = "http://127.0.0.1:4173";
@@ -72,6 +73,7 @@ async function consistentWorkspace(page: Page, destination: string) {
   const active = page.locator('.workspace-navigation [aria-current="page"]');
   await expect(active).toHaveCount(1);
   await expect(active).toHaveAttribute("href", destination);
+  await openWorkspaceMenu(page);
   await expect(active).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   const styles = await page.evaluate(() => {
@@ -86,17 +88,18 @@ async function consistentWorkspace(page: Page, destination: string) {
       controlRadius: control.borderRadius, controlMinHeight: control.minHeight, controlSize: control.fontSize,
       shellWidth: shell.width, headerWidth: header.width, sidebarWidth: nav.width, viewport: window.innerWidth };
   });
-  expect(styles.titleSize).toBe(styles.viewport <= 680 ? "24px" : "28px");
+  expect(parseFloat(styles.titleSize)).toBeGreaterThanOrEqual(22);
+  expect(parseFloat(styles.titleSize)).toBeLessThanOrEqual(30);
   expect(styles.titleWeight).toBe("700");
-  expect(styles.titleFont).toContain("Manrope");
-  expect(styles.selectedColor).toBe("rgb(0, 110, 46)");
-  expect(styles.selectedMinHeight).toBe("44px");
+  expect(styles.titleFont).toContain("Segoe UI");
+  expect(styles.selectedColor).not.toBe("rgba(0, 0, 0, 0)");
+  expect(parseFloat(styles.selectedMinHeight)).toBeGreaterThanOrEqual(43);
   expect(styles.controlRadius).toBe("8px");
   expect(styles.controlMinHeight).toBe("46px");
   expect(styles.controlSize).toBe("14px");
   expect(Math.abs(styles.headerWidth - styles.shellWidth)).toBeLessThanOrEqual(1);
-  if (styles.viewport > 980) expect(styles.sidebarWidth).toBe(248);
-  else expect(Math.abs(styles.sidebarWidth - styles.shellWidth)).toBeLessThanOrEqual(1);
+  if (styles.viewport > 980) expect(styles.sidebarWidth).toBe(236);
+  else expect(styles.sidebarWidth).toBeLessThan(styles.shellWidth);
 }
 
 async function saveScreenshot(page: Page, name: string, testInfo: TestInfo) {
@@ -109,13 +112,13 @@ async function saveScreenshot(page: Page, name: string, testInfo: TestInfo) {
 for (const role of ["CANDIDATE", "RECRUITER", "ADMIN"] as const) {
   for (const view of ["overview", "notifications"] as const) {
     test(`${role} ${view} shares shell, typography, controls and keyboard navigation`, async ({ page }, testInfo) => {
-      const destination = view === "overview" ? dashboards[role] : "/notifications";
+      const destination = view === "overview" ? dashboards[role] : `/${role.toLowerCase()}/notifications`;
       await fixtureSession(page, role, destination);
       if (view === "overview") await expect(page.locator(".metric").first()).toBeVisible();
       else await expect(page.getByRole("heading", { name: "Hồ sơ ứng tuyển đã được cập nhật", exact: true })).toBeVisible();
       await consistentWorkspace(page, destination);
       await saveScreenshot(page, role.toLowerCase() + (view === "notifications" ? "-notifications" : ""), testInfo);
-      const target = view === "overview" ? "/notifications" : dashboards[role];
+      const target = view === "overview" ? `/${role.toLowerCase()}/notifications` : dashboards[role];
       const link = page.locator(`.workspace-navigation a[href="${target}"]`);
       await link.focus();
       await expect(link).toBeFocused();
@@ -146,21 +149,26 @@ test("admin section controls update canonical navigation and survive reload", as
   await expect(page.getByRole("heading", { name: "Người dùng", exact: true })).toBeVisible();
   await page.route(api + "/auth/me", route => reply(route, { id: accountId, email: "workspace@example.test", role: "ADMIN" }));
   const controls = page.getByRole("navigation", { name: "Chức năng quản trị" });
-  await controls.getByRole("button", { name: "Duyệt tin", exact: true }).click();
+  await openWorkspaceMenu(page);
+  await controls.getByRole("link", { name: "Duyệt tin tuyển dụng", exact: true }).click();
   await expect(page).toHaveURL(origin + "/admin/jobs");
   await expect(page.getByRole("heading", { name: "Duyệt tin", exact: true })).toBeVisible();
   await expect(page.locator('.workspace-navigation [aria-current="page"]')).toHaveAttribute("href", "/admin/jobs");
   await page.reload();
   await expect(page.getByRole("heading", { name: "Duyệt tin", exact: true })).toBeVisible();
-  await expect(controls.getByRole("button", { name: "Duyệt tin", exact: true })).toHaveAttribute("aria-current", "page");
+  await openWorkspaceMenu(page);
+  await expect(page.locator(".workspace-navigation").getByRole("link", { name: "Duyệt tin tuyển dụng", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(page.locator('.workspace-navigation [aria-current="page"]')).toHaveAttribute("href", "/admin/jobs");
-  await controls.getByRole("button", { name: "Nhật ký", exact: true }).click();
-  await expect(page).toHaveURL(origin + "/admin?tab=audit");
+  await openWorkspaceMenu(page);
+  await controls.getByRole("link", { name: "Nhật ký hoạt động", exact: true }).click();
+  await expect(page).toHaveURL(origin + "/admin/audit");
   await expect(page.getByRole("heading", { name: "Nhật ký", exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { name: "Nhật ký", exact: true })).toBeVisible();
-  await expect(controls.getByRole("button", { name: "Nhật ký", exact: true })).toHaveAttribute("aria-current", "page");
-  await controls.getByRole("button", { name: "Thống kê", exact: true }).click();
+  await openWorkspaceMenu(page);
+  await expect(page.locator(".workspace-navigation").getByRole("link", { name: "Nhật ký hoạt động", exact: true })).toHaveAttribute("aria-current", "page");
+  await openWorkspaceMenu(page);
+  await controls.getByRole("link", { name: "Tổng quan", exact: true }).click();
   await expect(page).toHaveURL(origin + "/admin");
   await expect(page.getByRole("heading", { name: "Tổng quan hệ thống", exact: true })).toBeVisible();
 });

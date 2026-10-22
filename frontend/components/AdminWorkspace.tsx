@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
 import { requestApi } from "../lib/apiClient";
 import { person1Error, saveBlob } from "../lib/person1Api";
 import { ConfirmationDialog } from "./ConfirmationDialog";
@@ -16,14 +15,6 @@ const labels: Record<Tab, string> = {
   reports: "Báo cáo vi phạm",
   audit: "Nhật ký",
 };
-const tabRoutes: Record<Tab, string> = {
-  stats: "/admin",
-  companies: "/admin/companies",
-  jobs: "/admin/jobs",
-  users: "/admin/users",
-  reports: "/admin/reports",
-  audit: "/admin?tab=audit",
-};
 const metricNames: Record<string, string> = {
   JOBS_PUBLISHED: "Tin đã đăng",
   APPLIED: "Đơn ứng tuyển",
@@ -36,7 +27,6 @@ const reportStatusLabels: Record<string, string> = { OPEN: "Mới gửi", PROCES
 const targetLabels: Record<string, string> = { JOB: "Tin tuyển dụng", COMPANY: "Công ty", USER: "Tài khoản" };
 const today = () => new Date().toISOString().slice(0, 10);
 export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
-  const router = useRouter();
   const tab = initialTab;
   const [rows, setRows] = useState<Row[]>([]);
   const [overview, setOverview] = useState<{
@@ -187,24 +177,7 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
       <PageHeader eyebrow="QUẢN TRỊ" title={tab === "stats" ? "Tổng quan hệ thống" : labels[tab]}
         description={tab === "stats" ? "Theo dõi số liệu tuyển dụng và tỷ lệ chuyển đổi trong khoảng thời gian bạn chọn." : "Xem thông tin, kiểm tra nội dung và xử lý yêu cầu trong hệ thống."}
         action={<button className="btn" disabled={loading || pending} onClick={() => setReload((n) => n + 1)}>Tải lại dữ liệu</button>} />
-      <nav className="admin-workspace-tabs" aria-label="Chức năng quản trị">
-        {(Object.keys(labels) as Tab[]).map((key) => (
-          <button
-            className={"btn" + (tab === key ? " btn-primary" : "")}
-            aria-current={tab === key ? "page" : undefined}
-            key={key}
-            disabled={pending}
-            onClick={() => {
-              setPage(1);
-              setNotice("");
-              setReason("");
-              router.push(tabRoutes[key]);
-            }}
-          >
-            <span>{labels[key]}</span>
-          </button>
-        ))}
-      </nav>
+
       {tab === "stats" ? (
         <>
         <section className="panel form-stack">

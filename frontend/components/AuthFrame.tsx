@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { Logo } from "./Logo";
 import styles from "./AuthFrame.module.css";
+import { portalEntry } from "@/lib/portalRoutes";
 
 type AuthPortal = "CANDIDATE" | "RECRUITER" | "ADMIN";
 const portals = {
@@ -28,8 +29,8 @@ export function AuthFrame({ portal = "CANDIDATE", title, description, children }
   const context = portals[portal];
   return <main className={styles.frame} data-auth-frame={portal.toLowerCase()}>
     <header className={styles.header}>
-      <Link className={styles.brand} href="/" aria-label="CareerHub - Trang chủ"><Logo size={36} /><span>CareerHub</span></Link>
-      <Link className={styles.explore} href="/candidate/jobs">Khám phá việc làm <span aria-hidden="true">↗</span></Link>
+      <Link className={styles.brand} href={portalEntry(portal)} aria-label="CareerHub - Trang chủ"><Logo size={36} /><span>CareerHub</span></Link>
+      <Link className={styles.explore} href={portal === "CANDIDATE" ? "/candidate/jobs" : portalEntry(portal)}>{portal === "CANDIDATE" ? "Khám phá việc làm" : portal === "RECRUITER" ? "Trang chủ tuyển dụng" : "Khu vực quản trị"} <span aria-hidden="true">↗</span></Link>
     </header>
     <div className={styles.layout}>
       <aside className={styles.context}>
@@ -40,14 +41,12 @@ export function AuthFrame({ portal = "CANDIDATE", title, description, children }
         <div className={styles.contextFooter}>Kết nối cơ hội. Phát triển sự nghiệp.</div>
       </aside>
       <section className={styles.card}>
-        <nav className={styles.portals} aria-label="Chọn khu vực đăng nhập">
-          {(Object.keys(portals) as AuthPortal[]).map(key => <Link key={key} href={portals[key].href} aria-current={key === portal ? "page" : undefined}>{portals[key].label}</Link>)}
-        </nav>
+        <div className={styles.portalBadge}>{context.label}</div>
         <header className={styles.heading}><h1>{title}</h1><p>{description}</p></header>
         <div className={styles.content}>{children}</div>
       </section>
     </div>
-    <footer className={styles.footer}><span>© 2026 CareerHub</span><Link href="/companies">Khám phá công ty</Link></footer>
+    <footer className={styles.footer}><span>© 2026 CareerHub</span><span>{portal === "CANDIDATE" ? "Cơ hội phù hợp. Tương lai rộng mở." : portal === "RECRUITER" ? "Kết nối nhân tài. Xây dựng đội ngũ." : "Không gian vận hành hệ thống"}</span></footer>
   </main>;
 }
 

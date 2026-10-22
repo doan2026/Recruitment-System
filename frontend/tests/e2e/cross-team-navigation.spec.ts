@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { openWorkspaceMenu } from "./helpers/workspace";
 
 const accountId = "1795c0de-7908-4ab5-9bed-4c4f1cf9c211";
 const targetId = "2795c0de-7908-4ab5-9bed-4c4f1cf9c211";
@@ -35,18 +36,20 @@ test("Recruiter access recovery keeps invitation context and navigation", async 
   await page.goto("/recruiter/invitations/accept?source=invitation");
   await expect(page.getByRole("heading", { name: "Đăng nhập để tiếp tục" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Đăng nhập", exact: true }).last()).toHaveAttribute("href", "/recruiter/login?returnTo=%2Frecruiter%2Finvitations%2Faccept%3Fsource%3Dinvitation");
-  await expect(page.getByRole("navigation", { name: "Điều hướng chính" })).toBeVisible();
+  await expect(page.locator(".workspace-header")).toBeVisible();
   await noPageOverflow(page);
 });
 
 test("Candidate messages and notifications keep one consistent workspace", async ({ page }, info) => {
   await session(page, "CANDIDATE");
   await page.goto("/messages");
+  await openWorkspaceMenu(page);
   await expect(page.getByRole("navigation", { name: "Khu vực ứng viên" })).toHaveCount(1);
   await expect(page.locator(".candidate-workspace")).toHaveCount(1);
-  await expect(page.locator('nav[aria-label="Khu vực ứng viên"] a[href="/messages"]')).toHaveAttribute("aria-current", "page");
+  await expect(page.locator('nav[aria-label="Khu vực ứng viên"] a[href="/candidate/messages"]')).toHaveAttribute("aria-current", "page");
   await noPageOverflow(page);
-  await page.locator('nav[aria-label="Khu vực ứng viên"] a[href="/notifications"]').click();
+  await openWorkspaceMenu(page);
+  await page.locator('nav[aria-label="Khu vực ứng viên"] a[href="/candidate/notifications"]').click();
   await expect(page.getByRole("heading", { name: "Thông báo", exact: true })).toBeVisible();
   await expect(page.locator(".candidate-workspace")).toHaveCount(1);
   await noPageOverflow(page);
@@ -74,6 +77,7 @@ test("Recruiter notifications use a responsive sidebar with an active destinatio
   await session(page, "RECRUITER");
   await page.goto("/notifications");
   await expect(page.getByRole("heading", { name: "Thông báo", exact: true })).toBeVisible();
+  await openWorkspaceMenu(page);
   const nav = page.getByRole("navigation", { name: "Khu vực nhà tuyển dụng" });
   await expect(nav.getByRole("link", { name: "Thông báo", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(page.locator(".candidate-sidebar")).toHaveCount(0);
@@ -86,16 +90,17 @@ test("Homepage directs visitors into job discovery and the recruiter portal", as
   await session(page);
   await page.route(api + "/jobs**", r => reply(r, [], 200));
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("Cơ hội mới");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Công việc phù hợp");
   await noPageOverflow(page);
   await page.evaluate(() => document.fonts.ready);
   await page.screenshot({ path: `/tmp/recruitment-ui-after-home-${info.project.name}.png`, fullPage: true });
-  await page.getByRole("link", { name: "Tìm việc ngay", exact: true }).click();
+  await page.getByRole("button", { name: "Tìm việc", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Việc làm công khai" })).toBeVisible();
   await expect(page.locator(".workspace-sidebar")).toHaveCount(0);
   await page.getByRole("link", { name: "CareerHub - Trang chủ" }).click();
-  await page.getByRole("main").getByRole("link", { name: "Dành cho nhà tuyển dụng", exact: true }).click();
-  await expect(page).toHaveURL(/\/recruiter\/login$/);
+  await page.locator(".public-footer").getByRole("link", { name: "Nhà tuyển dụng", exact: true }).click();
+  await expect(page).toHaveURL(/\/recruiter$/);
+  await page.locator('header').getByRole("link", { name: "Đăng nhập", exact: true }).click();
   await expect(page.getByLabel("Email công việc", { exact: true })).toBeVisible();
   await noPageOverflow(page);
 });
@@ -103,13 +108,15 @@ test("Homepage directs visitors into job discovery and the recruiter portal", as
 test("Candidate can reach general reporting from the workspace on every viewport", async ({ page }) => {
   await session(page, "CANDIDATE");
   await page.goto("/notifications");
+  await openWorkspaceMenu(page);
   const nav = page.getByRole("navigation", { name: "Khu vực ứng viên" });
   const report = nav.getByRole("link", { name: "Báo cáo vi phạm", exact: true });
   await report.focus();
   await expect(report).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\/reports$/);
+  await expect(page).toHaveURL(/\/candidate\/reports$/);
   await expect(page.getByRole("heading", { name: "Báo cáo vi phạm", exact: true })).toBeVisible();
+  await openWorkspaceMenu(page);
   await expect(nav.getByRole("link", { name: "Báo cáo vi phạm", exact: true })).toHaveAttribute("aria-current", "page");
   await noPageOverflow(page);
 });

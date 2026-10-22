@@ -471,6 +471,7 @@ export async function getCompany() {
 }
 
 export async function getPublicJobs(search: {
+  companyId?: string;
   q?: string;
   location?: string;
   salaryMin?: number;
@@ -490,6 +491,7 @@ export async function getPublicJobs(search: {
 
   const list = jobs
     .filter((item) => item.status === "PUBLISHED")
+    .filter((item) => !search.companyId || item.companyId === search.companyId)
     .filter((item) => {
       const matchKeyword =
         item.title.toLowerCase().includes(keyword) ||

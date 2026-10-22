@@ -8,11 +8,13 @@ import { EmptyState, ErrorState, LoadingState, Metric, PageHeader, StatusBadge }
 import { ApiClientError, toUserMessage } from "../../../lib/apiClient";
 import { activeJobsMetricView, dashboardWarningView } from "../../../lib/applicationDegradedStates";
 import { getCompany, getRecruiterDashboard, type RecruiterDashboard } from "../../../lib/person2Api";
+import { ArrowRight, BriefcaseBusiness, Files, Building2 } from "lucide-react";
 
 export default function RecruiterDashboardPage() {
   const [dashboard, setDashboard] = useState<RecruiterDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [needsCompany, setNeedsCompany] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -20,6 +22,7 @@ export default function RecruiterDashboardPage() {
     const controller = new AbortController();
     setLoading(true);
     setError("");
+    setNeedsCompany(false);
     getCompany(controller.signal)
       .then((company) => getRecruiterDashboard(company.data.id, controller.signal))
       .then((response) => {
@@ -27,7 +30,8 @@ export default function RecruiterDashboardPage() {
       })
       .catch((reason: unknown) => {
         if (active && !(reason instanceof ApiClientError && reason.code === "REQUEST_CANCELLED")) {
-          setError(toUserMessage(reason));
+          if (reason instanceof ApiClientError && reason.code === "COMPANY_NOT_FOUND") setNeedsCompany(true);
+          else setError(toUserMessage(reason));
         }
       })
       .finally(() => {
@@ -47,8 +51,10 @@ export default function RecruiterDashboardPage() {
         eyebrow="TỔNG QUAN TUYỂN DỤNG"
         title="Sức khỏe tuyển dụng"
         description="Theo dõi hiệu quả tuyển dụng, số lượng hồ sơ và tiến trình của từng vị trí."
-        action={<Link className="btn" href="/recruiter/jobs">Quản lý tin</Link>}
+        action={<Link className="btn btn-primary" href="/recruiter/jobs/new">Đăng tin tuyển dụng <ArrowRight size={16} /></Link>}
       />
+      <div className="dashboard-quick-links"><Link href="/recruiter/jobs"><BriefcaseBusiness size={19} />Quản lý tin<ArrowRight size={16} /></Link><Link href="/recruiter/applications"><Files size={19} />Hồ sơ ứng tuyển<ArrowRight size={16} /></Link><Link href="/recruiter/company"><Building2 size={19} />Hồ sơ công ty<ArrowRight size={16} /></Link></div>
+      {needsCompany && <section className="dashboard-welcome"><div><h2>Chào mừng đến không gian tuyển dụng</h2><p>Bắt đầu bằng hồ sơ công ty để đăng tin và kết nối với ứng viên.</p></div><Link className="btn btn-primary" href="/recruiter/company/new">Tạo hồ sơ công ty <ArrowRight size={16} /></Link></section>}
       {error ? <ErrorState message={error} onRetry={() => setReloadKey((value) => value + 1)} /> : null}
       {loading ? <LoadingState label="Đang tổng hợp số liệu tuyển dụng" /> : null}
       {dashboard ? (

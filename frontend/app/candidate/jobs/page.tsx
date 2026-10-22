@@ -65,12 +65,14 @@ function RecommendationCard({
   );
 }
 
-export default function CandidateJobsPage() {
+export default function CandidateJobsPage({ searchParams = {} }: { searchParams?: { q?: string; location?: string } }) {
   const account = useCurrentAccount();
   const canRecommend = isDemoPerson2Api || account?.role === "CANDIDATE";
   const [recommendationFallback, setRecommendationFallback] = useState<FallbackReason | undefined>();
-  const [form, setForm] = useState<PublicJobSearchForm>(emptyPublicJobSearchForm);
-  const [filters, setFilters] = useState<PublicJobSearchFilters>(() => normalizePublicJobSearch(emptyPublicJobSearchForm));
+  const [form, setForm] = useState<PublicJobSearchForm>(() => ({ ...emptyPublicJobSearchForm,
+    q: typeof searchParams.q === "string" ? searchParams.q.slice(0, 200) : "",
+    location: typeof searchParams.location === "string" ? searchParams.location.slice(0, 255) : "" }));
+  const [filters, setFilters] = useState<PublicJobSearchFilters>(() => normalizePublicJobSearch(form));
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [mode, setMode] = useState<SearchMode>("OFFSET");
   const [page, setPage] = useState(1);

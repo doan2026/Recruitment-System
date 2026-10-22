@@ -1,3 +1,5 @@
+import { portalSection } from "./portalRoutes";
+
 export interface InboxNotification {
   id: string;
   type: string;
@@ -17,7 +19,7 @@ export function mergeNotifications(current: InboxNotification[], incoming: Inbox
 export function notificationDestination(notification: InboxNotification, role: string): string | null {
   const metadata = notification.metadata;
   const conversationId = metadata?.conversation_id;
-  if (typeof conversationId === "string" && conversationId) return `/messages?chat=${encodeURIComponent(conversationId)}`;
+  if (typeof conversationId === "string" && conversationId && (role === "CANDIDATE" || role === "RECRUITER")) return `${portalSection(role, "messages")}?chat=${encodeURIComponent(conversationId)}`;
   if (notification.type.toLowerCase().includes("interview") && role === "CANDIDATE") return "/candidate/interviews";
   const applicationId = metadata?.application_id;
   if (typeof applicationId === "string" && applicationId && ["CANDIDATE", "RECRUITER"].includes(role)) {

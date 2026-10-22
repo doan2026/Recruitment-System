@@ -5,14 +5,14 @@ import { LayoutDashboard, BriefcaseBusiness, Files, UsersRound, Building2, MailP
 import { useCurrentAccount } from "./SessionGate";
 import { WorkspaceShell, type WorkspaceLink } from "./WorkspaceShell";
 const links: WorkspaceLink[] = [
-  { href: "/recruiter/dashboard", label: "Tổng quan", icon: LayoutDashboard },
+  { href: "/recruiter/dashboard", label: "Trang chủ", icon: LayoutDashboard },
   { href: "/recruiter/jobs", label: "Quản lý tin tuyển dụng", icon: BriefcaseBusiness },
   { href: "/recruiter/applications", label: "Hồ sơ ứng tuyển", icon: Files },
   { href: "/recruiter/candidate-recommendations", label: "Ứng viên gợi ý", icon: UsersRound },
   { href: "/recruiter/company", label: "Hồ sơ công ty", icon: Building2 },
   { href: "/recruiter/invitations/accept", label: "Nhận lời mời", icon: MailPlus },
-  { href: "/messages", label: "Tin nhắn", icon: MessageSquare },
-  { href: "/notifications", label: "Thông báo", icon: Bell },
+  { href: "/recruiter/messages", label: "Tin nhắn", icon: MessageSquare },
+  { href: "/recruiter/notifications", label: "Thông báo", icon: Bell },
 ];
 export function RecruiterShell({ children }: { children: ReactNode }) {
   const account = useCurrentAccount();

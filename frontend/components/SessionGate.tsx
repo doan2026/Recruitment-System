@@ -5,7 +5,8 @@ import { usePathname } from "next/navigation";
 import { type ReactNode, useSyncExternalStore } from "react";
 import { subscribeToApiSession } from "../lib/apiClient";
 import { getCurrentAccount, type CurrentAccount } from "../lib/authSession";
-import { isDemoPerson2Api } from "../lib/person2Api";
+import { isDemoPerson2Api } from "../lib/apiMode";
+import { portalHome } from "../lib/portalRoutes";
 import { loginRoute } from "../lib/person1Api";
 import { LoadingState } from "./ui";
 
@@ -16,7 +17,7 @@ export function useCurrentAccount(): CurrentAccount | null | undefined {
 export function SessionGate({ children, role, publicJobRoutes = false }: { children: ReactNode; role: CurrentAccount["role"]; publicJobRoutes?: boolean }) {
   const account = useCurrentAccount();
   const pathname = usePathname();
-  if (publicJobRoutes && /^\/candidate\/jobs(?:\/[^/]+)?$/.test(pathname)) return <>{children}</>;
+  if (publicJobRoutes && /^\/candidate\/(?:jobs|companies)(?:\/[^/]+)?$/.test(pathname) && (account === null || account?.role === role)) return <>{children}</>;
   if (role === "RECRUITER" && (pathname === "/recruiter/login" || pathname === "/recruiter/register")) return <>{children}</>;
   if (isDemoPerson2Api) return <>{children}</>;
   if (account === undefined) return (
@@ -33,7 +34,7 @@ export function SessionGate({ children, role, publicJobRoutes = false }: { child
     <section className="card empty-state" role="alert">
       <h1>Bạn không có quyền truy cập</h1>
       <p>Trang này dành cho {role === "ADMIN" ? "quản trị viên" : role === "RECRUITER" ? "nhà tuyển dụng" : "ứng viên"}.</p>
-      <Link className="btn" href="/candidate/jobs">Xem việc làm công khai</Link>
+      <Link className="btn btn-primary" href={portalHome(account.role)}>Về không gian của tôi</Link>
     </section>
   );
   return <>{children}</>;

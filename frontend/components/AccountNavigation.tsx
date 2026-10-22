@@ -3,34 +3,33 @@
 import Link from "next/link";
 import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, MessageSquare } from "lucide-react";
+import { Bell, MessageSquare, LogOut, Plus, ArrowUpRight } from "lucide-react";
 import { useCurrentAccount } from "./SessionGate";
 import { signOut } from "../lib/authSession";
-import { isDemoPerson2Api } from "../lib/person2Api";
-import { loginRoute } from "../lib/person1Api";
+import { portalHome, portalLabel, portalSection, type AccountRole } from "../lib/portalRoutes";
 import { useNotifications } from "./NotificationProvider";
 
-const publicLinks = [
-  { label: "Trang chủ", href: "/" }, { label: "Việc làm", href: "/candidate/jobs" },
-  { label: "Doanh nghiệp", href: "/companies" },
-];
 export function NotificationBell() {
+  const account = useCurrentAccount();
   const { unreadCount } = useNotifications();
-  return <Link href="/notifications" aria-label={unreadCount > 0 ? `Thông báo, ${unreadCount} chưa đọc` : "Thông báo"} title="Thông báo" className="notification-bell">
+  return <Link prefetch={false} href={portalSection(account?.role ?? "CANDIDATE", "notifications")} aria-label={unreadCount > 0 ? `Thông báo, ${unreadCount} chưa đọc` : "Thông báo"} title="Thông báo" className="notification-bell">
     <Bell size={20} strokeWidth={1.7} aria-hidden="true" />
     {unreadCount > 0 && <span className="notification-count">{unreadCount > 99 ? "99+" : unreadCount}</span>}
   </Link>;
 }
-export function AccountNavigation({ workspace = false }: { workspace?: boolean }) {
+
+export function AccountNavigation({ workspace = false, portal = "CANDIDATE" }: { workspace?: boolean; portal?: AccountRole }) {
   const account = useCurrentAccount();
   const pathname = usePathname();
   const router = useRouter();
   const [pending, setPending] = useState(false);
-  const home = account?.role === "RECRUITER" ? "/recruiter/dashboard" : account?.role === "ADMIN" ? "/admin" : "/candidate/dashboard";
-  const links = [...publicLinks, ...(!workspace && account ? [{ label: "Không gian của tôi", href: home }] : [])];
+  const role = account?.role ?? portal;
+  const links = workspace ? [{ label: "Trang chủ", href: portalHome(role) }, ...(role === "CANDIDATE" ? [{ label: "Công ty", href: "/candidate/companies" }] : [])]
+    : portal === "RECRUITER" ? [{ label: "Trang chủ", href: "/recruiter" }, { label: "Giải pháp tuyển dụng", href: "/recruiter#solutions" }, { label: "Quy trình", href: "/recruiter#how-it-works" }]
+      : [{ label: "Trang chủ", href: "/" }, { label: "Tìm việc làm", href: "/candidate/jobs" }, { label: "Công ty", href: account?.role === "CANDIDATE" ? "/candidate/companies" : "/companies" }];
   async function logout() {
     if (pending) return;
-    const destination = loginRoute(account?.role ?? "CANDIDATE");
+    const destination = role === "ADMIN" ? "/admin/login" : role === "RECRUITER" ? "/recruiter/login" : "/login";
     setPending(true);
     try { await signOut(); router.replace(destination); }
     catch { router.replace(destination + "?logout=unconfirmed"); }
@@ -38,11 +37,22 @@ export function AccountNavigation({ workspace = false }: { workspace?: boolean }
   }
   return <>
     <nav className="top-nav" aria-label="Điều hướng chính">
-      {links.map(item => <Link key={item.href} href={item.href} aria-current={pathname === item.href ? "page" : undefined}>{item.label}</Link>)}
+      {account === undefined ? <span className="account-skeleton" aria-hidden="true" /> : links.map(item => <Link prefetch={false} key={item.href} href={item.href} aria-current={pathname === item.href || (item.href.endsWith("/companies") && pathname.startsWith(item.href + "/")) ? "page" : undefined}>{item.label}</Link>)}
     </nav>
     <div className="profile-chip">
-      {account && <><NotificationBell />{account.role !== "ADMIN" && <Link className="notification-bell" href="/messages" aria-label="Tin nhắn" title="Tin nhắn"><MessageSquare size={20} strokeWidth={1.7} aria-hidden="true" /></Link>}</>}
-      {isDemoPerson2Api ? <span className="badge badge-info">Chế độ demo</span> : account ? <button className="btn" type="button" disabled={pending} onClick={() => void logout()}>{pending ? "Đang thoát…" : "Đăng xuất"}</button> : <><Link className="btn btn-ghost recruiter-entry" href="/recruiter/login">Nhà tuyển dụng</Link><Link className="btn btn-primary" href="/login">Đăng nhập</Link></>}
+      {account === undefined ? <span className="account-skeleton" aria-label="Đang kiểm tra tài khoản" /> : account ? <>
+        {role === "RECRUITER" && <Link className="btn btn-primary header-create-job" href="/recruiter/jobs/new"><Plus size={17} aria-hidden="true" />Đăng tin</Link>}
+        <NotificationBell />
+        {role !== "ADMIN" && <Link prefetch={false} className="notification-bell" href={portalSection(role, "messages")} aria-label="Tin nhắn" title="Tin nhắn"><MessageSquare size={20} strokeWidth={1.7} aria-hidden="true" /></Link>}
+        <Link prefetch={false} className="account-identity" href={role === "CANDIDATE" ? "/candidate/profile" : role === "RECRUITER" ? "/recruiter/company" : "/admin"} title={account.email}>
+          <span className="account-avatar" aria-hidden="true">{account.email.slice(0, 1).toUpperCase()}</span><span className="account-copy"><strong>{account.email.split("@")[0]}</strong><small>{portalLabel(role)}</small></span>
+        </Link>
+        <button className="notification-bell logout-button" type="button" disabled={pending} onClick={() => void logout()} aria-label={pending ? "Đang thoát…" : "Đăng xuất"} title="Đăng xuất"><LogOut size={19} aria-hidden="true" /></button>
+      </> : <>
+        {portal === "CANDIDATE" && <Link prefetch={false} className="recruiter-entry portal-switch" href="/recruiter">Nhà tuyển dụng <ArrowUpRight size={14} aria-hidden="true" /></Link>}
+        <Link className="btn btn-ghost" href={portal === "RECRUITER" ? "/recruiter/login" : portal === "ADMIN" ? "/admin/login" : "/login"}>Đăng nhập</Link>
+        {portal !== "ADMIN" && <Link className="btn btn-primary" href={portal === "RECRUITER" ? "/recruiter/register" : "/register"}>Đăng ký</Link>}
+      </>}
     </div>
   </>;
 }

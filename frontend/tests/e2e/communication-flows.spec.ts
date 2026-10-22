@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { scopedDestination } from "../../lib/portalRoutes";
 
 const api = "http://127.0.0.1:4173/api";
 const userId = "1795c0de-7908-4ab5-9bed-4c4f1cf9c211";
@@ -13,13 +14,19 @@ async function session(page: Page, destination: string) {
       constructor(_url: string) { super(); (window as any).__notificationStream = this; }
       close() {}
     }
-    class TestWebSocket {
+    const NativeWebSocket = window.WebSocket;
+    class TestWebSocket extends EventTarget {
+      static OPEN = 1;
       readyState = 1;
       onopen: (() => void) | null = null;
       onmessage: ((event: MessageEvent) => void) | null = null;
       onerror: (() => void) | null = null;
       onclose: (() => void) | null = null;
-      constructor(_url: string) { (window as any).__chatSocket = this; }
+      constructor(url: string | URL) {
+        super();
+        if (!String(url).includes("/api/chat/ws/chat")) return new NativeWebSocket(url) as unknown as TestWebSocket;
+        (window as any).__chatSocket = this;
+      }
       close() {}
     }
     (window as any).EventSource = TestEventSource;
@@ -34,7 +41,8 @@ async function session(page: Page, destination: string) {
   await page.getByLabel("Email", { exact: true }).fill("chat@example.test");
   await page.getByLabel("Mật khẩu", { exact: true }).fill("ChatFixturePassword123");
   await page.getByRole("button", { name: "Đăng nhập", exact: true }).click();
-  await expect(page).toHaveURL("http://127.0.0.1:4173" + destination);
+  const target = new URL(destination, "http://127.0.0.1:4173");
+  await expect(page).toHaveURL("http://127.0.0.1:4173" + scopedDestination("CANDIDATE", target.pathname) + target.search);
 }
 
 async function conversations(page: Page) {
@@ -117,7 +125,8 @@ test("communication routes show a login recovery instead of a blank page", async
   await page.route(api + "/auth-cookie/refresh", route => reply(route, { code: "AUTH_INVALID" }, 401));
   for (const path of ["/messages", "/notifications", `/interviews/${firstId}/room`]) {
     await page.goto(path);
-    await expect(page.getByRole("heading", { name: "Đăng nhập để tiếp tục" })).toBeVisible();
+    await expect(page).toHaveURL(/\/login\?returnTo=/);
+    await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
   }
 });
 

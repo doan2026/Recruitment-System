@@ -263,7 +263,7 @@ export function RecruiterApplicationPipeline({ jobId }: { jobId?: string }) {
     setChattingId(application.id);
     try {
       const response = await createConversation(`Chat với ${application.candidateName}`, [application.candidateId], false);
-      router.push(`/messages?chat=${response.data.id}`);
+      router.push(`/recruiter/messages?chat=${encodeURIComponent(response.data.id)}`);
     } catch (error) {
       setActionError("Không thể mở cuộc trò chuyện. " + toUserMessage(error));
     } finally {

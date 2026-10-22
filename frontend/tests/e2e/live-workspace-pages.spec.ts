@@ -68,6 +68,7 @@ test("CV detail reads owned metadata and refuses a non-HTTPS download URL", asyn
 
 test("Legacy CV creation opens the functional builder", async ({ page }) => {
   await login(page, "CANDIDATE", "/candidate/profile");
+  await page.route(api + "/auth/me", r => reply(r, { id: userId, email: "fixture@example.test", role: "CANDIDATE" }));
   await page.goto("/candidate/cvs/new");
   await expect(page).toHaveURL(/\/candidate\/profile\/cvs\/builder$/);
 });

@@ -23,8 +23,8 @@ for (const role of ["RECRUITER", "ADMIN"] as const) {
         else await reply(route, { code: "AUTH_LOGOUT_FAILED" }, status);
       });
       await page.goto("/candidate/jobs");
-      await expect(page.locator(".public-shell")).toBeVisible();
-      await expect(page.locator(".workspace-shell")).toHaveCount(0);
+      await expect(page.locator(".workspace-shell")).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Bạn không có quyền truy cập", exact: true })).toBeVisible();
       try {
         await page.getByRole("button", { name: "Đăng xuất", exact: true }).click();
         // signOut clears local identity before the response, remounting this public route.

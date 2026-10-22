@@ -152,3 +152,27 @@ over WebSocket and Notification pushes inbox updates over SSE. Redis supports Au
 OTP/OAuth/session data and the services' configured cache/queue mechanisms; Go Chat
 does not use the former Socket.IO runtime. MongoDB remains in local Compose for
 compatibility and is not the current Go Chat data store.
+
+## Frontend portal boundaries
+
+Candidate, Recruiter and Admin have separate navigation, home destinations and
+scoped messages/notifications/report/call routes. A workspace logo never points
+to another portal's public landing. Legacy shared URLs resolve into the signed-in
+account's portal and preserve validated return destinations. Candidate layout
+guards private children before their data effects run; public job browsing remains
+available to anonymous visitors. API authorization remains authoritative.
+
+The notification provider persists outside the private page reset boundary, loads
+inbox data on demand and keeps a single SSE subscription across route changes.
+Its rendered state is account-owned, and pending requests retain session revision
+checks. See [frontend portals and verification](frontend-portals-2026-10-22.md).
+
+### Khám phá công ty trong khu vực ứng viên
+
+`/candidate/companies` và `/candidate/companies/[companyId]` dùng chung nội dung
+với hồ sơ công khai `/companies`, nhưng giữ layout và điều hướng ứng viên.
+Company Service quyết định công ty nào được công khai qua các API chỉ trả
+VERIFIED. Trang chi tiết render động để kiểm tra lại trạng thái công khai.
+Job Search Service sẵn có bộ lọc `companyId` trong `GET /jobs/search`; frontend
+truyền bộ lọc ở mọi trang kết quả và chỉ hiển thị các tin PUBLISHED còn hạn.
+Link việc làm mang `source=COMPANY_PAGE` để giữ đúng nguồn khi ứng tuyển.

@@ -104,6 +104,31 @@ test("Job adapter preserves REMOTE, USD and authoritative aggregate version", as
   assert.equal(result.data?.aggregateVersion, 8);
 });
 
+test("Company jobs use the backend company filter on every page and preserve totals", async () => {
+  const api = await import("./person2Api");
+  const urls: URL[] = [];
+  globalThis.fetch = async input => {
+    const url = new URL(String(input));
+    urls.push(url);
+    return json({ items: [], total: 7, page: Number(url.searchParams.get("page")), limit: 6, hasMore: url.searchParams.get("page") === "1", source: "POSTGRESQL", nextCursor: null });
+  };
+  for (const page of [1, 2]) {
+    const result = await api.getPublicJobs({ companyId, mode: "OFFSET", page, limit: 6, sort: "NEWEST" });
+    assert.equal(result.meta?.total, 7);
+    assert.equal(result.meta?.hasMore, page === 1);
+  }
+  assert.equal(urls.length, 2);
+  for (const [index, url] of urls.entries()) {
+    assert.equal(url.pathname, "/jobs/search");
+    assert.equal(url.searchParams.get("companyId"), companyId);
+    assert.equal(url.searchParams.get("page"), String(index + 1));
+    assert.equal(url.searchParams.get("sort"), "NEWEST");
+    assert.equal(url.searchParams.has("q"), false);
+  }
+  await assert.rejects(api.getPublicJobs({ companyId: "invalid-company", mode: "OFFSET", sort: "NEWEST" }));
+  assert.equal(urls.length, 2);
+});
+
 test("Company update sends captured version and preserves complete profile fields", async () => {
   const api = await import("./person2Api");
   globalThis.fetch = async (_input, options) => {

@@ -63,8 +63,8 @@ import type {
   SearchMode,
 } from "./demoData";
 
-export const person2ApiMode = "gateway";
-export const isDemoPerson2Api = false;
+import { person2ApiMode, isDemoPerson2Api } from "./apiMode";
+export { person2ApiMode, isDemoPerson2Api } from "./apiMode";
 
 interface BackendCompany {
   id: string;
@@ -885,6 +885,7 @@ export async function removeCompanyMember(
 }
 
 export interface PublicJobSearchRequest extends PublicJobSearchFilters {
+  companyId?: string;
   mode: SearchMode;
   page?: number;
   limit?: number;
@@ -894,11 +895,13 @@ export interface PublicJobSearchRequest extends PublicJobSearchFilters {
 
 export async function getPublicJobs(search: PublicJobSearchRequest, signal?: AbortSignal): Promise<ApiEnvelope<Job[]>> {
   if (isDemoPerson2Api) return normalizeDemo(demo.getPublicJobs(search));
+  if (search.companyId) assertCanonicalUuidV4(search.companyId, "companyId");
   const response = await requestApi<JobSearchResult>(API_PATHS.jobSearch, {
     signal,
     query: {
       q: search.q,
       location: search.location,
+      companyId: search.companyId,
       salaryMin: search.salaryMin,
       salaryMax: search.salaryMax,
       skills: search.skills,
@@ -910,7 +913,7 @@ export async function getPublicJobs(search: PublicJobSearchRequest, signal?: Abo
       limit: search.limit,
       cursor: search.mode === "CURSOR" ? search.cursor : undefined,
     },
-    allowedQueryKeys: ["q", "location", "salaryMin", "salaryMax", "skills", "experienceYears", "jobType", "sort", "pagination", "page", "limit", "cursor"],
+    allowedQueryKeys: ["q", "location", "companyId", "salaryMin", "salaryMax", "skills", "experienceYears", "jobType", "sort", "pagination", "page", "limit", "cursor"],
   });
   return {
     data: response.data.items.map((item) => toJob(item, response.data.source)),

@@ -81,7 +81,8 @@ test("Candidate, Recruiter and Admin login share brand, heading and control geom
     await page.goto(path);
     await expect(page.locator("[data-auth-frame]")).toHaveAttribute("data-auth-frame", portal);
     await expect(page.getByLabel(emailLabel, { exact: true })).toBeVisible();
-    await expect(page.getByRole("navigation", { name: "Chọn khu vực đăng nhập" }).locator('[aria-current="page"]')).toHaveCount(1);
+    await expect(page.getByRole("navigation", { name: "Chọn khu vực đăng nhập" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "CareerHub - Trang chủ" })).toHaveAttribute("href", portal === "candidate" ? "/" : portal === "recruiter" ? "/recruiter" : "/admin");
     const geometry = await frameGeometry(page);
     baseline ??= geometry;
     expectSameFamily(geometry, baseline);

@@ -7,6 +7,7 @@ import { ErrorState, LoadingState, Metric, PageHeader } from "@/components/ui";
 import { requestApi, toUserMessage } from "../../../lib/apiClient";
 import type { InterviewPage } from "../../../lib/interviewApi";
 import { getApplications, getCandidateBookmarks } from "../../../lib/person2Api";
+import { ArrowRight, FileText, Search, Files } from "lucide-react";
 
 function Dashboard() {
   const [counts, setCounts] = useState<{ saved: number; applied: number; interviews: string } | null>(null);
@@ -28,6 +29,8 @@ function Dashboard() {
   }, [reload]);
   return <main>
     <PageHeader eyebrow="ỨNG VIÊN · TỔNG QUAN" title="Tổng quan ứng viên" description="Theo dõi việc đã lưu, hồ sơ ứng tuyển và lịch phỏng vấn của bạn." action={<Link className="btn btn-primary" href="/candidate/jobs">Tìm việc phù hợp</Link>} />
+    <section className="dashboard-welcome"><div><h2>Sẵn sàng cho bước tiến mới?</h2><p>Mỗi hồ sơ hoàn thiện là một bước gần hơn với cơ hội phù hợp.</p></div><Link className="btn" href="/candidate/profile">Hoàn thiện hồ sơ <ArrowRight size={16} /></Link></section>
+    <div className="dashboard-quick-links"><Link href="/candidate/jobs"><Search size={19} />Khám phá việc làm<ArrowRight size={16} /></Link><Link href="/candidate/profile/cvs"><FileText size={19} />Quản lý CV<ArrowRight size={16} /></Link><Link href="/candidate/applications"><Files size={19} />Theo dõi ứng tuyển<ArrowRight size={16} /></Link></div>
     {error ? <ErrorState message={error} onRetry={() => setReload(n => n + 1)} /> : !counts ? <LoadingState label="Đang tải tổng quan" /> :
       <section className="metric-grid metric-grid-3" aria-label="Thống kê của tôi">
         <Link className="metric-link" href="/candidate/bookmarks"><Metric label="Việc đã lưu" value={String(counts.saved)} /></Link>

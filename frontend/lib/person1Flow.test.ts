@@ -76,7 +76,7 @@ test("login return paths stay in their role portal and reject redirect tricks", 
   assert.equal(loginDestination("CANDIDATE", "/candidate/profile/cvs?tab=online"), "/candidate/profile/cvs?tab=online");
   assert.equal(loginDestination("RECRUITER", "/recruiter/jobs/new"), "/recruiter/jobs/new");
   assert.equal(loginDestination("ADMIN", "/admin"), "/admin");
-  assert.equal(loginDestination("CANDIDATE", "/ai"), "/ai");
+  assert.equal(loginDestination("CANDIDATE", "/ai"), "/candidate/ai");
   for (const target of [null, "https://evil.example", "//evil.example", "/admin", "/recruiter/jobs", "/candidate/../admin", "/candidate/%2e%2e/admin", "/candidate/\\evil", "/candidate/%5cevil", "/candidate/%2fadmin", "/candidate/%252e%252e/admin", "/candidate/%ZZ"]) {
     assert.equal(loginDestination("CANDIDATE", target), "/candidate/profile");
   }
@@ -125,11 +125,11 @@ test("binary response from a previous session is discarded", async () => {
 
 test("shared signed-in workflows preserve their destination within role permissions", () => {
   for (const role of ["CANDIDATE", "RECRUITER"] as const) {
-    assert.equal(loginDestination(role, "/messages?conversation=abc"), "/messages?conversation=abc");
-    assert.equal(loginDestination(role, "/notifications"), "/notifications");
-    assert.equal(loginDestination(role, "/reports?type=JOB&id=abc"), "/reports?type=JOB&id=abc");
+    assert.equal(loginDestination(role, "/messages?conversation=abc"), `/${role.toLowerCase()}/messages?conversation=abc`);
+    assert.equal(loginDestination(role, "/notifications"), `/${role.toLowerCase()}/notifications`);
+    assert.equal(loginDestination(role, "/reports?type=JOB&id=abc"), `/${role.toLowerCase()}/reports?type=JOB&id=abc`);
   }
-  assert.equal(loginDestination("ADMIN", "/notifications"), "/notifications");
+  assert.equal(loginDestination("ADMIN", "/notifications"), "/admin/notifications");
   assert.equal(loginDestination("ADMIN", "/messages"), "/admin");
   assert.equal(loginDestination("CANDIDATE", "/notifications/../admin"), "/candidate/profile");
 });
@@ -142,8 +142,8 @@ test("profile experience dates follow current and past employment requirements",
 
 test("video call login returns to the invited room only for participants' roles", () => {
   const room = "/interviews/1795c0de-7908-4ab5-9bed-4c4f1cf9c211/room?chat=thread";
-  assert.equal(loginDestination("CANDIDATE", room), room);
-  assert.equal(loginDestination("RECRUITER", room), room);
+  assert.equal(loginDestination("CANDIDATE", room), "/candidate/calls/1795c0de-7908-4ab5-9bed-4c4f1cf9c211?chat=thread");
+  assert.equal(loginDestination("RECRUITER", room), "/recruiter/calls/1795c0de-7908-4ab5-9bed-4c4f1cf9c211?chat=thread");
   assert.equal(loginDestination("ADMIN", room), "/admin");
   assert.equal(loginDestination("CANDIDATE", "/interviews/untrusted/path/room"), "/candidate/profile");
 });

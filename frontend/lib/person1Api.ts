@@ -1,4 +1,5 @@
 import { ApiClientError, requestApi, toUserMessage } from "./apiClient";
+import { scopedDestination } from "./portalRoutes";
 import {
   awaitSessionHydration,
   establishSession,
@@ -33,7 +34,7 @@ export function loginDestination(role: CurrentAccount["role"], returnTo: string 
     const allowed = shared || pathname === prefix || pathname.startsWith(prefix + "/")
       || (role === "CANDIDATE" && (pathname === "/ai" || pathname.startsWith("/ai/")));
     if (!allowed || pathname === "/admin/login" || pathname === "/recruiter/login" || pathname === "/recruiter/register") return landing(role);
-    return url.pathname + url.search + url.hash;
+    return scopedDestination(role, url.pathname) + url.search + url.hash;
   } catch {
     return landing(role);
   }

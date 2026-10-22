@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { openWorkspaceMenu } from "./helpers/workspace";
 const api = "http://127.0.0.1:4173/api";
 const userId = "4795c0de-7908-4ab5-9bed-4c4f1cf9c213";
 const cvId = "7795c0de-7908-4ab5-9bed-4c4f1cf9c216";
@@ -485,7 +486,8 @@ test("admin rejection requires reason and confirmation before one mutation", asy
     return reply(route, {});
   });
   await login(page, "ADMIN", "/admin");
-  await page.getByRole("button", { name: "Duyệt tin", exact: true }).click();
+  await openWorkspaceMenu(page);
+  await page.getByRole("link", { name: "Duyệt tin tuyển dụng", exact: true }).click();
   await page.getByRole("button", { name: "Từ chối", exact: true }).click();
   await expect(
     page.getByRole("alert").filter({ hasText: "Nhập lý do" }),
@@ -592,12 +594,14 @@ test("candidate navigation is shared across profile and CV routes without duplic
   await login(page);
   await expect(page.locator(".candidate-workspace")).toHaveCount(1);
   const navigation = page.getByRole("navigation", { name: "Khu vực ứng viên" });
+  await openWorkspaceMenu(page);
   await expect(navigation.getByRole("link", { name: "Hồ sơ cá nhân", exact: true })).toHaveAttribute("aria-current", "page");
   await navigation.getByRole("link", { name: "Quản lý CV", exact: true }).click();
   await expect(page.getByRole("heading", { name: "CV của tôi" })).toBeVisible();
+  await openWorkspaceMenu(page);
   await expect(page.locator(".candidate-workspace")).toHaveCount(1);
   await expect(navigation.getByRole("link", { name: "Quản lý CV", exact: true })).toHaveAttribute("aria-current", "page");
-  await expect(navigation.getByRole("link", { name: "Thông báo", exact: true })).toHaveAttribute("href", "/notifications");
+  await expect(page.locator('.workspace-navigation a[href="/candidate/notifications"]')).toHaveAttribute("href", "/candidate/notifications");
 });
 
 test("candidate public jobs do not present another role with a candidate workspace", async ({ page }) => {
@@ -605,7 +609,7 @@ test("candidate public jobs do not present another role with a candidate workspa
   await page.route(api + "/jobs**", route => reply(route, []));
   await page.route(api + "/auth-cookie/refresh", route => reply(route, { user: tokens("RECRUITER").user }));
   await page.goto("/candidate/jobs");
-  await expect(page.getByRole("heading", { name: "Bạn không có quyền truy cập" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Bạn không có quyền truy cập" })).toBeVisible();
   await expect(page.locator(".candidate-workspace")).toHaveCount(0);
   await expect(page.locator(".candidate-sidebar")).toHaveCount(0);
 });
@@ -682,7 +686,7 @@ test("candidate settings links to working security and notification workflows", 
   await base(page);
   await login(page, "CANDIDATE", "/candidate/settings");
   await expect(page.getByRole("link", { name: "Đặt lại mật khẩu", exact: true })).toHaveAttribute("href", "/forgot-password");
-  await expect(page.getByRole("link", { name: "Xem thông báo", exact: true })).toHaveAttribute("href", "/notifications");
+  await expect(page.getByRole("link", { name: "Xem thông báo", exact: true })).toHaveAttribute("href", "/candidate/notifications");
   await expect(page.getByRole("checkbox")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Xoá tài khoản", exact: true })).toHaveCount(0);
 });

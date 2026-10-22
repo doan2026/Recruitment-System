@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { ApiSessionBoundary } from "@/components/ApiSessionBoundary";
 import { NotificationProvider } from "@/components/NotificationProvider";
 import "./globals.css";
+import "./portal.css";
 
 export const metadata: Metadata = {
   title: { default: "CareerHub", template: "%s — CareerHub" },
@@ -13,11 +14,11 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
   return (
     <html lang="vi">
       <body>
-        <ApiSessionBoundary>
-          <NotificationProvider>
+        <NotificationProvider>
+          <ApiSessionBoundary>
             {children}
-          </NotificationProvider>
-        </ApiSessionBoundary>
+          </ApiSessionBoundary>
+        </NotificationProvider>
       </body>
     </html>
   );
