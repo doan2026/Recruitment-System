@@ -10,7 +10,7 @@ import { PublicShell } from "./PublicShell";
 import { WorkspaceShell, type WorkspaceLink } from "./WorkspaceShell";
 
 const links: WorkspaceLink[] = [
-  { label: "Trang chủ", href: "/candidate/dashboard", icon: LayoutDashboard },
+  { label: "Tổng quan", href: "/candidate/dashboard", icon: LayoutDashboard },
   { label: "Tìm việc", href: "/candidate/jobs", icon: Search },
   { label: "Công ty", href: "/candidate/companies", icon: Building2 },
   { label: "Việc làm đã lưu", href: "/candidate/bookmarks", icon: Heart },

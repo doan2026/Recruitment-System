@@ -17,7 +17,9 @@ Ngày thực hiện: 22/10/2026, GMT+7. Không tạo commit theo yêu cầu ngư
 | Cuộc gọi từ chat | `/candidate/calls/[id]` | `/recruiter/calls/[id]` | Không mở giao diện gọi |
 | Trợ lý nghề nghiệp | `/candidate/ai` | Không có | Không có |
 
-- Logo và Trang chủ trong workspace luôn về dashboard của chính khu vực đó.
+- Logo trong workspace về dashboard của chính khu vực đó. Theo cập nhật ngày
+  23/10/2026, Trang chủ trên header ứng viên về landing chung `/`; mục sidebar
+  ứng viên đổi thành Tổng quan, tiếp tục về `/candidate/dashboard`.
 - Người dùng Recruiter/Admin mở `/` sẽ về dashboard của tài khoản, không hiển thị
   landing ứng viên rồi giữ họ trong luồng sai.
 - Candidate routes được kiểm tra role tại layout, kể cả tìm việc: khách chưa đăng
@@ -119,9 +121,10 @@ Local: `http://localhost:3000`, `http://localhost:3000/recruiter`,
 
 ## Bổ sung mục Công ty cho ứng viên
 
-- Thanh điều hướng trên cùng của workspace ứng viên có tab Công ty cạnh Trang
-  chủ, kể cả khi đang mở hồ sơ cá nhân; tab được đánh dấu khi xem danh sách hoặc
-  chi tiết công ty. Mobile tiếp tục truy cập qua mục Công ty trong menu bên.
+- Thanh điều hướng trên cùng của workspace ứng viên dùng chung ba tab với
+  landing: Trang chủ, Tìm việc làm, Công ty, kể cả khi đang mở hồ sơ cá nhân.
+  Tab việc làm/công ty được đánh dấu khi xem danh sách hoặc chi tiết tương ứng.
+  Mobile tiếp tục truy cập các chức năng qua menu bên.
 - Typecheck và **152/152** kiểm tra logic đạt, gồm hợp đồng `companyId` trên
   mọi trang kết quả và kiểm tra ID trước khi gọi API.
 - **14/14** ca Chrome desktop/mobile trong `candidate-companies.spec.ts` đạt:

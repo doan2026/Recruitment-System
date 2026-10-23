@@ -24,9 +24,10 @@ export function AccountNavigation({ workspace = false, portal = "CANDIDATE" }: {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const role = account?.role ?? portal;
-  const links = workspace ? [{ label: "Trang chủ", href: portalHome(role) }, ...(role === "CANDIDATE" ? [{ label: "Công ty", href: "/candidate/companies" }] : [])]
+  const candidateLinks = [{ label: "Trang chủ", href: "/" }, { label: "Tìm việc làm", href: "/candidate/jobs" }, { label: "Công ty", href: account?.role === "CANDIDATE" ? "/candidate/companies" : "/companies" }];
+  const links = workspace ? role === "CANDIDATE" ? candidateLinks : [{ label: "Trang chủ", href: portalHome(role) }]
     : portal === "RECRUITER" ? [{ label: "Trang chủ", href: "/recruiter" }, { label: "Giải pháp tuyển dụng", href: "/recruiter#solutions" }, { label: "Quy trình", href: "/recruiter#how-it-works" }]
-      : [{ label: "Trang chủ", href: "/" }, { label: "Tìm việc làm", href: "/candidate/jobs" }, { label: "Công ty", href: account?.role === "CANDIDATE" ? "/candidate/companies" : "/companies" }];
+      : candidateLinks;
   async function logout() {
     if (pending) return;
     const destination = role === "ADMIN" ? "/admin/login" : role === "RECRUITER" ? "/recruiter/login" : "/login";
@@ -37,7 +38,7 @@ export function AccountNavigation({ workspace = false, portal = "CANDIDATE" }: {
   }
   return <>
     <nav className="top-nav" aria-label="Điều hướng chính">
-      {account === undefined ? <span className="account-skeleton" aria-hidden="true" /> : links.map(item => <Link prefetch={false} key={item.href} href={item.href} aria-current={pathname === item.href || (item.href.endsWith("/companies") && pathname.startsWith(item.href + "/")) ? "page" : undefined}>{item.label}</Link>)}
+      {account === undefined ? <span className="account-skeleton" aria-hidden="true" /> : links.map(item => <Link prefetch={false} key={item.href} href={item.href} aria-current={pathname === item.href || (/\/(?:companies|jobs)$/.test(item.href) && pathname.startsWith(item.href + "/")) ? "page" : undefined}>{item.label}</Link>)}
     </nav>
     <div className="profile-chip">
       {account === undefined ? <span className="account-skeleton" aria-label="Đang kiểm tra tài khoản" /> : account ? <>
