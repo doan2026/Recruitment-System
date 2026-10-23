@@ -185,7 +185,7 @@ function BlockEditor({
     );
     try {
       const result = await requestApi<CandidateProfile>(
-        `/profile/${block.key}${editing ? "/" + editing : ""}`,
+        `/api/profile/${block.key}${editing ? "/" + editing : ""}`,
         { method: editing ? "PUT" : "POST", body, privateData: true },
       );
       onSaved(result.data);
@@ -203,7 +203,7 @@ function BlockEditor({
     setError("");
     try {
       const result = await requestApi<CandidateProfile>(
-        `/profile/${block.key}/${deleting}`,
+        `/api/profile/${block.key}/${deleting}`,
         { method: "DELETE", privateData: true },
       );
       onSaved(result.data);
@@ -328,7 +328,7 @@ export default function ProfilePage() {
     const controller = new AbortController();
     setLoading(true);
     setError("");
-    requestApi<CandidateProfile>("/profile/" + account.id, {
+    requestApi<CandidateProfile>("/api/profile/" + account.id, {
       privateData: true,
       signal: controller.signal,
     })
@@ -364,7 +364,7 @@ export default function ProfilePage() {
         ]),
       );
       const result = await requestApi<CandidateProfile>(
-        "/profile/" + account.id,
+        "/api/profile/" + account.id,
         { method: "PUT", privateData: true, body },
       );
       setProfile(result.data);
@@ -384,7 +384,7 @@ export default function ProfilePage() {
     try {
       const fileId = await uploadPersonalFile(file, "AVATAR");
       const result = await requestApi<CandidateProfile>(
-        `/profile/${account.id}/avatar`,
+        `/api/profile/${account.id}/avatar`,
         { method: "PUT", privateData: true, body: { fileId } },
       );
       setProfile(result.data);

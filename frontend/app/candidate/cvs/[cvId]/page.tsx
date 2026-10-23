@@ -16,7 +16,7 @@ function CvDetail({ cvId }: { cvId: string }) {
   useEffect(() => {
     const controller = new AbortController();
     setCv(null); setError(""); setActionError("");
-    requestApi<CandidateCv>(`/profile/cvs/${encodeURIComponent(cvId)}`, { privateData: true, signal: controller.signal })
+    requestApi<CandidateCv>(`/api/profile/cvs/${encodeURIComponent(cvId)}`, { privateData: true, signal: controller.signal })
       .then(r => { if (!controller.signal.aborted) setCv(r.data); })
       .catch(e => { if (!controller.signal.aborted) setError(person1Error(e)); });
     return () => controller.abort();
@@ -25,7 +25,7 @@ function CvDetail({ cvId }: { cvId: string }) {
     if (pending || !cv) return;
     setPending(true); setActionError("");
     try {
-      const r = await requestApi<{ url: string }>(`/profile/cvs/${encodeURIComponent(cvId)}/download-url`, {
+      const r = await requestApi<{ url: string }>(`/api/profile/cvs/${encodeURIComponent(cvId)}/download-url`, {
         method: "POST", privateData: true, maxRetries: 0,
       });
       const url = new URL(r.data.url);

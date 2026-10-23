@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { apiUrl } from "./apiRoutes";
 
 const refreshPath = "/api/auth-cookie";
 const legacyRefreshPath = "/api/auth-cookie/refresh";
@@ -6,8 +7,8 @@ const noStore = { "Cache-Control": "no-store", Pragma: "no-cache" };
 
 type Action = "login" | "verify" | "google" | "refresh" | "logout";
 const endpoints: Record<Action, string> = {
-  login: "/auth/login", verify: "/auth/otp/verify", google: "/auth/google/exchange",
-  refresh: "/auth/refresh", logout: "/auth/logout",
+  login: "/api/auth/login", verify: "/api/auth/otp/verify", google: "/api/auth/google/exchange",
+  refresh: "/api/auth/refresh", logout: "/api/auth/logout",
 };
 
 function cookieOptions(req: Request, path: string, maxAge: number) {
@@ -46,7 +47,7 @@ export async function proxyAuthCookie(req: Request, action: Action): Promise<Nex
       const body = needsRefresh ? { refreshToken } : await req.json();
       const binder = action === "google" ? cookies.get("oauth2_exchange_binder")?.value : undefined;
       const gateway = (process.env.API_INTERNAL_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
-      const upstream = await fetch(`${gateway}${endpoints[action]}`, {
+      const upstream = await fetch(apiUrl(endpoints[action], gateway), {
         method: "POST", headers: { "Content-Type": "application/json",
           ...(binder ? { Cookie: `oauth2_exchange_binder=${binder}` } : {}) },
         body: JSON.stringify(body), cache: "no-store", redirect: "error", signal: AbortSignal.timeout(10_000),

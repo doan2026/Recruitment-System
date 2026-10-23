@@ -36,7 +36,7 @@ export default function ResetPasswordPage() {
     setPending(true);
     setError("");
     try {
-      await requestApi("/auth/reset-password", {
+      await requestApi("/api/auth/reset-password", {
         ...publicAuth,
         method: "POST",
         body: { token: token.current, newPassword: password },

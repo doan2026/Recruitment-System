@@ -71,7 +71,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     if (!isCurrent()) return;
     const revision = ++countRevision.current;
     try {
-      const response = await requestApi<{ unread_count: number }>("/notifications/unread-count", { privateData: true });
+      const response = await requestApi<{ unread_count: number }>("/api/notifications/unread-count", { privateData: true });
       if (isCurrent() && revision === countRevision.current) setUnreadCount(response.data.unread_count);
     } catch { /* Inbox read failures are shown by refresh; keep the last known count. */ }
   }, [isCurrent]);
@@ -81,7 +81,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     loadLock.current = true; setLoading(true); setError("");
     const startedAt = notificationRevision.current;
     try {
-      const response = await requestApi<Notification[]>("/notifications", { privateData: true });
+      const response = await requestApi<Notification[]>("/api/notifications", { privateData: true });
       if (!isCurrent()) return;
       const overlay = [...notificationUpdates.current.values()].filter(update => update.revision > startedAt).map(update => update.notification);
       notificationsRef.current = mergeNotifications(response.data ?? [], overlay);
@@ -97,7 +97,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     loadLock.current = true; setLoading(true); setError("");
     const startedAt = notificationRevision.current;
     try {
-      const response = await requestApi<Notification[]>("/notifications", { privateData: true, query: { cursor: nextCursor } });
+      const response = await requestApi<Notification[]>("/api/notifications", { privateData: true, query: { cursor: nextCursor } });
       if (isCurrent()) {
         const overlay = [...notificationUpdates.current.values()].filter(update => update.revision > startedAt).map(update => update.notification);
         notificationsRef.current = mergeNotifications(mergeNotifications(notificationsRef.current, response.data ?? []), overlay);
@@ -112,7 +112,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     if (!isCurrent() || mutationLock.current || notifications.find(notification => notification.id === id)?.is_read) return;
     mutationLock.current = true; setMarking(true); setError("");
     try {
-      await requestApi(`/notifications/${encodeURIComponent(id)}/read`, { method: "PATCH", privateData: true, maxRetries: 0 });
+      await requestApi(`/api/notifications/${encodeURIComponent(id)}/read`, { method: "PATCH", privateData: true, maxRetries: 0 });
       if (isCurrent()) {
         const latest = notificationsRef.current.find(notification => notification.id === id);
         if (latest) recordUpdates([{ ...latest, is_read: true }]);
@@ -127,7 +127,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     const visibleIds = new Set(notifications.map(notification => notification.id));
     mutationLock.current = true; setMarking(true); setError("");
     try {
-      await requestApi("/notifications/read-all", { method: "PATCH", privateData: true, maxRetries: 0 });
+      await requestApi("/api/notifications/read-all", { method: "PATCH", privateData: true, maxRetries: 0 });
       if (isCurrent()) {
         const updates = [...visibleIds].flatMap(id => {
           const latest = notificationsRef.current.find(notification => notification.id === id);
@@ -157,7 +157,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     const verifyCallSignal = async (call: { callId: string; action: "ENDED" | "REJECTED" }) => {
       if (!active || !isCurrent()) return;
       try {
-        const response = await requestApi<{ id: string }[]>("/calls", { privateData: true, maxRetries: 0 });
+        const response = await requestApi<{ id: string }[]>("/api/calls", { privateData: true, maxRetries: 0 });
         const calls = response.data;
         // Chat content is user-authored. Only Video can establish that a call is closed.
         // This endpoint is capped at 50; absence in a full page proves nothing.
@@ -213,7 +213,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     const call = incomingCall;
     callLock.current = true; setCallPending(true); setCallError("");
     try {
-      if (!accept) await requestApi(`/calls/${encodeURIComponent(call.callId)}/reject`, { method: "POST", privateData: true, maxRetries: 0 });
+      if (!accept) await requestApi(`/api/calls/${encodeURIComponent(call.callId)}/reject`, { method: "POST", privateData: true, maxRetries: 0 });
       try { await sendChatMessage(call.conversationId, `[CALL_${accept ? "ACCEPTED" : "REJECTED"}] ${call.callId}`, crypto.randomUUID()); } catch { /* Call authorization stays in Video service. */ }
       if (!isCurrent()) return;
       setIncomingCall(null);

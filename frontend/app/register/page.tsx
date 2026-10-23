@@ -65,7 +65,7 @@ export default function RegisterPage() {
         setVerified(true);
         if (account.role === "CANDIDATE" && fullName.trim()) {
           try {
-            await requestApi(`/profile/${account.id}`, { method: "PUT", privateData: true, body: { fullName: fullName.trim() } });
+            await requestApi(`/api/profile/${account.id}`, { method: "PUT", privateData: true, body: { fullName: fullName.trim() } });
           } catch {
             setNotice("Email đã xác minh. Hồ sơ chưa lưu được tên; bạn có thể bổ sung tại trang Hồ sơ cá nhân.");
             setPending(false);
@@ -74,7 +74,7 @@ export default function RegisterPage() {
         }
         router.replace(loginDestination(account.role, destination));
       } else {
-        const result = await requestApi<{ registrationId: string }>("/auth/register", {
+        const result = await requestApi<{ registrationId: string }>("/api/auth/register", {
           ...publicAuth,
           method: "POST",
           body: { email: email.trim(), password, role },
@@ -95,7 +95,7 @@ export default function RegisterPage() {
     if (pending || !flow) return;
     setPending(true); setError("");
     try {
-      await requestApi("/auth/otp/resend", { ...publicAuth, method: "POST", body: { email: email.trim(), registrationId: flow } });
+      await requestApi("/api/auth/otp/resend", { ...publicAuth, method: "POST", body: { email: email.trim(), registrationId: flow } });
       setNotice("Đã yêu cầu gửi lại mã. Bạn có thể gửi lại tối đa 3 lần mỗi giờ.");
     } catch (reason) { setError(person1Error(reason)); }
     finally { setPending(false); }

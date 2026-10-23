@@ -31,7 +31,7 @@ export default function ReportScreen() {
     setError("");
     setDone(false);
     try {
-      await requestApi("/admin/reports", {
+      await requestApi("/api/admin/reports", {
         method: "POST",
         privateData: true,
         body: { targetType, targetId, reason, description },

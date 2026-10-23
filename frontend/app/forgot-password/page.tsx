@@ -24,7 +24,7 @@ export default function ForgotPasswordPage() {
     }
     setPending(true); setError("");
     try {
-      await requestApi("/auth/forgot-password", { ...publicAuth, method: "POST", body: { email: email.trim() } });
+      await requestApi("/api/auth/forgot-password", { ...publicAuth, method: "POST", body: { email: email.trim() } });
       setDone(true);
     } catch (reason) { setError(person1Error(reason)); }
     finally { setPending(false); }

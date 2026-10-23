@@ -36,7 +36,7 @@ function CandidateWorkspaceContent({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (account?.role !== "CANDIDATE") { setProfile(null); return; }
     const controller = new AbortController();
-    requestApi<CandidateProfile>(`/profile/${account.id}`, { privateData: true, signal: controller.signal })
+    requestApi<CandidateProfile>(`/api/profile/${account.id}`, { privateData: true, signal: controller.signal })
       .then(result => { if (!controller.signal.aborted) setProfile(result.data); })
       .catch(() => { if (!controller.signal.aborted) setProfile(null); });
     return () => controller.abort();

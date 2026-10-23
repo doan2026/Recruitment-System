@@ -1,3 +1,5 @@
+import { apiUrl } from "./apiRoutes";
+
 export interface ApiMeta {
   page?: number;
   limit?: number;
@@ -59,19 +61,19 @@ export class ApiClientError extends Error {
 }
 
 export const API_PATHS = Object.freeze({
-  companies: "/companies/",
-  companyMine: "/companies/me",
-  companySearch: "/companies/search",
-  jobs: "/jobs/",
-  jobMine: "/jobs/mine",
-  jobSearch: "/jobs/search",
-  jobRecommended: "/jobs/recommended",
-  applications: "/applications/",
-  applicationMine: "/applications/my",
-  bookmarks: "/applications/bookmarks",
-  offers: "/offers/",
-  aiChat: "/ai/chat",
-  chats: "/chat/chats",
+  companies: "/api/companies/",
+  companyMine: "/api/companies/me",
+  companySearch: "/api/companies/search",
+  jobs: "/api/jobs/",
+  jobMine: "/api/jobs/mine",
+  jobSearch: "/api/jobs/search",
+  jobRecommended: "/api/jobs/recommended",
+  applications: "/api/applications/",
+  applicationMine: "/api/applications/my",
+  bookmarks: "/api/applications/bookmarks",
+  offers: "/api/offers/",
+  aiChat: "/api/ai/chat",
+  chats: "/api/chat/chats",
 });
 
 type QueryPrimitive = string | number | boolean;
@@ -348,14 +350,12 @@ export function toNoStoreHeaders(): Record<string, string> {
 
 function apiBaseUrl(): string {
   // HttpOnly access cookies are forwarded by the same-origin Next middleware.
-  if (typeof window !== "undefined") return "/api";
-  const configured = (typeof window === "undefined"
-    ? process.env.API_INTERNAL_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL
-    : process.env.NEXT_PUBLIC_API_BASE_URL)?.trim() ?? "";
-  if (!configured && typeof window === "undefined") {
+  if (typeof window !== "undefined") return "";
+  const configured = (process.env.API_INTERNAL_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL)?.trim() ?? "";
+  if (!configured) {
     throw new ApiClientError({ code: "API_BASE_URL_REQUIRED" });
   }
-  return configured.replace(/\/$/, "");
+  return configured;
 }
 
 function isEnvelope(value: unknown): value is ApiEnvelope<unknown> {
@@ -404,7 +404,14 @@ export async function requestApi<T>(
   path: string,
   options: ApiRequestOptions = {},
 ): Promise<ApiEnvelope<T>> {
-  if (!path.startsWith("/")) throw new ApiClientError({ code: "INVALID_API_PATH" });
+  let url: string;
+  const query = buildQuery(options.query, options.allowedQueryKeys);
+  try {
+    url = `${apiUrl(path, apiBaseUrl())}${query}`;
+  } catch (error) {
+    if (error instanceof ApiClientError) throw error;
+    throw new ApiClientError({ code: "INVALID_API_PATH" });
+  }
   const method = options.method ?? "GET";
   const timeoutMs = options.timeoutMs ?? 10_000;
   const controller = new AbortController();
@@ -426,8 +433,6 @@ export async function requestApi<T>(
   else if (accessToken && options.privateData) headers.set("Authorization", `Bearer ${accessToken}`);
   if (options.body !== undefined) headers.set("Content-Type", "application/json");
 
-  const query = buildQuery(options.query, options.allowedQueryKeys);
-  const url = `${apiBaseUrl()}${path}${query}`;
   const fetcher = options.fetcher ?? fetch;
   const maxRetries = options.maxRetries ?? (SAFE_RETRY_METHODS.has(method) ? 1 : 0);
 
@@ -450,7 +455,8 @@ export async function requestApi<T>(
           method,
           headers,
           credentials: "include",
-          cache: options.privateData ? "no-store" : "default",
+          // SSR must not persist an old HTML/error response as API data.
+          cache: options.privateData || typeof window === "undefined" ? "no-store" : "default",
           body: options.body === undefined ? undefined : JSON.stringify(options.body),
           signal: controller.signal,
         });

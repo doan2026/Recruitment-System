@@ -52,7 +52,7 @@ test("server requests use internal Gateway origin without changing public browse
   process.env.API_INTERNAL_BASE_URL = "http://api-gateway";
   let url = "";
   await requestApi("/companies/public-id", { fetcher: async (input) => { url = String(input); return json({}); } });
-  assert.equal(url, "http://api-gateway/companies/public-id");
+  assert.equal(url, "http://api-gateway/api/companies/public-id");
   assert.equal(process.env.NEXT_PUBLIC_API_BASE_URL, "http://gateway.test");
 });
 
@@ -119,7 +119,7 @@ test("Company jobs use the backend company filter on every page and preserve tot
   }
   assert.equal(urls.length, 2);
   for (const [index, url] of urls.entries()) {
-    assert.equal(url.pathname, "/jobs/search");
+    assert.equal(url.pathname, "/api/jobs/search");
     assert.equal(url.searchParams.get("companyId"), companyId);
     assert.equal(url.searchParams.get("page"), String(index + 1));
     assert.equal(url.searchParams.get("sort"), "NEWEST");
@@ -146,7 +146,7 @@ test("Company update sends captured version and preserves complete profile field
 test("Offer read maps real offer and application versions, terms and SENT status", async () => {
   const api = await import("./person2Api");
   globalThis.fetch = async (input, options) => {
-    assert.equal(String(input), "http://gateway.test/offers/" + offerId);
+    assert.equal(String(input), "http://gateway.test/api/offers/" + offerId);
     assert.equal(options?.cache, "no-store");
     return json({ id: offerId, applicationId, position: "Backend Engineer", salary: "30000000", version: 2, applicationVersion: 7, applicationStatus: "OFFER", status: "SENT", expiresAt: "2027-12-01T00:00:00Z", startDate: "2027-12-15", note: "Remote", responseNote: null, fileId: null, fileUrl: null });
   };
@@ -186,7 +186,7 @@ test("bookmark removal and CV picker use public Gateway paths with private cachi
   };
   await api.removeCandidateBookmark(jobId);
   await api.getActiveCandidateCvs();
-  assert.deepEqual(seen, ["http://gateway.test/applications/bookmarks/" + jobId, "http://gateway.test/profile/cvs"]);
+  assert.deepEqual(seen, ["http://gateway.test/api/applications/bookmarks/" + jobId, "http://gateway.test/api/profile/cvs"]);
 });
 
 test("a private response body resolving after account switch is discarded", async () => {

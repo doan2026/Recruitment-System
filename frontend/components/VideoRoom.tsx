@@ -31,7 +31,7 @@ export function VideoRoom({ callId }: { callId: string }) {
   useEffect(() => {
     const controller = new AbortController();
     setCredentials(null); setError(""); setDisconnected(false); setEnded(false);
-    requestApi<RoomCredentials>(`/calls/${encodeURIComponent(callId)}/join`, {
+    requestApi<RoomCredentials>(`/api/calls/${encodeURIComponent(callId)}/join`, {
       method: "POST", privateData: true, signal: controller.signal, maxRetries: 0,
     }).then(response => { if (!controller.signal.aborted) setCredentials(response.data); })
       .catch(failure => { if (!controller.signal.aborted) setError(toUserMessage(failure)); });
@@ -58,7 +58,7 @@ export function VideoRoom({ callId }: { callId: string }) {
     if (endingRef.current || !credentials || account?.id !== credentials.call.host_id) return;
     endingRef.current = true; setEnding(true); setError("");
     try {
-      await requestApi(`/calls/${encodeURIComponent(callId)}/end`, { method: "POST", privateData: true, maxRetries: 0 });
+      await requestApi(`/api/calls/${encodeURIComponent(callId)}/end`, { method: "POST", privateData: true, maxRetries: 0 });
       if (mounted.current) { setEnded(true); setDisconnected(true); }
       const conversationId = credentials.call.conversation_id;
       if (conversationId) {

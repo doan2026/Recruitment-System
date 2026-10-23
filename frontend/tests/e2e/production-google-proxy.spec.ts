@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
 // Uses the actual production nginx configuration and actual Next cookie proxy.
-// Only Auth is a stand-in; no Google account, JWT key or cloud secret is needed.
+// Service responses are fixtures; no Google account, JWT key or cloud secret is needed.
 test.skip(process.env.PRODUCTION_PROXY_TEST !== "1", "Set PRODUCTION_PROXY_TEST=1; Docker and OpenSSL are required");
 test.use({ ignoreHTTPSErrors: true });
 
@@ -125,15 +125,34 @@ test("public callback renders Next while Google authorization stays with Auth", 
 });
 
 test("company internal and public API routes return JSON and preserve query strings", async ({ request }) => {
-  for (const url of [internalUrl + `/companies/${company.id}`, publicUrl + `/api/companies/${company.id}`]) {
+  for (const url of [internalUrl + `/api/companies/${company.id}`, publicUrl + `/api/companies/${company.id}`]) {
     const response = await request.get(url);
     expect(response.status()).toBe(200);
     expect(response.headers()["content-type"]).toContain("application/json");
     expect((await response.json()).data).toEqual(company);
   }
-  const search = await request.get(internalUrl + "/companies/search?q=Health%20%26%20Care");
+  const search = await request.get(internalUrl + "/api/companies/search?q=Health%20%26%20Care");
   expect(search.status()).toBe(200);
   expect((await search.json()).meta.q).toBe("Health & Care");
+});
+
+test("API namespace cannot fall through to frontend pages or bypass internal guards", async ({ request }) => {
+  for (const base of [publicUrl, internalUrl]) {
+    const jobs = await request.get(base + `/api/jobs/search?companyId=${company.id}`);
+    expect(jobs.status()).toBe(200);
+    expect((await jobs.json()).data.items).toEqual([]);
+    const identity = await request.get(base + "/api/auth/me");
+    expect(identity.status()).toBe(401);
+    expect((await identity.json()).code).toBe("AUTH_INVALID");
+    for (const path of ["/api", "/api/candidate/profile", "/api/unknown"]) {
+      const response = await request.get(base + path);
+      expect(response.status()).toBe(404);
+      expect(await response.json()).toEqual({ code: "API_NOT_FOUND" });
+    }
+    for (const path of ["/api/auth/users", "/api/profile/internal/test", "/api/ai/match"]) {
+      expect((await request.get(base + path)).status()).toBe(404);
+    }
+  }
 });
 
 test("company HTTPS page renders its server profile and survives reload", async ({ page }) => {

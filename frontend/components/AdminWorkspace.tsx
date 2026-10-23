@@ -66,14 +66,14 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
       if (tab === "stats") {
         const [o, f] = await Promise.all([
           requestApi<{ daily: Row[]; totals: Record<string, number> }>(
-            "/admin/stats/overview",
+            "/api/admin/stats/overview",
             {
               privateData: true,
               query: { from, to },
               signal: controller.signal,
             },
           ),
-          requestApi<typeof funnel>("/admin/stats/funnel", {
+          requestApi<typeof funnel>("/api/admin/stats/funnel", {
             privateData: true,
             query: { from, to },
             signal: controller.signal,
@@ -89,7 +89,7 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
           reports: "reports",
           audit: "audit-logs",
         };
-        const result = await requestApi<Row[]>("/admin/" + paths[tab], {
+        const result = await requestApi<Row[]>("/api/admin/" + paths[tab], {
           privateData: true,
           signal: controller.signal,
           query: {
@@ -137,7 +137,7 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
     setError("");
     setNotice("");
     try {
-      await requestApi("/admin/" + command.path, {
+      await requestApi("/api/admin/" + command.path, {
         method: "PATCH",
         privateData: true,
         body: command.body,
@@ -158,7 +158,7 @@ export function AdminWorkspace({ initialTab = "stats" }: { initialTab?: Tab }) {
     setPending(true);
     setError("");
     try {
-      const result = await requestApi<Blob>("/admin/stats/export", {
+      const result = await requestApi<Blob>("/api/admin/stats/export", {
         privateData: true,
         query: { type, from, to },
         responseType: "blob",

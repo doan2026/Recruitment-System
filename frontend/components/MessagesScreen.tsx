@@ -46,7 +46,7 @@ function ChatInterface({ accountId, role }: { accountId: string; role: AccountRo
   const fetchConversations = useCallback(async () => {
     setLoading(true); setListError("");
     try {
-      const response = await requestApi<ChatConversation[]>("/chat/chats", { privateData: true });
+      const response = await requestApi<ChatConversation[]>("/api/chat/chats", { privateData: true });
       if (mounted.current) setConversations(response.data ?? []);
     } catch (error) { if (mounted.current) setListError(toUserMessage(error)); }
     finally { if (mounted.current) setLoading(false); }
@@ -187,7 +187,7 @@ function ChatInterface({ accountId, role }: { accountId: string; role: AccountRo
     const conversationId = selected.id;
     callLock.current = true; setStartingCall(true); setActionError("");
     try {
-      const response = await requestApi<{ id: string }>("/calls", {
+      const response = await requestApi<{ id: string }>("/api/calls", {
         method: "POST", privateData: true, maxRetries: 0,
         body: { title: "Cuộc gọi từ tin nhắn", participant_ids: participantIds, conversation_id: conversationId },
       });

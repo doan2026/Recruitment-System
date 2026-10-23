@@ -50,7 +50,7 @@ export default function BuilderPage() {
     const id = new URLSearchParams(location.search).get("id");
     const load = id
       ? requestApi<CandidateCv>(
-          `/profile/cvs/${encodeURIComponent(id)}/builder`,
+          `/api/profile/cvs/${encodeURIComponent(id)}/builder`,
           { privateData: true, signal: controller.signal },
         ).then((r) => {
           setOriginal(r.data);
@@ -58,7 +58,7 @@ export default function BuilderPage() {
           setContent(validateBuilder(r.data.contentJson));
           setTemplate(r.data.templateId === "classic" ? "classic" : "modern");
         })
-      : requestApi<CandidateProfile>("/profile/" + account.id, {
+      : requestApi<CandidateProfile>("/api/profile/" + account.id, {
           privateData: true,
           signal: controller.signal,
         }).then((r) => setContent(contentFromProfile(r.data)));
@@ -139,8 +139,8 @@ export default function BuilderPage() {
       };
       await requestApi(
         original
-          ? `/profile/cvs/${original.id}/revisions`
-          : "/profile/cvs/online",
+          ? `/api/profile/cvs/${original.id}/revisions`
+          : "/api/profile/cvs/online",
         { method: "POST", privateData: true, body },
       );
       router.push("/candidate/profile/cvs");

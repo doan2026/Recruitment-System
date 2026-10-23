@@ -91,7 +91,7 @@ export async function verifyRegistration(
   otp: string,
 ) {
   await awaitSessionHydration();
-  const result = await requestApi<LoginResponse>("/auth-cookie/verify", {
+  const result = await requestApi<LoginResponse>("/api/auth-cookie/verify", {
     ...publicAuth,
     method: "POST",
     body: { email, registrationId, otp },
@@ -103,7 +103,7 @@ export async function exchangeGoogle(
   role: "CANDIDATE" | "RECRUITER",
 ) {
   await awaitSessionHydration();
-  const result = await requestApi<LoginResponse>("/auth/google/exchange", {
+  const result = await requestApi<LoginResponse>("/api/auth/google/exchange", {
     ...publicAuth,
     // The HttpOnly binder is scoped to this canonical path, not /api/auth/...
     fetcher: (_url, options) => fetch("/auth/google/exchange", options),
@@ -123,9 +123,8 @@ export async function exchangeGoogle(
   // Do not refresh or retry a consumed Google exchange code on failure.
   let current: CurrentAccount;
   try {
-    const verified = await requestApi<CurrentAccount>("/auth/me", {
+    const verified = await requestApi<CurrentAccount>("/api/auth/me", {
       ...publicAuth,
-      fetcher: (_url, options) => fetch("/api/auth/me", options),
     });
     current = verified.data;
   } catch (error) {
@@ -254,7 +253,7 @@ export async function uploadPersonalFile(
     new TextDecoder().decode(await file.slice(0, 5).arrayBuffer()) !== "%PDF-"
   )
     throw new Error("Nội dung tệp không phải PDF.");
-  const result = await requestApi<UploadCapability>("/files/signature", {
+  const result = await requestApi<UploadCapability>("/api/files/signature", {
     method: "POST",
     privateData: true,
     signal,
@@ -299,7 +298,7 @@ export async function uploadPersonalFile(
     clearTimeout(timeout);
     signal?.removeEventListener("abort", cancel);
   }
-  await requestApi("/files/", {
+  await requestApi("/api/files/", {
     method: "POST",
     privateData: true,
     body: { fileId: cap.fileId },

@@ -19,7 +19,7 @@ function Dashboard() {
     Promise.all([
       getCandidateBookmarks(controller.signal),
       getApplications(undefined, controller.signal),
-      requestApi<InterviewPage>("/interviews/my", { privateData: true, signal: controller.signal,
+      requestApi<InterviewPage>("/api/interviews/my", { privateData: true, signal: controller.signal,
         query: { period: "UPCOMING", limit: 20 } }),
     ]).then(([saved, applied, interviews]) => {
       if (!controller.signal.aborted) setCounts({ saved: saved.data.length, applied: applied.data.length,

@@ -1619,7 +1619,7 @@ export async function getActiveCandidateCvs(signal?: AbortSignal): Promise<ApiEn
     { id: "cv-frontend-01", title: "CV Frontend Senior", type: "UPLOAD", isDefault: true, createdAt: new Date(0).toISOString() },
     { id: "cv-frontend-02", title: "CV Frontend Junior", type: "ONLINE", isDefault: false, createdAt: new Date(0).toISOString() },
   ], meta: null };
-  return requestApi<ActiveCandidateCv[]>("/profile/cvs", { privateData: true, signal });
+  return requestApi<ActiveCandidateCv[]>("/api/profile/cvs", { privateData: true, signal });
 }
 
 export async function saveCandidateBookmark(jobId: string, signal?: AbortSignal): Promise<ApiEnvelope<CandidateBookmark>> {

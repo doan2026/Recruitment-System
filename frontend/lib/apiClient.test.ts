@@ -103,14 +103,14 @@ test("collection paths always preserve the gateway trailing slash", () => {
 
 test("Application, bookmark and Offer paths preserve their three distinct gateway prefixes", () => {
   assert.deepEqual(APPLICATION_API_ROUTES, {
-    collection: "/applications/",
-    bookmarks: "/applications/bookmarks",
-    offers: "/offers/",
+    collection: "/api/applications/",
+    bookmarks: "/api/applications/bookmarks",
+    offers: "/api/offers/",
   });
-  assert.equal(applicationResourceRoute("application-id", "cv/download-url"), "/applications/application-id/cv/download-url");
-  assert.equal(recruiterDashboardRoute(), "/applications/stats");
-  assert.equal(offerResponseRoute("offer-id"), "/offers/offer-id/respond");
-  assert.doesNotMatch(offerResponseRoute("offer-id"), /^\/applications\//);
+  assert.equal(applicationResourceRoute("application-id", "cv/download-url"), "/api/applications/application-id/cv/download-url");
+  assert.equal(recruiterDashboardRoute(), "/api/applications/stats");
+  assert.equal(offerResponseRoute("offer-id"), "/api/offers/offer-id/respond");
+  assert.doesNotMatch(offerResponseRoute("offer-id"), /^\/api\/applications\//);
 });
 
 test("canonical UUID v4 accepts lowercase only", () => {
@@ -341,11 +341,11 @@ test("AI chat rejects unsafe or unbounded response bodies before rendering", () 
 });
 
 test("Person 2 AI consumers route only through chat and public Job recommendation APIs", () => {
-  assert.equal(PERSON2_AI_PUBLIC_ROUTES.chat, "/ai/chat");
-  assert.equal(PERSON2_AI_PUBLIC_ROUTES.candidateJobRecommendations, "/jobs/recommended");
+  assert.equal(PERSON2_AI_PUBLIC_ROUTES.chat, "/api/ai/chat");
+  assert.equal(PERSON2_AI_PUBLIC_ROUTES.candidateJobRecommendations, "/api/jobs/recommended");
   assert.equal(
     recruiterCandidateRecommendationsRoute("018f47a2-6f4d-4b7d-8c91-ff02d770a944"),
-    "/jobs/018f47a2-6f4d-4b7d-8c91-ff02d770a944/recommended-candidates",
+    "/api/jobs/018f47a2-6f4d-4b7d-8c91-ff02d770a944/recommended-candidates",
   );
 });
 
@@ -357,6 +357,9 @@ test("Person 2 FE rejects every internal AI provider route variant", () => {
     "/ai/recommend/jobs?limit=3",
     "/ai/recommend/candidates",
     "/ai/recommend/candidates#private",
+    "/api/ai/match",
+    "/api/ai/recommend/jobs",
+    "/api/ai/recommend/candidates",
   ]) {
     assert.throws(
       () => assertPerson2AiPublicRoute(path),

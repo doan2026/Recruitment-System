@@ -31,14 +31,14 @@ export function interviewStartGmt7(local: string): string {
 }
 
 export function listMyInterviews(cursor: string | null, signal?: AbortSignal) {
-  return requestApi<InterviewPage>("/interviews/my", {
+  return requestApi<InterviewPage>("/api/interviews/my", {
     privateData: true, signal, query: { period: "ALL", limit: 20, cursor },
   });
 }
 
 export function scheduleInterview(body: ScheduleInterview) {
   // A retry reuses the requestId. Never silently repeat a scheduling mutation.
-  return requestApi<Interview>("/interviews", { method: "POST", body, privateData: true, maxRetries: 0 });
+  return requestApi<Interview>("/api/interviews", { method: "POST", body, privateData: true, maxRetries: 0 });
 }
 
 export function interviewStatusLabel(status: string): string {

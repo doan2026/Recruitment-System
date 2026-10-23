@@ -27,7 +27,7 @@ export default function CvsPage() {
     const controller = new AbortController();
     setLoading(true);
     setError("");
-    requestApi<CandidateCv[]>("/profile/cvs", {
+    requestApi<CandidateCv[]>("/api/profile/cvs", {
       privateData: true,
       signal: controller.signal,
     })
@@ -51,7 +51,7 @@ export default function CvsPage() {
     try {
       const fileId = uploaded ?? (await uploadPersonalFile(file, "CV"));
       setUploaded(fileId);
-      await requestApi("/profile/cvs", {
+      await requestApi("/api/profile/cvs", {
         method: "POST",
         privateData: true,
         body: { title: title.trim(), fileId },
@@ -77,7 +77,7 @@ export default function CvsPage() {
     setNotice("");
     try {
       const result = await requestApi<{ deletionMode?: string }>(
-        `/profile/cvs/${cv.id}${kind === "default" ? "/default" : ""}`,
+        `/api/profile/cvs/${cv.id}${kind === "default" ? "/default" : ""}`,
         {
           method: kind === "delete" ? "DELETE" : "PATCH",
           privateData: true,
@@ -106,7 +106,7 @@ export default function CvsPage() {
     setError("");
     try {
       const r = await requestApi<{ url: string }>(
-        `/profile/cvs/${cv.id}/download-url`,
+        `/api/profile/cvs/${cv.id}/download-url`,
         { method: "POST", privateData: true },
       );
       const url = new URL(r.data.url);

@@ -47,7 +47,7 @@ export async function refreshAuthSession() {
     method: "POST" as const, privateData: true,
     authRecovery: false, attachAccessToken: false, maxRetries: 0,
   };
-  const result = await requestApi<LoginResponse>("/auth-cookie/refresh", { ...options, body: {} });
+  const result = await requestApi<LoginResponse>("/api/auth-cookie/refresh", { ...options, body: {} });
   validateLoginResponse(result.data);
   if (getApiSessionRevision() !== revision || result.data.user.id !== current.id) {
     throw new ApiClientError({ code: "REQUEST_CANCELLED" });
@@ -70,13 +70,13 @@ async function hydrateSession(): Promise<void> {
   try {
     let user: CurrentAccount;
     try {
-      const result = await requestApi<CurrentAccount>("/auth/me", {
+      const result = await requestApi<CurrentAccount>("/api/auth/me", {
         privateData: true, authRecovery: false, maxRetries: 0,
       });
       user = result.data;
     } catch (error) {
       if (!(error instanceof ApiClientError) || error.status !== 401) throw error;
-      const refreshed = await requestApi<LoginResponse>("/auth-cookie/refresh", {
+      const refreshed = await requestApi<LoginResponse>("/api/auth-cookie/refresh", {
         method: "POST", body: {}, privateData: true,
         authRecovery: false, attachAccessToken: false, maxRetries: 0,
       });
@@ -106,7 +106,7 @@ export async function signIn(email: string, password: string): Promise<CurrentAc
   // A late anonymous hydration clears the session revision. Finish it before
   // starting a credential mutation, so it cannot cancel a new login response.
   await awaitSessionHydration();
-  const response = await requestApi<LoginResponse>("/auth-cookie/login", {
+  const response = await requestApi<LoginResponse>("/api/auth-cookie/login", {
     method: "POST", body: { email: email.trim(), password }, privateData: true,
     authRecovery: false, attachAccessToken: false, maxRetries: 0,
   });
@@ -115,7 +115,7 @@ export async function signIn(email: string, password: string): Promise<CurrentAc
 
 export async function signOut(): Promise<void> {
   clearApiSession();
-  await requestApi<void>("/auth-cookie/logout", {
+  await requestApi<void>("/api/auth-cookie/logout", {
     method: "POST", body: {},
     privateData: true, authRecovery: false, attachAccessToken: false, maxRetries: 0,
   });

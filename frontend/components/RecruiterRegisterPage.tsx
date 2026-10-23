@@ -30,7 +30,7 @@ export default function RecruiterRegisterPage() {
   }, []);
 
   async function saveContact() {
-    await requestApi("/auth/me/recruiter-contact", { method: "PUT", privateData: true, body: { fullName: name.trim(), phone: phone.trim() } });
+    await requestApi("/api/auth/me/recruiter-contact", { method: "PUT", privateData: true, body: { fullName: name.trim(), phone: phone.trim() } });
     router.replace(destination);
   }
 
@@ -68,7 +68,7 @@ export default function RecruiterRegisterPage() {
           setNotice("Tài khoản đã xác minh, nhưng chưa lưu được tên và số điện thoại. Hãy lưu lại thông tin liên hệ để hoàn tất.");
         }
       } else {
-        const result = await requestApi<{ registrationId: string }>("/auth/register", { ...publicAuth, method: "POST", body: { email: email.trim(), password, role: "RECRUITER" } });
+        const result = await requestApi<{ registrationId: string }>("/api/auth/register", { ...publicAuth, method: "POST", body: { email: email.trim(), password, role: "RECRUITER" } });
         setRegistrationId(result.data.registrationId); setPassword(""); setConfirm("");
         setNotice("Mã xác minh có hiệu lực 5 phút. Kiểm tra hộp thư email công việc.");
       }
@@ -80,7 +80,7 @@ export default function RecruiterRegisterPage() {
     if (pending || !registrationId) return;
     setPending(true); setError(""); setNotice("");
     try {
-      await requestApi("/auth/otp/resend", { ...publicAuth, method: "POST", body: { email: email.trim(), registrationId } });
+      await requestApi("/api/auth/otp/resend", { ...publicAuth, method: "POST", body: { email: email.trim(), registrationId } });
       setNotice("Đã yêu cầu gửi lại mã. Tối đa 3 lần mỗi giờ.");
     } catch (reason) { setError(person1Error(reason)); }
     finally { setPending(false); }
