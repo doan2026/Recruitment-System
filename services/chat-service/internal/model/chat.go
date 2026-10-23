@@ -7,13 +7,23 @@ import (
 )
 
 type Conversation struct {
-	ID        uuid.UUID   `json:"id"`
-	Title     string      `json:"title"`
-	IsGroup   bool        `json:"is_group"`
-	Members   []uuid.UUID `json:"members,omitempty"`
-	AvatarURL string      `json:"avatar_url,omitempty"`
-	CreatedAt time.Time   `json:"created_at"`
-	UpdatedAt time.Time   `json:"updated_at"`
+	ID          uuid.UUID             `json:"id"`
+	Title       string                `json:"title"`
+	IsGroup     bool                  `json:"is_group"`
+	Members     []uuid.UUID           `json:"members,omitempty"`
+	AvatarURL   string                `json:"avatar_url,omitempty"`
+	Counterpart *ConversationIdentity `json:"counterpart,omitempty"`
+	CreatedAt   time.Time             `json:"created_at"`
+	UpdatedAt   time.Time             `json:"updated_at"`
+}
+
+// A viewer-specific, minimal projection. Never persist it as the shared title.
+type ConversationIdentity struct {
+	UserID      uuid.UUID  `json:"user_id"`
+	Kind        string     `json:"kind"`
+	DisplayName string     `json:"display_name"`
+	AvatarURL   string     `json:"avatar_url,omitempty"`
+	CompanyID   *uuid.UUID `json:"company_id,omitempty"`
 }
 
 type ConversationMember struct {

@@ -371,3 +371,13 @@ upgraded database.
 
 Swagger is available at `/docs` internally and `/companies/docs` through
 the gateway. A Postman collection is in `postman/`.
+## Chat company identification
+
+Hidden `POST /internal/v1/chat-identities` accepts `{userIds}` (1–100 unique
+UUIDv4 IDs) from Chat and resolves current company memberships to
+`{userId,companyId,name,avatarUrl}` only. It requires the distinct
+`INTERNAL_API_KEY_CHAT` and `X-Internal-Service: chat-service`; the Job Search key
+and user bearer tokens are not substitutes. Chat verifies conversation membership
+first. Company verification/contact/tax/member details are not projected; an
+existing participant can still recognize their company if its review state changes.
+The gateway strips internal headers, and responses use private/no-store caching.

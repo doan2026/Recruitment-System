@@ -51,6 +51,7 @@ func (h *ChatHandler) CreateConversation(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "private, no-store")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(ApiEnvelope{Data: conv})
 }
@@ -73,6 +74,7 @@ func (h *ChatHandler) ListConversations(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "private, no-store")
 	_ = json.NewEncoder(w).Encode(ApiEnvelope{Data: convs})
 }
 
@@ -97,5 +99,6 @@ func (h *ChatHandler) GetConversation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "private, no-store")
 	_ = json.NewEncoder(w).Encode(ApiEnvelope{Data: conv})
 }

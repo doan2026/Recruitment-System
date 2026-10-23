@@ -10,6 +10,13 @@ export interface ChatConversation {
   members?: string[];
   unread_count?: number;
   avatar_url?: string;
+  counterpart?: {
+    user_id: string;
+    kind: "COMPANY" | "CANDIDATE";
+    display_name: string;
+    avatar_url?: string;
+    company_id?: string;
+  };
 }
 
 export async function createConversation(

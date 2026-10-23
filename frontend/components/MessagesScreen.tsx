@@ -7,6 +7,8 @@ import { useCurrentAccount } from "@/components/SessionGate";
 import { PageHeader, EmptyState, ErrorState, LoadingState } from "@/components/ui";
 import { requestApi, toUserMessage } from "@/lib/apiClientCore";
 import { listChatMessages, mergeConversationMessages, parseCallMessage, sendChatMessage, type ChatConversation, type ChatMessage } from "@/lib/chatApi";
+import { conversationIdentity } from "@/lib/chatIdentity";
+import { ChatIdentityAvatar } from "./ChatIdentityAvatar";
 
 function ChatInterface({ accountId, role }: { accountId: string; role: AccountRole }) {
   const router = useRouter();
@@ -38,6 +40,7 @@ function ChatInterface({ accountId, role }: { accountId: string; role: AccountRo
   const initialHistory = useRef(true);
   const scrollToLatest = () => requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }));
   const selected = conversations.find(conversation => conversation.id === selectedId);
+  const selectedIdentity = selected ? conversationIdentity(selected, accountId) : null;
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const fetchConversations = useCallback(async () => {
@@ -206,19 +209,22 @@ function ChatInterface({ accountId, role }: { accountId: string; role: AccountRo
           {listError && <ErrorState message={listError} onRetry={() => void fetchConversations()} />}
           {!loading && !listError && !conversations.length && <EmptyState title="Chưa có cuộc trò chuyện" description="Mở hồ sơ ứng tuyển để bắt đầu trao đổi." />}
         </div>
-        {conversations.map(conversation => <button key={conversation.id} type="button"
-          className="btn" aria-pressed={selectedId === conversation.id}
+        {conversations.map(conversation => {
+          const identity = conversationIdentity(conversation, accountId);
+          return <button key={conversation.id} type="button"
+          className="chat-conversation-item" aria-pressed={selectedId === conversation.id}
           onClick={() => router.replace(`${portalSection(role, "messages")}?chat=${encodeURIComponent(conversation.id)}`, { scroll: false })}
-          style={{ display: "block", width: "100%", textAlign: "left", borderRadius: 0, whiteSpace: "normal", overflowWrap: "anywhere", padding: 16, background: selectedId === conversation.id ? "var(--primary-soft)" : "var(--surface)" }}>
-          <strong>{conversation.title || "Đối tác"}</strong><br />
-          <small className="muted">Cập nhật {new Date(conversation.updated_at).toLocaleDateString("vi-VN")}</small>
-        </button>)}
+          >
+          <ChatIdentityAvatar identity={identity} />
+          <span className="chat-identity-copy"><strong>{identity.name}</strong><span>{identity.description}</span><small>Cập nhật {new Date(conversation.updated_at).toLocaleDateString("vi-VN")}</small></span>
+        </button>})}
       </section>
       <section className="messages-thread" aria-label="Nội dung cuộc trò chuyện">
         {selectedId ? <>
-          <div className="section-head" style={{ padding: 16, marginBottom: 0, borderBottom: "1px solid var(--line)" }}>
-            <div><h2>{selected?.title || "Cuộc trò chuyện"}</h2>
-              <small className="muted" role="status">{connected ? "Đã kết nối" : "Đang kết nối lại · Tin nhắn cập nhật định kỳ"}</small></div>
+          <div className="section-head chat-thread-header" style={{ padding: 16, marginBottom: 0, borderBottom: "1px solid var(--line)" }}>
+            <div className="chat-thread-identity">{selectedIdentity ? <ChatIdentityAvatar identity={selectedIdentity} /> : null}<div><h2>{selectedIdentity?.name || "Cuộc trò chuyện"}</h2>
+              {selectedIdentity ? <p className="chat-thread-description">{selectedIdentity.description}</p> : null}
+              <small className="muted" role="status">{connected ? "Đã kết nối" : "Đang kết nối lại · Tin nhắn cập nhật định kỳ"}</small></div></div>
             <button className="btn btn-primary" type="button" onClick={() => void startCall()} disabled={!selected || startingCall}>{startingCall ? "Đang tạo cuộc gọi…" : "Gọi video"}</button>
           </div>
           <div ref={scrollRef} style={{ flex: 1, minHeight: 240, overflowY: "auto", padding: 16 }} aria-label="Tin nhắn trong hội thoại">

@@ -1,0 +1,51 @@
+'use strict';
+require('reflect-metadata');
+const assert = require('node:assert/strict');
+const { before, after, test } = require('node:test');
+const { randomUUID, generateKeyPairSync, createPublicKey, createHash } = require('node:crypto');
+const { NestFactory } = require('@nestjs/core');
+const { JwtService } = require('@nestjs/jwt');
+const { PrismaClient } = require('@prisma/client');
+const { assertSafeTestDatabase } = require('./test-database-safety');
+
+const CHAT_KEY='chat-profile-contract-key-000000000000000001';
+const APP_KEY='application-profile-contract-key-000000000001';
+const JOB_KEY='job-search-profile-contract-key-0000000000001';
+const {privateKey,publicKey}=generateKeyPairSync('rsa',{modulusLength:2048});
+const privatePem=privateKey.export({type:'pkcs8',format:'pem'});
+const publicPem=publicKey.export({type:'spki',format:'pem'});
+const jwk=createPublicKey(publicPem).export({format:'jwk'});
+const kid=createHash('sha256').update(JSON.stringify({e:jwk.e,kty:'RSA',n:jwk.n})).digest('base64url');
+Object.assign(process.env,{JWT_PUBLIC_KEY:publicPem,JWT_PUBLIC_KEY_PATH:'',JWT_JWKS_URI:'',JWT_ISSUER:'https://auth.recruitment.local',JWT_AUDIENCE:'recruitment-api',INTERNAL_API_KEY_CHAT:CHAT_KEY,INTERNAL_API_KEY_APPLICATION:APP_KEY,INTERNAL_API_KEY_JOB_SEARCH:JOB_KEY,CV_EVENT_PUBLISHER_ENABLED:'false',CV_MEDIA_CLEANUP_ENABLED:'false',CV_DELETION_RECONCILE_ENABLED:'false',SWAGGER_ENABLED:'false'});
+const prisma=new PrismaClient();
+const candidateId=randomUUID();
+let app,base,created=false;
+before(async()=>{
+  await assertSafeTestDatabase(prisma);
+  await prisma.profile.create({data:{userId:candidateId,fullName:'Ứng viên kiểm thử Chat',phone:'0900000001',address:'Private address',summary:'Private summary'}});
+  created=true;
+  const {AppModule}=require('../dist/app.module');
+  const {configureApplication}=require('../dist/main');
+  app=await NestFactory.create(AppModule,{logger:false});
+  configureApplication(app);
+  await app.listen(0,'0.0.0.0');
+  base='http://127.0.0.1:'+app.getHttpServer().address().port;
+});
+after(async()=>{
+  if(app)await app.close();
+  if(created)await prisma.profile.delete({where:{userId:candidateId}});
+  await prisma.$disconnect();
+});
+const resolve=(headers={},body={userIds:[candidateId]})=>fetch(base+'/internal/v1/chat-identities',{method:'POST',headers:{'content-type':'application/json',...headers},body:JSON.stringify(body)});
+test('Chat identity endpoint authorizes only Chat and projects minimal fields from PostgreSQL',async()=>{
+  const headers={'x-internal-service':'chat-service','x-internal-api-key':CHAT_KEY};
+  const response=await resolve(headers,{userIds:[candidateId,randomUUID()]});
+  assert.equal(response.status,200);
+  assert.equal(response.headers.get('cache-control'),'private, no-store');
+  assert.deepEqual((await response.json()).data,[{userId:candidateId,name:'Ứng viên kiểm thử Chat',avatarUrl:null}]);
+  for(const invalid of [{},{'x-internal-service':'application-service','x-internal-api-key':APP_KEY},{'x-internal-service':'chat-service','x-internal-api-key':JOB_KEY}])assert.equal((await resolve(invalid)).status,401);
+  for(const userIds of [[],[candidateId,candidateId],['invalid'],Array(101).fill(candidateId)])assert.equal((await resolve(headers,{userIds})).status,400);
+  assert.equal((await fetch(base+'/internal/v1/candidates/'+candidateId+'/cvs',{headers})).status,401);
+  const token=new JwtService().sign({role:'RECRUITER'},{privateKey:privatePem,algorithm:'RS256',issuer:process.env.JWT_ISSUER,audience:process.env.JWT_AUDIENCE,subject:randomUUID(),jwtid:randomUUID(),expiresIn:'5m',keyid:kid});
+  assert.equal((await fetch(base+'/'+candidateId,{headers:{authorization:'Bearer '+token}})).status,403);
+});

@@ -66,7 +66,11 @@ func main() {
 	// Repositories & Services
 	convRepo := repository.NewConversationRepository(database)
 	msgRepo := repository.NewMessageRepository(database)
-	chatSvc := service.NewChatService(convRepo, msgRepo, producer)
+	identities := service.NewConversationIdentityResolver(
+		getEnv("COMPANY_SERVICE_URL", ""), getEnv("COMPANY_INTERNAL_API_KEY", ""),
+		getEnv("PROFILE_SERVICE_URL", ""), getEnv("PROFILE_INTERNAL_API_KEY", ""),
+	)
+	chatSvc := service.NewChatService(convRepo, msgRepo, producer, identities)
 
 	// WebSocket Hub
 	hub := ws.NewHub()

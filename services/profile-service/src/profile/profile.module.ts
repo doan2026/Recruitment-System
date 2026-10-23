@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { ChatIdentityService } from './chat-identity.service';
+import { InternalChatIdentityController } from './internal-chat-identity.controller';
 import { ApplicationClientModule } from '../application/application-client.module';
 import { MediaClientModule } from '../media/media-client.module';
 import { CvBuilderController } from './cv-builder.controller';
@@ -23,6 +25,7 @@ import { RecruiterDiscoveryService } from './recruiter-discovery.service';
 @Module({
   imports: [ApplicationClientModule, MediaClientModule],
   controllers: [
+    InternalChatIdentityController,
     InternalCvController,
     InternalCvV2Controller,
     InternalRecruiterDiscoveryController,
@@ -33,6 +36,7 @@ import { RecruiterDiscoveryService } from './recruiter-discovery.service';
     ProfileController,
   ],
   providers: [
+    ChatIdentityService,
     ProfileService,
     ProfileMediaService,
     CvBuilderService,

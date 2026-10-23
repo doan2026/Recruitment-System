@@ -14,6 +14,15 @@ Database constraints validate percentages, dates, normalized skills, HTTPS URLs,
 
 ## Candidate profile API implemented
 
+Hidden `POST /internal/v1/chat-identities` accepts at most 100 unique UUIDv4
+`userIds` and returns only `{userId,name,avatarUrl}` for existing profiles.
+It requires `X-Internal-Service: chat-service` and the distinct
+`INTERNAL_API_KEY_CHAT`. Chat authorizes conversation membership before resolving
+peers; missing profiles are omitted. This separate chat-display projection never
+includes phone/address, CVs or discovery preferences/consent, and does not grant
+recruiter bearer access to the owner-only profile APIs. The Chat key cannot use
+Application CV or Job Search discovery endpoints. Responses are private/no-store.
+
 - Through the gateway, the base path is `/profile`; direct service paths omit that prefix. General fields use `GET /profile/:userId` and `PUT /profile/:userId`.
 - Education, experience, skill, certificate, and project blocks support `POST`, `PUT /:id`, and `DELETE /:id`. Plural resource paths are canonical (`educations`, `experiences`, `skills`, `certificates`, `projects`); singular aliases remain available for the source specification.
 - Per-Profile limits are enforced after locking the aggregate in the same transaction: 20 educations, 30 experiences, 100 skills, 50 certificates, and 50 projects. Exceeding a limit returns `409 PROFILE_COLLECTION_LIMIT_REACHED`.

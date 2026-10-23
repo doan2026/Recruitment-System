@@ -30,6 +30,23 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .shell-brand small { font-size: 11px; letter-spacing: 0; }
 .top-nav a { font-size: 13px; font-weight: 600; }
 .top-nav a[aria-current="page"] { color: var(--primary); background: var(--primary-tint); }
+.chat-conversation-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 16px; text-align: left; border: 0; border-bottom: 1px solid var(--line); border-left: 3px solid transparent; background: white; color: var(--text); font: inherit; cursor: pointer; }
+.chat-conversation-item:hover { background: var(--surface-2); }
+.chat-conversation-item[aria-pressed="true"] { background: var(--primary-tint); border-left-color: var(--primary); }
+.chat-identity-avatar { display: grid; place-items: center; flex: 0 0 42px; width: 42px; height: 42px; overflow: hidden; border: 1px solid var(--line); border-radius: 50%; background: var(--primary-tint); color: var(--primary); font-size: 13px; font-weight: 700; }
+.chat-identity-avatar.chat-identity-company { border-radius: 11px; background: white; }
+.chat-identity-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.chat-identity-company img { object-fit: contain; }
+.chat-identity-copy { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.chat-identity-copy strong { font-size: 13px; line-height: 1.5; }
+.chat-identity-copy > span, .chat-identity-copy small { color: var(--muted); font-size: 11px; font-weight: 400; }
+.chat-thread-identity { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.chat-thread-identity > div { min-width: 0; }
+.chat-thread-identity h2 { margin: 0; font-size: 17px; overflow-wrap: anywhere; }
+.chat-thread-description { color: var(--muted); font-size: 12px; margin: 3px 0; }
+.chat-thread-header { align-items: center; gap: 12px; }
+.chat-thread-header > button { flex-shrink: 0; }
+@media (max-width: 600px) { .chat-thread-header { flex-wrap: wrap; } .chat-thread-identity h2 { font-size: 15px; } }
 .profile-chip { gap: 8px; }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; transition: background-color .15s, border-color .15s, box-shadow .15s; }
 .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }

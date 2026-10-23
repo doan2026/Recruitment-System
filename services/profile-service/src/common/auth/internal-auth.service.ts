@@ -11,6 +11,7 @@ const APPLICATION_SERVICE: InternalService = 'application-service';
 const KEY_ENVIRONMENTS: Readonly<Record<InternalService, string>> = {
   'application-service': 'INTERNAL_API_KEY_APPLICATION',
   'job-search-service': 'INTERNAL_API_KEY_JOB_SEARCH',
+  'chat-service': 'INTERNAL_API_KEY_CHAT',
 };
 const SAFE_KEY_PATTERN = /^[\x21-\x7e]{32,512}$/;
 
@@ -23,6 +24,13 @@ export class InternalAuthService {
     const jobSearchKey = this.getConfiguredKey('job-search-service');
     if (applicationKey === jobSearchKey) {
       throw this.configurationError();
+    }
+    const chatSetting = this.config.get<unknown>('INTERNAL_API_KEY_CHAT');
+    if (chatSetting !== undefined && chatSetting !== '') {
+      const chatKey = this.getConfiguredKey('chat-service');
+      if (chatKey === applicationKey || chatKey === jobSearchKey) {
+        throw this.configurationError();
+      }
     }
   }
 
@@ -84,7 +92,7 @@ export class InternalAuthService {
   }
 
   private isInternalService(value: string): value is InternalService {
-    return value === 'application-service' || value === 'job-search-service';
+    return value === 'application-service' || value === 'job-search-service' || value === 'chat-service';
   }
 
   private configurationError(): ApiException {

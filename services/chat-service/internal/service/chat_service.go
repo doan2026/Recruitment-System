@@ -23,20 +23,32 @@ var (
 const maxMessageRunes = 4000
 
 type ChatService struct {
-	convRepo *repository.ConversationRepository
-	msgRepo  *repository.MessageRepository
-	producer *kafka.Producer
+	convRepo   *repository.ConversationRepository
+	msgRepo    *repository.MessageRepository
+	producer   *kafka.Producer
+	identities *ConversationIdentityResolver
 }
 
 func NewChatService(
 	convRepo *repository.ConversationRepository,
 	msgRepo *repository.MessageRepository,
 	producer *kafka.Producer,
+	identities ...*ConversationIdentityResolver,
 ) *ChatService {
-	return &ChatService{
+	svc := &ChatService{
 		convRepo: convRepo,
 		msgRepo:  msgRepo,
 		producer: producer,
+	}
+	if len(identities) > 0 {
+		svc.identities = identities[0]
+	}
+	return svc
+}
+
+func (s *ChatService) enrich(ctx context.Context, viewer uuid.UUID, conversations ...*model.Conversation) {
+	if s.identities != nil {
+		s.identities.Enrich(ctx, viewer, conversations)
 	}
 }
 
@@ -59,11 +71,16 @@ func (s *ChatService) CreateConversation(ctx context.Context, creatorID uuid.UUI
 	if !isGroup && len(unique) == 2 {
 		existing, err := s.convRepo.FindDirectConversation(ctx, unique[0], unique[1])
 		if err == nil && existing != nil {
+			s.enrich(ctx, creatorID, existing)
 			return existing, nil
 		}
 	}
 
-	return s.convRepo.Create(ctx, strings.TrimSpace(title), isGroup, unique)
+	conversation, err := s.convRepo.Create(ctx, strings.TrimSpace(title), isGroup, unique)
+	if err == nil {
+		s.enrich(ctx, creatorID, conversation)
+	}
+	return conversation, err
 }
 
 func (s *ChatService) GetConversation(ctx context.Context, convID, userID uuid.UUID) (*model.Conversation, error) {
@@ -75,11 +92,19 @@ func (s *ChatService) GetConversation(ctx context.Context, convID, userID uuid.U
 		return nil, ErrNotMember
 	}
 
-	return s.convRepo.FindByID(ctx, convID, userID)
+	conversation, err := s.convRepo.FindByID(ctx, convID, userID)
+	if err == nil {
+		s.enrich(ctx, userID, conversation)
+	}
+	return conversation, err
 }
 
 func (s *ChatService) ListUserConversations(ctx context.Context, userID uuid.UUID) ([]*model.Conversation, error) {
-	return s.convRepo.ListByUserID(ctx, userID)
+	conversations, err := s.convRepo.ListByUserID(ctx, userID)
+	if err == nil {
+		s.enrich(ctx, userID, conversations...)
+	}
+	return conversations, err
 }
 
 func (s *ChatService) SendMessage(ctx context.Context, convID, senderID, clientMsgID uuid.UUID, content string) (*model.Message, []uuid.UUID, error) {

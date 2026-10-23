@@ -9,7 +9,8 @@ export interface AuthUser {
 
 export type InternalService =
   | 'application-service'
-  | 'job-search-service';
+  | 'job-search-service'
+  | 'chat-service';
 
 export interface InternalCaller {
   service: InternalService;
