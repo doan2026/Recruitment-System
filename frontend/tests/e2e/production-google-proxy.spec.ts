@@ -18,6 +18,13 @@ let publicUrl = "";
 let internalUrl = "";
 let authExchanges = 0;
 const issued = new Map<string, { id: string; email: string; role: string }>();
+const company = {
+  id: "99735b3d-1a8f-4e10-941a-f2aa70b14da5", name: "Production Routing Company",
+  slug: "production-routing-company", description: "Company profile routing regression fixture.",
+  industry: "Software", size: "51-200", address: "Test address", website: null,
+  taxCode: "ROUTING-DEMO", logoUrl: null, media: [],
+  createdAt: "2026-10-23T00:00:00.000Z", updatedAt: "2026-10-23T00:00:00.000Z",
+};
 const docker = (...args: string[]) => execFileSync("docker", args, { encoding: "utf8", timeout: 120_000 }).trim();
 const listen = (server: Server, port: number, host: string) => new Promise<number>((done, reject) => {
   server.once("error", reject);
@@ -33,6 +40,15 @@ test.beforeAll(async () => {
   test.setTimeout(120_000);
   auth = createServer(async (req, res) => {
     res.setHeader("Content-Type", "application/json");
+    if (req.url === `/${company.id}`) {
+      res.end(JSON.stringify({ data: company, meta: null })); return;
+    }
+    if (req.url?.startsWith("/search?")) {
+      const query = new URL(req.url, "http://fixture").searchParams;
+      res.end(JSON.stringify(query.has("companyId")
+        ? { data: { items: [], total: 0, page: 1, limit: 6, hasMore: false, source: "ELASTICSEARCH" }, meta: null }
+        : { data: [company], meta: { q: query.get("q"), hasMore: false, nextCursor: null } })); return;
+    }
     if (req.url === "/auth/google/exchange") {
       authExchanges++;
       let text = "";
@@ -106,6 +122,28 @@ test("public callback renders Next while Google authorization stays with Auth", 
   expect(await callback.text()).toContain("/_next/");
   const start = await request.get(publicUrl + "/auth/google?role=RECRUITER");
   expect(await start.json()).toEqual({ routeOwner: "Auth", role: "RECRUITER" });
+});
+
+test("company internal and public API routes return JSON and preserve query strings", async ({ request }) => {
+  for (const url of [internalUrl + `/companies/${company.id}`, publicUrl + `/api/companies/${company.id}`]) {
+    const response = await request.get(url);
+    expect(response.status()).toBe(200);
+    expect(response.headers()["content-type"]).toContain("application/json");
+    expect((await response.json()).data).toEqual(company);
+  }
+  const search = await request.get(internalUrl + "/companies/search?q=Health%20%26%20Care");
+  expect(search.status()).toBe(200);
+  expect((await search.json()).meta.q).toBe("Health & Care");
+});
+
+test("company HTTPS page renders its server profile and survives reload", async ({ page }) => {
+  await page.goto(publicUrl + `/companies/${company.id}`);
+  await expect(page.getByRole("heading", { name: company.name, exact: true })).toBeVisible();
+  await expect(page.locator("main [role=alert]")).toHaveCount(0);
+  await expect(page.locator("#company-jobs")).toHaveAttribute("aria-busy", "false");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: company.name, exact: true })).toBeVisible();
+  await expect(page.locator("main [role=alert]")).toHaveCount(0);
 });
 
 for (const role of ["CANDIDATE", "RECRUITER"]) {
